@@ -6,6 +6,7 @@ use num_traits::Float;
 
 // Workarounds: can't use f32.lerp, f32.clamp or f32.powi.
 
+#[derive(Copy, Clone)]
 pub struct View(pub Vec3);
 
 impl ShadingVector for View {
@@ -14,6 +15,7 @@ impl ShadingVector for View {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct Light(pub Vec3);
 
 impl ShadingVector for Light {
@@ -27,6 +29,7 @@ pub trait ShadingVector {
     fn vector(&self) -> Vec3;
 }
 
+#[derive(Copy, Clone)]
 pub struct Normal(pub Vec3);
 
 impl ShadingVector for Normal {
@@ -35,6 +38,7 @@ impl ShadingVector for Normal {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct Halfway(Vec3);
 
 impl Halfway {
@@ -148,6 +152,7 @@ pub fn fd_burley(
 #[derive(Copy, Clone)]
 pub struct ActualRoughness(f32);
 
+#[derive(Clone, Copy)]
 pub struct PerceptualRoughness(pub f32);
 
 impl PerceptualRoughness {
@@ -161,12 +166,18 @@ pub struct BasicBrdfParams {
     pub light: Light,
     pub light_intensity: Vec3,
     pub view: View,
+    pub material_params: MaterialParams,
+}
+
+#[derive(Clone, Copy)]
+pub struct MaterialParams {
     pub diffuse_colour: Vec3,
     pub metallic: f32,
     pub perceptual_roughness: PerceptualRoughness,
     pub perceptual_dielectric_reflectance: PerceptualDielectricReflectance,
 }
 
+#[derive(Clone, Copy)]
 pub struct PerceptualDielectricReflectance(pub f32);
 
 /// Corresponds a f0 of 4% reflectance on non-metallic (dielectric) materials (0.16 * 0.5 * 0.5).
@@ -188,10 +199,13 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
         light,
         light_intensity,
         view,
-        diffuse_colour,
-        metallic,
-        perceptual_roughness,
-        perceptual_dielectric_reflectance,
+        material_params:
+            MaterialParams {
+                diffuse_colour,
+                metallic,
+                perceptual_roughness,
+                perceptual_dielectric_reflectance,
+            },
     } = params;
 
     let actual_roughness = perceptual_roughness.as_actual_roughness();

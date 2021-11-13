@@ -8,8 +8,8 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
-use glam::{Mat4, Vec3, Vec3A, Vec4};
-
+use glam::{Mat4, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use shared_structs::PointLight;
 
 fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) -> Mat4 {
     let t = (vertical_fov / 2.0).tan();
@@ -23,7 +23,6 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
         Vec4::new(0.0, 0.0, -z_near, 0.0),
     )
 }
-
 
 fn main() -> anyhow::Result<()> {
     {
@@ -42,7 +41,7 @@ fn main() -> anyhow::Result<()> {
 
     let entry = unsafe { ash::Entry::new() }?;
 
-    let api_version = vk::API_VERSION_1_0;
+    let api_version = vk::API_VERSION_1_1;
 
     let app_info = vk::ApplicationInfo::builder()
         .application_name(CStr::from_bytes_with_nul(b"Nice Grass\0")?)
@@ -124,10 +123,23 @@ fn main() -> anyhow::Result<()> {
 
     let render_passes = RenderPasses::new(&device, surface_format.format)?;
 
+    let lights_dsl = unsafe {
+        device.create_descriptor_set_layout(
+            &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                *vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+            ]),
+            None,
+        )
+    }?;
+
     let pipeline_cache =
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
-    let pipelines = Pipelines::new(&device, &render_passes, pipeline_cache)?;
+    let pipelines = Pipelines::new(&device, &render_passes, lights_dsl, pipeline_cache)?;
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
@@ -187,6 +199,24 @@ fn main() -> anyhow::Result<()> {
         load_gltf_from_bytes(&std::fs::read(&filename)?, &mut init_resources)?;
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+
+    let lights_buffer = ash_abstractions::Buffer::new(
+        unsafe {
+            cast_slice(&[
+                PointLight {
+                    position: Vec3::new(0.0, 10.0, 0.0).into(),
+                    colour_and_intensity: Vec4::new(1.0, 0.0, 0.0, 10000.0),
+                },
+                PointLight {
+                    position: Vec3::new(1000.0, 10.0, 0.0).into(),
+                    colour_and_intensity: Vec4::new(0.0, 0.0, 1.0, 10000.0),
+                },
+            ])
+        },
+        "lights",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources,
+    )?;
 
     drop(init_resources);
 
@@ -254,13 +284,52 @@ fn main() -> anyhow::Result<()> {
         0.1,
     );
 
+    let num_tiles = UVec2::splat(16);
+
     let mut push_constants = shared_structs::PushConstants {
         // Updated every frame.
         proj_view: Default::default(),
         view_position: Default::default(),
         sun_dir: Vec3::new(1.0, 10.0, 1.0).normalize().into(),
         sun_intensity: Vec3::ONE.into(),
+        num_tiles,
+        tile_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
+            / num_tiles.as_vec2(),
     };
+
+    let descriptor_pool = unsafe {
+        device.create_descriptor_pool(
+            &vk::DescriptorPoolCreateInfo::builder()
+                .pool_sizes(&[*vk::DescriptorPoolSize::builder()
+                    .ty(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)])
+                .max_sets(1),
+            None,
+        )
+    }?;
+
+    let descriptor_sets = unsafe {
+        device.allocate_descriptor_sets(
+            &vk::DescriptorSetAllocateInfo::builder()
+                .set_layouts(&[lights_dsl])
+                .descriptor_pool(descriptor_pool),
+        )
+    }?;
+
+    let lights_ds = descriptor_sets[0];
+
+    unsafe {
+        device.update_descriptor_sets(
+            &[*vk::WriteDescriptorSet::builder()
+                .dst_set(lights_ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                    .buffer(lights_buffer.buffer)
+                    .range(vk::WHOLE_SIZE)])],
+            &[],
+        )
+    }
 
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
@@ -320,7 +389,7 @@ fn main() -> anyhow::Result<()> {
                             }
                             _ => {}
                         }
-                    },
+                    }
                     WindowEvent::CursorMoved { position, .. } => {
                         if cursor_grab {
                             let position = position.to_logical::<f64>(window.scale_factor());
@@ -334,10 +403,14 @@ fn main() -> anyhow::Result<()> {
                                     0.1 * (screen_center.y - position.y) as f32,
                                 );
                         }
-                    },
+                    }
                     WindowEvent::Resized(new_size) => {
                         extent.width = new_size.width;
                         extent.height = new_size.height;
+
+                        push_constants.tile_size_in_pixels =
+                            Vec2::new(extent.width as f32, extent.height as f32)
+                                / num_tiles.as_vec2();
 
                         perspective_matrix = perspective_infinite_z_vk(
                             59.0_f32.to_radians(),
@@ -397,8 +470,7 @@ fn main() -> anyhow::Result<()> {
 
                             device.queue_submit(
                                 queue,
-                                &[*vk::SubmitInfo::builder()
-                                    .command_buffers(&[command_buffer])],
+                                &[*vk::SubmitInfo::builder().command_buffers(&[command_buffer])],
                                 fence,
                             )?;
 
@@ -412,7 +484,7 @@ fn main() -> anyhow::Result<()> {
                             &render_passes,
                             &depthbuffer,
                         )?;
-                    },
+                    }
                     _ => {}
                 },
                 Event::MainEventsCleared => {
@@ -519,6 +591,14 @@ fn main() -> anyhow::Result<()> {
                             command_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.grass,
+                        );
+                        device.cmd_bind_descriptor_sets(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.pipeline_layout,
+                            0,
+                            &[lights_ds],
+                            &[],
                         );
                         device.cmd_bind_vertex_buffers(
                             command_buffer,
@@ -632,6 +712,7 @@ impl Pipelines {
     fn new(
         device: &ash::Device,
         render_passes: &RenderPasses,
+        lights_dsl: vk::DescriptorSetLayout,
         pipeline_cache: vk::PipelineCache,
     ) -> anyhow::Result<Self> {
         let vertex_entry_point = CString::new("vertex")?;
@@ -653,7 +734,7 @@ impl Pipelines {
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[])
+                    .set_layouts(&[lights_dsl])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
