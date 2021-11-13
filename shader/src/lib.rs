@@ -27,7 +27,7 @@ pub fn fragment(
         view: View(view.normalize()),
         diffuse_colour: Vec3::new(0.2, 0.8, 0.2),
         metallic: 0.0,
-        perceptual_roughness: PerceptualRoughness(0.75),
+        perceptual_roughness: PerceptualRoughness(0.25),
         perceptual_dielectric_reflectance: Default::default(),
     });
 
@@ -41,9 +41,10 @@ pub fn vertex(
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_normal: &mut Vec3,
     out_view: &mut Vec3,
+    #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let position = (push_constants.proj_view * position.extend(1.0)).truncate();
-
     *out_normal = normal;
     *out_view = Vec3::from(push_constants.view_position) - position;
+
+    *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }

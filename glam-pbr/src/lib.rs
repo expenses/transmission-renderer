@@ -63,7 +63,6 @@ impl<A, B> Clone for Dot<A, B> {
     }
 }
 
-
 impl<A, B> Copy for Dot<A, B> {}
 
 impl<A: ShadingVector, B: ShadingVector> Dot<A, B> {
