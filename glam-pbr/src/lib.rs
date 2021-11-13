@@ -135,7 +135,7 @@ pub fn fd_burley(
     light_dot_halfway: Dot<Light, Halfway>,
     roughness: ActualRoughness,
 ) -> f32 {
-    // Internal fresnel function for burley.
+    // Internal untyped fresnel function for burley.
     fn fresnel_schlick(u: f32, f0: f32, f90: f32) -> f32 {
         f0 + (f90 - f0) * (1.0 - u).powf(5.0)
     }
@@ -216,14 +216,8 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
     let normal_dot_view = Dot::new(&normal, &view, 0.0);
     let normal_dot_light = Dot::new(&normal, &light, 0.0);
 
-    // from:
-    // https://google.github.io/filament/Filament.md.html#materialsystem/parameterization/remapping
-    let dielectric_f0 = perceptual_dielectric_reflectance.to_dielectric_f0();
-    let metallic_f0 = diffuse_colour;
-
-    let f0 = (1.0 - metallic) * dielectric_f0 + metallic * metallic_f0;
+    let f0 = compute_f0(metallic, perceptual_dielectric_reflectance, diffuse_colour);
     let f90 = compute_f90(light_dot_halfway, actual_roughness);
-
     let fresnel = fresnel_schlick(light_dot_halfway, f0, Vec3::splat(f90));
 
     let distribution_function = d_ggx(normal_dot_halfway, actual_roughness);
@@ -246,4 +240,17 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
     let combined_factor = diffuse_brdf_factor + specular_brdf_factor;
 
     light_intensity * normal_dot_light.value * combined_factor
+}
+
+pub fn compute_f0(
+    metallic: f32,
+    perceptual_dielectric_reflectance: PerceptualDielectricReflectance,
+    diffuse_colour: Vec3,
+) -> Vec3 {
+    // from:
+    // https://google.github.io/filament/Filament.md.html#materialsystem/parameterization/remapping
+    let dielectric_f0 = perceptual_dielectric_reflectance.to_dielectric_f0();
+    let metallic_f0 = diffuse_colour;
+
+    (1.0 - metallic) * dielectric_f0 + metallic * metallic_f0
 }

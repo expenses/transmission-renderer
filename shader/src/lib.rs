@@ -22,9 +22,12 @@ use spirv_std::{
 pub fn fragment(
     position: Vec3,
     normal: Vec3,
+    uv: Vec2,
+    #[spirv(flat)] material: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 0, binding = 1, uniform)] tonemapper_params: &BakedLottesTonemapperParams,
     output: &mut Vec4,
 ) {
     let cluster_id = {
@@ -36,10 +39,8 @@ pub fn fragment(
     let view = View((Vec3::from(push_constants.view_position) - position).normalize());
     let normal = Normal(normal.normalize());
 
-    let diffuse_colour = Vec3::new(0.2, 0.8, 0.2);
-
     let material_params = MaterialParams {
-        diffuse_colour,
+        diffuse_colour: debug_colour_for_id(material),
         metallic: 0.0,
         perceptual_roughness: PerceptualRoughness(0.25),
         perceptual_dielectric_reflectance: Default::default(),
@@ -61,15 +62,14 @@ pub fn fragment(
     while i < num_lights {
         let light = &point_lights[i];
 
-        let direction = Vec3::from(light.position) - position;
-        let distance_sq = direction.length_squared();
+        let vector = Vec3::from(light.position) - position;
+        let distance_sq = vector.length_squared();
+        let direction = vector / distance_sq.sqrt();
 
         let attenuation = 1.0 / distance_sq;
 
         let light_colour = light.colour_and_intensity.truncate();
         let intensity = light.colour_and_intensity.w;
-
-        let direction = direction / distance_sq.sqrt();
 
         colour += basic_brdf(BasicBrdfParams {
             light: Light(direction),
@@ -82,28 +82,33 @@ pub fn fragment(
         i += 1;
     }
 
-    *output = colour.extend(1.0);
+    *output = LottesTonemapper
+        .tonemap(colour, *tonemapper_params)
+        .extend(1.0);
 }
 
 #[spirv(vertex)]
 pub fn vertex(
     position: Vec3,
     normal: Vec3,
+    uv: Vec2,
+    material: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
+    out_uv: &mut Vec2,
+    out_material: &mut u32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
     *out_position = position;
     *out_normal = normal;
+    *out_uv = uv;
+    *out_material = material;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
-const DEBUG_COLOURS: [Vec3; 16] = [
-    const_vec3!([0.0, 0.0, 0.0]),         // black
-    const_vec3!([0.0, 0.0, 0.1647]),      // darkest blue
-    const_vec3!([0.0, 0.0, 0.3647]),      // darker blue
+const DEBUG_COLOURS: [Vec3; 13] = [
     const_vec3!([0.0, 0.0, 0.6647]),      // dark blue
     const_vec3!([0.0, 0.0, 0.9647]),      // blue
     const_vec3!([0.0, 0.9255, 0.9255]),   // cyan
@@ -121,4 +126,42 @@ const DEBUG_COLOURS: [Vec3; 16] = [
 
 fn debug_colour_for_id(id: u32) -> Vec3 {
     DEBUG_COLOURS[(id as usize % DEBUG_COLOURS.len())]
+}
+
+// This is just lifted from
+// https://github.com/termhn/colstodian/blob/f2fb0f55d94644dbb753edd5c01da9a08f0e2d3f/src/tonemap.rs#L187-L220
+// because rust-gpu support is hard.
+
+struct LottesTonemapper;
+
+impl LottesTonemapper {
+    #[inline]
+    fn tonemap_inner(x: f32, params: BakedLottesTonemapperParams) -> f32 {
+        let z = x.powf(params.a);
+        z / (z.powf(params.d) * params.b + params.c)
+    }
+
+    fn tonemap(&self, color: Vec3, params: BakedLottesTonemapperParams) -> Vec3 {
+        let max = color.max_element();
+        let mut ratio = color / max;
+        let tonemapped_max = Self::tonemap_inner(max, params);
+
+        ratio = ratio.powf(params.saturation / params.cross_saturation);
+        ratio = ratio.lerp(Vec3::ONE, tonemapped_max.powf(params.crosstalk));
+        ratio = ratio.powf(params.cross_saturation);
+
+        (ratio * tonemapped_max).min(Vec3::ONE).max(Vec3::ZERO)
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct BakedLottesTonemapperParams {
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    crosstalk: f32,
+    saturation: f32,
+    cross_saturation: f32,
 }

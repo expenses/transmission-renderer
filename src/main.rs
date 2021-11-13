@@ -131,6 +131,11 @@ fn main() -> anyhow::Result<()> {
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                *vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
             ]),
             None,
         )
@@ -218,6 +223,19 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
+    let tonemapping_params_buffer = ash_abstractions::Buffer::new(
+        unsafe {
+            bytes_of(&colstodian::tonemap::BakedLottesTonemapperParams::from(
+                colstodian::tonemap::LottesTonemapperParams {
+                    ..Default::default()
+                },
+            ))
+        },
+        "tonemapping params",
+        vk::BufferUsageFlags::UNIFORM_BUFFER,
+        &mut init_resources,
+    )?;
+
     drop(init_resources);
 
     unsafe {
@@ -300,9 +318,14 @@ fn main() -> anyhow::Result<()> {
     let descriptor_pool = unsafe {
         device.create_descriptor_pool(
             &vk::DescriptorPoolCreateInfo::builder()
-                .pool_sizes(&[*vk::DescriptorPoolSize::builder()
-                    .ty(vk::DescriptorType::STORAGE_BUFFER)
-                    .descriptor_count(1)])
+                .pool_sizes(&[
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::STORAGE_BUFFER)
+                        .descriptor_count(1),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                        .descriptor_count(1),
+                ])
                 .max_sets(1),
             None,
         )
@@ -320,13 +343,22 @@ fn main() -> anyhow::Result<()> {
 
     unsafe {
         device.update_descriptor_sets(
-            &[*vk::WriteDescriptorSet::builder()
-                .dst_set(lights_ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                    .buffer(lights_buffer.buffer)
-                    .range(vk::WHOLE_SIZE)])],
+            &[
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(lights_ds)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(lights_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(lights_ds)
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(tonemapping_params_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+            ],
             &[],
         )
     }
@@ -494,8 +526,7 @@ fn main() -> anyhow::Result<()> {
                     let right = keyboard_state.right as i32 - keyboard_state.left as i32;
 
                     let move_vec = camera.final_transform.rotation
-                        * dolly::glam::Vec3::new(right as f32, 0.0, -forwards as f32)
-                            .clamp_length_max(1.0);
+                        * Vec3::new(right as f32, 0.0, -forwards as f32).clamp_length_max(1.0);
 
                     camera
                         .driver_mut::<dolly::drivers::Position>()
@@ -592,6 +623,7 @@ fn main() -> anyhow::Result<()> {
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.grass,
                         );
+
                         device.cmd_bind_descriptor_sets(
                             command_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
@@ -600,18 +632,21 @@ fn main() -> anyhow::Result<()> {
                             &[lights_ds],
                             &[],
                         );
+
                         device.cmd_bind_vertex_buffers(
                             command_buffer,
                             0,
                             &[model_vertices.buffer],
                             &[0],
                         );
+
                         device.cmd_bind_index_buffer(
                             command_buffer,
                             model_indices.buffer,
                             0,
                             vk::IndexType::UINT32,
                         );
+
                         device.cmd_push_constants(
                             command_buffer,
                             pipelines.pipeline_layout,
@@ -654,6 +689,8 @@ fn main() -> anyhow::Result<()> {
                         depthbuffer.cleanup(&device, &mut allocator)?;
                         model_vertices.cleanup(&device, &mut allocator)?;
                         model_indices.cleanup(&device, &mut allocator)?;
+                        lights_buffer.cleanup(&device, &mut allocator)?;
+                        tonemapping_params_buffer.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -760,6 +797,8 @@ impl Pipelines {
                 &[
                     ash_abstractions::VertexAttribute::Vec3,
                     ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec2,
+                    ash_abstractions::VertexAttribute::Uint,
                 ],
             ),
             vertex_bindings: &[*vk::VertexInputBindingDescription::builder()
@@ -788,8 +827,10 @@ impl Pipelines {
 }
 
 struct Vertex {
-    position: glam::Vec3,
-    normal: glam::Vec3,
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    material: u32,
 }
 
 struct RenderPasses {
@@ -923,6 +964,8 @@ fn load_gltf_from_bytes(
 
     for mesh in gltf.meshes() {
         for primitive in mesh.primitives() {
+            let material_id = primitive.material().index().unwrap_or(0);
+
             let reader = primitive.reader(|_| Some(buffer_blob));
 
             let read_indices = reader.read_indices().unwrap().into_u32();
@@ -935,10 +978,12 @@ fn load_gltf_from_bytes(
             let normals = reader.read_normals().unwrap();
             let uvs = reader.read_tex_coords(0).unwrap().into_f32();
 
-            for (position, normal) in positions.zip(normals) {
+            for ((position, normal), uv) in positions.zip(normals).zip(uvs) {
                 vertices.push(Vertex {
                     position: position.into(),
+                    uv: uv.into(),
                     normal: normal.into(),
+                    material: material_id as u32,
                 });
             }
         }
