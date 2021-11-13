@@ -1,0 +1,9 @@
+[package]
+name = "shared-structs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+glam = { version = "0.19.0", features = ["libm"], default-features = false }
