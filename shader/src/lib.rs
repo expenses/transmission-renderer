@@ -12,22 +12,53 @@ extern crate spirv_std;
 use glam_pbr::{
     basic_brdf, BasicBrdfParams, Light, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{PointLight, PushConstants};
+use shared_structs::{Material, PointLight, PushConstants};
 use spirv_std::{
-    glam::{const_vec3, Vec2, Vec3, Vec4},
+    glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
+    image::SampledImage,
     num_traits::Float,
+    Image, RuntimeArray, Sampler,
 };
+
+type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
+
+fn sample_texture(textures: &Textures, sampler: &Sampler, index: u32, uv: Vec2) -> Vec4 {
+    let texture = unsafe { textures.index(index as usize) };
+
+    texture.sample(*sampler, uv)
+}
+
+fn compute_cotangent_frame(normal: Vec3, position: Vec3, uv: Vec2) -> Mat3 {
+    // get edge vectors of the pixel triangle
+    let delta_pos_1 = spirv_std::arch::ddx_vector(position);
+    let delta_pos_2 = spirv_std::arch::ddy_vector(position);
+    let delta_uv_1 = spirv_std::arch::ddx_vector(uv);
+    let delta_uv_2 = spirv_std::arch::ddy_vector(uv);
+
+    // solve the linear system
+    let delta_pos_2_perp = delta_pos_2.cross(normal);
+    let delta_pos_1_perp = normal.cross(delta_pos_1);
+    let t = delta_pos_2_perp * delta_uv_1.x + delta_pos_1_perp * delta_uv_2.x;
+    let b = delta_pos_2_perp * delta_uv_1.y + delta_pos_1_perp * delta_uv_2.y;
+
+    // construct a scale-invariant frame
+    let invmax = 1.0 / t.length_squared().max(b.length_squared()).sqrt();
+    Mat3::from_cols(t * invmax, b * invmax, normal)
+}
 
 #[spirv(fragment)]
 pub fn fragment(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
-    #[spirv(flat)] material: u32,
+    #[spirv(flat)] material_id: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1, uniform)] tonemapper_params: &BakedLottesTonemapperParams,
+    tonemapper_params: &BakedLottesTonemapperParams,
+    #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[Material],
     output: &mut Vec4,
 ) {
     let cluster_id = {
@@ -36,13 +67,28 @@ pub fn fragment(
         cluster_xy.y * push_constants.num_tiles.x + cluster_xy.x
     };
 
+    let material = &materials[material_id as usize];
+
+    let diffuse = sample_texture(textures, sampler, material.diffuse_texture, uv);
+    let metallic_roughness = sample_texture(textures, sampler, material.diffuse_texture, uv);
+
+    let mut normal = normal.normalize();
+
+    if material.normal_map_texture != -1 {
+        let map_normal =
+            sample_texture(textures, sampler, material.normal_map_texture as u32, uv).truncate();
+        let map_normal = map_normal * 2.0 - 1.0;
+
+        normal = (compute_cotangent_frame(normal, position, uv) * map_normal).normalize();
+    };
+
     let view = View((Vec3::from(push_constants.view_position) - position).normalize());
-    let normal = Normal(normal.normalize());
+    let normal = Normal(normal);
 
     let material_params = MaterialParams {
-        diffuse_colour: debug_colour_for_id(material),
-        metallic: 0.0,
-        perceptual_roughness: PerceptualRoughness(0.25),
+        diffuse_colour: diffuse.truncate(),
+        metallic: metallic_roughness.y,
+        perceptual_roughness: PerceptualRoughness(metallic_roughness.z),
         perceptual_dielectric_reflectance: Default::default(),
     };
 
@@ -84,7 +130,7 @@ pub fn fragment(
 
     *output = LottesTonemapper
         .tonemap(colour, *tonemapper_params)
-        .extend(1.0);
+        .extend(diffuse.w);
 }
 
 #[spirv(vertex)]

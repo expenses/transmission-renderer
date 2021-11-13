@@ -51,10 +51,7 @@ fn main() -> anyhow::Result<()> {
 
     let instance_extensions = CStrList::new({
         let mut instance_extensions = ash_window::enumerate_required_extensions(&window)?;
-        instance_extensions.extend(&[
-            DebugUtilsLoader::name(),
-            vk::KhrGetPhysicalDeviceProperties2Fn::name(),
-        ]);
+        instance_extensions.extend(&[DebugUtilsLoader::name()]);
         instance_extensions
     });
 
@@ -62,7 +59,10 @@ fn main() -> anyhow::Result<()> {
         b"VK_LAYER_KHRONOS_validation\0",
     )?]);
 
-    let device_extensions = CStrList::new(vec![SwapchainLoader::name()]);
+    let device_extensions = CStrList::new(vec![
+        SwapchainLoader::name(),
+        vk::ExtDescriptorIndexingFn::name(),
+    ]);
 
     let mut debug_messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
         .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
@@ -112,16 +112,26 @@ fn main() -> anyhow::Result<()> {
 
         let device_features = vk::PhysicalDeviceFeatures::builder();
 
+        let mut null_descriptor_feature =
+            vk::PhysicalDeviceRobustness2FeaturesEXT::builder().null_descriptor(true);
+
+        let mut descriptor_indexing =
+            vk::PhysicalDeviceDescriptorIndexingFeatures::builder().runtime_descriptor_array(true);
+
         let device_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_info)
             .enabled_features(&device_features)
             .enabled_extension_names(device_extensions.pointers())
-            .enabled_layer_names(enabled_layers.pointers());
+            .enabled_layer_names(enabled_layers.pointers())
+            .push_next(&mut null_descriptor_feature)
+            .push_next(&mut descriptor_indexing);
 
         unsafe { instance.create_device(physical_device, &device_info, None) }?
     };
 
     let render_passes = RenderPasses::new(&device, surface_format.format)?;
+
+    let max_images = 196;
 
     let lights_dsl = unsafe {
         device.create_descriptor_set_layout(
@@ -134,6 +144,21 @@ fn main() -> anyhow::Result<()> {
                 *vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                *vk::DescriptorSetLayoutBinding::builder()
+                    .binding(2)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .descriptor_count(max_images)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                *vk::DescriptorSetLayoutBinding::builder()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                *vk::DescriptorSetLayoutBinding::builder()
+                    .binding(4)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT),
             ]),
@@ -190,18 +215,24 @@ fn main() -> anyhow::Result<()> {
         debug_utils_loader: Some(&debug_utils_loader),
     };
 
+    let mut image_manager = ImageManager::new(&device)?;
+    let mut buffers_to_cleanup = Vec::new();
+
     let window_size = window.inner_size();
 
     let mut extent = vk::Extent2D {
         width: window_size.width,
-
         height: window_size.height,
     };
 
     let filename = std::env::args().nth(1).unwrap();
 
-    let (model_vertices, model_indices, model_num_indices) =
-        load_gltf_from_bytes(&std::fs::read(&filename)?, &mut init_resources)?;
+    let (model_vertices, model_indices, model_materials, model_num_indices) = load_gltf(
+        &filename,
+        &mut init_resources,
+        &mut image_manager,
+        &mut buffers_to_cleanup,
+    )?;
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
 
@@ -214,7 +245,7 @@ fn main() -> anyhow::Result<()> {
                 },
                 PointLight {
                     position: Vec3::new(1000.0, 10.0, 0.0).into(),
-                    colour_and_intensity: Vec4::new(0.0, 0.0, 1.0, 10000.0),
+                    colour_and_intensity: Vec4::new(0.0, 0.0, 1.0, 100000.0),
                 },
             ])
         },
@@ -250,6 +281,12 @@ fn main() -> anyhow::Result<()> {
 
         device.wait_for_fences(&[fence], true, u64::MAX)?;
     }
+
+    for buffer in buffers_to_cleanup.drain(..) {
+        buffer.cleanup_and_drop(&device, &mut allocator)?;
+    }
+
+    image_manager.fill_with_dummy_images_up_to(max_images as usize);
 
     // Swapchain
 
@@ -321,9 +358,15 @@ fn main() -> anyhow::Result<()> {
                 .pool_sizes(&[
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::STORAGE_BUFFER)
-                        .descriptor_count(1),
+                        .descriptor_count(2),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                        .descriptor_count(1),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::SAMPLED_IMAGE)
+                        .descriptor_count(max_images),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::SAMPLER)
                         .descriptor_count(1),
                 ])
                 .max_sets(1),
@@ -341,6 +384,16 @@ fn main() -> anyhow::Result<()> {
 
     let lights_ds = descriptor_sets[0];
 
+    let sampler = unsafe {
+        device.create_sampler(
+            &vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .max_lod(vk::LOD_CLAMP_NONE),
+            None,
+        )
+    }?;
+
     unsafe {
         device.update_descriptor_sets(
             &[
@@ -357,6 +410,19 @@ fn main() -> anyhow::Result<()> {
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(tonemapping_params_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *image_manager.write_descriptor_set(lights_ds, 2),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(lights_ds)
+                    .dst_binding(3)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
+                    .image_info(&[*vk::DescriptorImageInfo::builder().sampler(sampler)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(lights_ds)
+                    .dst_binding(4)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(model_materials.buffer)
                         .range(vk::WHOLE_SIZE)]),
             ],
             &[],
@@ -691,6 +757,8 @@ fn main() -> anyhow::Result<()> {
                         model_indices.cleanup(&device, &mut allocator)?;
                         lights_buffer.cleanup(&device, &mut allocator)?;
                         tonemapping_params_buffer.cleanup(&device, &mut allocator)?;
+                        image_manager.cleanup(&device, &mut allocator)?;
+                        model_materials.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -951,13 +1019,18 @@ fn create_depthbuffer(
     )
 }
 
-fn load_gltf_from_bytes(
-    bytes: &[u8],
+fn load_gltf(
+    path: &str,
     init_resources: &mut ash_abstractions::InitResources,
-) -> anyhow::Result<(ash_abstractions::Buffer, ash_abstractions::Buffer, u32)> {
-    let gltf = gltf::Gltf::from_slice(bytes)?;
-
-    let buffer_blob = gltf.blob.as_ref().unwrap();
+    image_manager: &mut ImageManager,
+    buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
+) -> anyhow::Result<(
+    ash_abstractions::Buffer,
+    ash_abstractions::Buffer,
+    ash_abstractions::Buffer,
+    u32,
+)> {
+    let (gltf, buffers, images) = gltf::import(path)?;
 
     let mut indices = Vec::new();
     let mut vertices = Vec::new();
@@ -966,7 +1039,7 @@ fn load_gltf_from_bytes(
         for primitive in mesh.primitives() {
             let material_id = primitive.material().index().unwrap_or(0);
 
-            let reader = primitive.reader(|_| Some(buffer_blob));
+            let reader = primitive.reader(|i| Some(&buffers[i.index()]));
 
             let read_indices = reader.read_indices().unwrap().into_u32();
 
@@ -989,19 +1062,58 @@ fn load_gltf_from_bytes(
         }
     }
 
-    /*
-    let material = gltf.materials().next().unwrap();
+    let mut materials = Vec::new();
 
-    let texture = material.emissive_texture().unwrap();
+    for (i, material) in gltf.materials().enumerate() {
+        let pbr = material.pbr_metallic_roughness();
 
-    let texture = load_texture_from_gltf(
-        texture.texture(),
-        "emissive texture",
-        buffer_blob,
-        init_resources,
-        buffers_to_cleanup,
-    )?;
-    */
+        let diffuse_texture = pbr.base_color_texture().unwrap();
+
+        let diffuse_texture = &images[diffuse_texture.texture().index()];
+
+        let diffuse_texture = load_texture_from_gltf(
+            diffuse_texture,
+            true,
+            "diffuse",
+            init_resources,
+            buffers_to_cleanup,
+        )?;
+
+        let metallic_roughness_texture = pbr.base_color_texture().unwrap();
+
+        let metallic_roughness_texture = &images[metallic_roughness_texture.texture().index()];
+
+        let metallic_roughness_texture = load_texture_from_gltf(
+            metallic_roughness_texture,
+            false,
+            "metallic roughness",
+            init_resources,
+            buffers_to_cleanup,
+        )?;
+
+        let normal_map_texture = match material.normal_texture() {
+            Some(normal_map_texture) => {
+                let normal_map_texture = &images[normal_map_texture.texture().index()];
+
+                let normal_map_texture = load_texture_from_gltf(
+                    normal_map_texture,
+                    false,
+                    "normal map",
+                    init_resources,
+                    buffers_to_cleanup,
+                )?;
+
+                image_manager.push_image(normal_map_texture) as i32
+            }
+            None => -1,
+        };
+
+        materials.push(shared_structs::Material {
+            diffuse_texture: image_manager.push_image(diffuse_texture),
+            metallic_roughness_texture: image_manager.push_image(metallic_roughness_texture),
+            normal_map_texture,
+        });
+    }
 
     let num_indices = indices.len() as u32;
 
@@ -1019,7 +1131,49 @@ fn load_gltf_from_bytes(
         init_resources,
     )?;
 
-    Ok((vertices, indices, num_indices))
+    let materials = ash_abstractions::Buffer::new(
+        unsafe { cast_slice(&materials) },
+        "materials",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        init_resources,
+    )?;
+
+    Ok((vertices, indices, materials, num_indices))
+}
+
+fn load_texture_from_gltf(
+    image: &gltf::image::Data,
+    srgb: bool,
+    label: &str,
+    init_resources: &mut ash_abstractions::InitResources,
+    buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
+) -> anyhow::Result<ash_abstractions::Image> {
+    let format = match (image.format, srgb) {
+        (gltf::image::Format::R8G8B8A8, true) => vk::Format::R8G8B8A8_SRGB,
+        (gltf::image::Format::R8G8B8A8, false) => vk::Format::R8G8B8A8_UNORM,
+        (gltf::image::Format::R8G8B8, true) => vk::Format::R8G8B8_SRGB,
+        (gltf::image::Format::R8G8B8, false) => vk::Format::R8G8B8_UNORM,
+        format => panic!("unsupported format: {:?}", format),
+    };
+
+    let (image, staging_buffer) = ash_abstractions::create_image_from_bytes(
+        &image.pixels,
+        vk::Extent3D {
+            width: image.width,
+            height: image.height,
+            depth: 1,
+        },
+        vk::ImageViewType::TYPE_2D,
+        format,
+        label,
+        init_resources,
+        &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+        vk_sync::ImageLayout::Optimal,
+    )?;
+
+    buffers_to_cleanup.push(staging_buffer);
+
+    Ok(image)
 }
 
 unsafe fn cast_slice<T>(slice: &[T]) -> &[u8] {
@@ -1031,4 +1185,62 @@ unsafe fn cast_slice<T>(slice: &[T]) -> &[u8] {
 
 unsafe fn bytes_of<T>(reference: &T) -> &[u8] {
     std::slice::from_raw_parts(reference as *const T as *const u8, std::mem::size_of::<T>())
+}
+
+pub struct ImageManager {
+    images: Vec<ash_abstractions::Image>,
+    image_infos: Vec<vk::DescriptorImageInfo>,
+}
+
+impl ImageManager {
+    pub fn new(device: &ash::Device) -> anyhow::Result<Self> {
+        Ok(Self {
+            images: Default::default(),
+            image_infos: Default::default(),
+        })
+    }
+
+    pub fn push_image(&mut self, image: ash_abstractions::Image) -> u32 {
+        let index = self.images.len() as u32;
+
+        self.image_infos.push(
+            *vk::DescriptorImageInfo::builder()
+                .image_view(image.view)
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        );
+
+        self.images.push(image);
+
+        index
+    }
+
+    pub fn fill_with_dummy_images_up_to(&mut self, items: usize) {
+        while self.image_infos.len() < items {
+            self.image_infos.push(self.image_infos[0]);
+        }
+    }
+
+    pub fn write_descriptor_set(
+        &self,
+        set: vk::DescriptorSet,
+        binding: u32,
+    ) -> vk::WriteDescriptorSetBuilder {
+        vk::WriteDescriptorSet::builder()
+            .dst_set(set)
+            .dst_binding(binding)
+            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+            .image_info(&self.image_infos)
+    }
+
+    pub fn cleanup(
+        &self,
+        device: &ash::Device,
+        allocator: &mut gpu_allocator::vulkan::Allocator,
+    ) -> anyhow::Result<()> {
+        for image in &self.images {
+            image.cleanup(device, allocator)?;
+        }
+
+        Ok(())
+    }
 }
