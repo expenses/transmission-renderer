@@ -16,7 +16,7 @@ pub struct PointLight {
     pub colour_and_intensity: Vec4,
 }
 
-pub struct Material {
+pub struct MaterialInfo {
     pub diffuse_texture: u32,
     pub metallic_roughness_texture: u32,
     pub normal_map_texture: i32,

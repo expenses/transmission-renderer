@@ -12,10 +12,9 @@ extern crate spirv_std;
 use glam_pbr::{
     basic_brdf, BasicBrdfParams, Light, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{Material, PointLight, PushConstants};
+use shared_structs::{MaterialInfo, PointLight, PushConstants};
 use spirv_std::{
     glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
-    image::SampledImage,
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
@@ -55,10 +54,10 @@ pub fn fragment(
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    tonemapper_params: &BakedLottesTonemapperParams,
+    #[spirv(descriptor_set = 0, binding = 1, uniform)] tonemapper_params: &BakedLottesTonemapperParams,
     #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[Material],
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
     output: &mut Vec4,
 ) {
     let cluster_id = {
@@ -148,6 +147,36 @@ pub fn vertex(
 ) {
     *out_position = position;
     *out_normal = normal;
+    *out_uv = uv;
+    *out_material = material;
+
+    *builtin_pos = push_constants.proj_view * position.extend(1.0);
+}
+
+#[spirv(vertex)]
+pub fn vertex_instanced(
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    material: u32,
+    translation: Vec3,
+    rotation_0: Vec3,
+    rotation_1: Vec3,
+    rotation_2: Vec3,
+    scale: f32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    out_position: &mut Vec3,
+    out_normal: &mut Vec3,
+    out_uv: &mut Vec2,
+    out_material: &mut u32,
+    #[spirv(position)] builtin_pos: &mut Vec4,
+) {
+    let rotation = Mat3::from_cols(rotation_0, rotation_1, rotation_2);
+
+    let position = (rotation * position) * scale + translation;
+
+    *out_position = position;
+    *out_normal = rotation * normal;
     *out_uv = uv;
     *out_material = material;
 

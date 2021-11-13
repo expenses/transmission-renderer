@@ -8,7 +8,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
-use glam::{Mat4, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use glam::{Mat3, Mat4, UVec2, Vec2, Vec3, Vec3A, Vec4};
 use shared_structs::PointLight;
 
 fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) -> Mat4 {
@@ -227,11 +227,21 @@ fn main() -> anyhow::Result<()> {
 
     let filename = std::env::args().nth(1).unwrap();
 
-    let (model_vertices, model_indices, model_materials, model_num_indices) = load_gltf(
+    let mut materials = Vec::new();
+
+    let (model_vertices, model_indices, model_num_indices) = load_gltf(
         &filename,
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
+        &mut materials,
+    )?;
+
+    let model_materials = ash_abstractions::Buffer::new(
+        unsafe { cast_slice(&materials) },
+        "materials",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources,
     )?;
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
@@ -251,6 +261,19 @@ fn main() -> anyhow::Result<()> {
         },
         "lights",
         vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources,
+    )?;
+
+    let instance_buffer = ash_abstractions::Buffer::new(
+        unsafe {
+            cast_slice(&[Instance {
+                translation: Vec3::new(0.0, 500.0, 0.0),
+                rotation: Mat3::from_rotation_y(1.0) * Mat3::from_rotation_x(2.0),
+                scale: 0.1,
+            }])
+        },
+        "instance",
+        vk::BufferUsageFlags::VERTEX_BUFFER,
         &mut init_resources,
     )?;
 
@@ -723,6 +746,19 @@ fn main() -> anyhow::Result<()> {
 
                         device.cmd_draw_indexed(command_buffer, model_num_indices, 1, 0, 0, 0);
 
+                        device.cmd_bind_pipeline(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.instanced,
+                        );
+                        device.cmd_bind_vertex_buffers(
+                            command_buffer,
+                            0,
+                            &[model_vertices.buffer, instance_buffer.buffer],
+                            &[0, 0],
+                        );
+                        device.cmd_draw_indexed(command_buffer, model_num_indices, 1, 0, 0, 0);
+
                         device.cmd_end_render_pass(command_buffer);
 
                         device.end_command_buffer(command_buffer)?;
@@ -810,6 +846,7 @@ struct KeyboardState {
 
 struct Pipelines {
     grass: vk::Pipeline,
+    instanced: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
 }
 
@@ -821,6 +858,7 @@ impl Pipelines {
         pipeline_cache: vk::PipelineCache,
     ) -> anyhow::Result<Self> {
         let vertex_entry_point = CString::new("vertex")?;
+        let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
         let fragment_entry_point = CString::new("fragment")?;
 
         let module =
@@ -836,6 +874,11 @@ impl Pipelines {
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .name(&fragment_entry_point);
 
+        let vertex_instanced_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .name(&vertex_instanced_entry_point);
+
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
@@ -846,8 +889,6 @@ impl Pipelines {
                 None,
             )
         }?;
-
-        let stages = &[*vertex_stage, *fragment_stage];
 
         let graphics_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
             primitive_state: ash_abstractions::PrimitiveState {
@@ -860,15 +901,12 @@ impl Pipelines {
                 depth_write_enable: true,
                 depth_compare_op: vk::CompareOp::LESS,
             }),
-            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(
-                0,
-                &[
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec2,
-                    ash_abstractions::VertexAttribute::Uint,
-                ],
-            ),
+            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[&[
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec2,
+                ash_abstractions::VertexAttribute::Uint,
+            ]]),
             vertex_bindings: &[*vk::VertexInputBindingDescription::builder()
                 .binding(0)
                 .stride(std::mem::size_of::<Vertex>() as u32)],
@@ -877,18 +915,75 @@ impl Pipelines {
                 .blend_enable(false)],
         };
 
+        let instanced_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::BACK,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: Some(ash_abstractions::DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                depth_compare_op: vk::CompareOp::LESS,
+            }),
+            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
+                &[
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec2,
+                    ash_abstractions::VertexAttribute::Uint,
+                ],
+                &[
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Float,
+                ],
+            ]),
+            vertex_bindings: &[
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(0)
+                    .stride(std::mem::size_of::<Vertex>() as u32),
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(1)
+                    .stride(std::mem::size_of::<Instance>() as u32)
+                    .input_rate(vk::VertexInputRate::INSTANCE),
+            ],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)],
+        };
+
         let baked = graphics_pipeline_desc.as_baked();
+        let instanced_baked = instanced_pipeline_desc.as_baked();
+
+        let stages = &[*vertex_stage, *fragment_stage];
 
         let graphics_pipeline_desc =
             baked.as_pipeline_create_info(stages, pipeline_layout, render_passes.draw, 0);
 
+        let instanced_stages = &[*vertex_instanced_stage, *fragment_stage];
+
+        let instanced_pipeline_desc = instanced_baked.as_pipeline_create_info(
+            instanced_stages,
+            pipeline_layout,
+            render_passes.draw,
+            0,
+        );
+
         let pipelines = unsafe {
-            device.create_graphics_pipelines(pipeline_cache, &[*graphics_pipeline_desc], None)
+            device.create_graphics_pipelines(
+                pipeline_cache,
+                &[*graphics_pipeline_desc, *instanced_pipeline_desc],
+                None,
+            )
         }
         .map_err(|(_, err)| err)?;
 
         Ok(Self {
             grass: pipelines[0],
+            instanced: pipelines[1],
             pipeline_layout,
         })
     }
@@ -899,6 +994,12 @@ struct Vertex {
     normal: Vec3,
     uv: Vec2,
     material: u32,
+}
+
+struct Instance {
+    translation: Vec3,
+    rotation: Mat3,
+    scale: f32,
 }
 
 struct RenderPasses {
@@ -1024,12 +1125,8 @@ fn load_gltf(
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
-) -> anyhow::Result<(
-    ash_abstractions::Buffer,
-    ash_abstractions::Buffer,
-    ash_abstractions::Buffer,
-    u32,
-)> {
+    materials: &mut Vec<shared_structs::MaterialInfo>,
+) -> anyhow::Result<(ash_abstractions::Buffer, ash_abstractions::Buffer, u32)> {
     let (gltf, buffers, images) = gltf::import(path)?;
 
     let mut indices = Vec::new();
@@ -1037,7 +1134,7 @@ fn load_gltf(
 
     for mesh in gltf.meshes() {
         for primitive in mesh.primitives() {
-            let material_id = primitive.material().index().unwrap_or(0);
+            let material_id = primitive.material().index().unwrap_or(0) + materials.len();
 
             let reader = primitive.reader(|i| Some(&buffers[i.index()]));
 
@@ -1061,8 +1158,6 @@ fn load_gltf(
             }
         }
     }
-
-    let mut materials = Vec::new();
 
     for (i, material) in gltf.materials().enumerate() {
         let pbr = material.pbr_metallic_roughness();
@@ -1108,7 +1203,7 @@ fn load_gltf(
             None => -1,
         };
 
-        materials.push(shared_structs::Material {
+        materials.push(shared_structs::MaterialInfo {
             diffuse_texture: image_manager.push_image(diffuse_texture),
             metallic_roughness_texture: image_manager.push_image(metallic_roughness_texture),
             normal_map_texture,
@@ -1131,14 +1226,7 @@ fn load_gltf(
         init_resources,
     )?;
 
-    let materials = ash_abstractions::Buffer::new(
-        unsafe { cast_slice(&materials) },
-        "materials",
-        vk::BufferUsageFlags::STORAGE_BUFFER,
-        init_resources,
-    )?;
-
-    Ok((vertices, indices, materials, num_indices))
+    Ok((vertices, indices, num_indices))
 }
 
 fn load_texture_from_gltf(
