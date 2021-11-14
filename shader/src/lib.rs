@@ -14,18 +14,12 @@ use glam_pbr::{
 };
 use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
 use spirv_std::{
-    glam::{const_vec3, Mat3, UVec2, Vec2, Vec3, Vec4},
+    glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
-
-fn sample_texture(textures: &Textures, sampler: &Sampler, index: u32, uv: Vec2) -> Vec4 {
-    let texture = unsafe { textures.index(index as usize) };
-
-    texture.sample(*sampler, uv)
-}
 
 fn compute_cotangent_frame(normal: Vec3, position: Vec3, uv: Vec2) -> Mat3 {
     // get edge vectors of the pixel triangle
@@ -63,7 +57,13 @@ pub fn fragment(
 ) {
     let material = &materials[material_id as usize];
 
-    let diffuse = sample_texture(textures, sampler, material.diffuse_texture, uv);
+    let texture_sampler = TextureSampler {
+        uv,
+        textures,
+        sampler: *sampler,
+    };
+
+    let diffuse = texture_sampler.sample(material.diffuse_texture);
 
     fragment_inner(
         diffuse,
@@ -75,8 +75,7 @@ pub fn fragment(
         frag_coord,
         point_lights,
         tonemapper_params,
-        textures,
-        sampler,
+        texture_sampler,
         sun_uniform,
         output,
     );
@@ -100,7 +99,13 @@ pub fn fragment_alpha_clip(
 ) {
     let material = &materials[material_id as usize];
 
-    let diffuse = sample_texture(textures, sampler, material.diffuse_texture, uv);
+    let texture_sampler = TextureSampler {
+        uv,
+        textures,
+        sampler: *sampler,
+    };
+
+    let diffuse = texture_sampler.sample(material.diffuse_texture);
 
     if diffuse.w < 0.5 {
         spirv_std::arch::kill();
@@ -116,11 +121,23 @@ pub fn fragment_alpha_clip(
         frag_coord,
         point_lights,
         tonemapper_params,
-        textures,
-        sampler,
+        texture_sampler,
         sun_uniform,
         output,
     );
+}
+
+struct TextureSampler<'a> {
+    textures: &'a Textures,
+    sampler: Sampler,
+    uv: Vec2,
+}
+
+impl<'a> TextureSampler<'a> {
+    fn sample(&self, texture_id: u32) -> Vec4 {
+        let texture = unsafe { self.textures.index(texture_id as usize) };
+        texture.sample(self.sampler, self.uv)
+    }
 }
 
 fn fragment_inner(
@@ -133,8 +150,7 @@ fn fragment_inner(
     frag_coord: Vec4,
     point_lights: &[PointLight],
     tonemapper_params: &BakedLottesTonemapperParams,
-    textures: &Textures,
-    sampler: &Sampler,
+    texture_sampler: TextureSampler,
     sun_uniform: &SunUniform,
     output: &mut Vec4,
 ) {
@@ -149,12 +165,7 @@ fn fragment_inner(
     };
 
     let (metallic, roughness) = if material.metallic_roughness_texture != -1 {
-        let sample = sample_texture(
-            textures,
-            sampler,
-            material.metallic_roughness_texture as u32,
-            uv,
-        );
+        let sample = texture_sampler.sample(material.metallic_roughness_texture as u32);
 
         // Switched!
         (sample.z, sample.y)
@@ -170,9 +181,10 @@ fn fragment_inner(
     let view_vector = Vec3::from(push_constants.view_position) - position;
 
     if material.normal_map_texture != -1 {
-        let map_normal =
-            sample_texture(textures, sampler, material.normal_map_texture as u32, uv).truncate();
-        let map_normal = map_normal * 2.0 - 1.0;
+        let map_normal = texture_sampler
+            .sample(material.normal_map_texture as u32)
+            .truncate();
+        let map_normal = map_normal * 255.0 / 127.0 - 128.0 / 127.0;
 
         normal = (compute_cotangent_frame(normal, -view_vector, uv) * map_normal).normalize();
     };
@@ -190,8 +202,9 @@ fn fragment_inner(
     let mut colour = Vec3::ZERO;
 
     if material.emissive_texture != -1 {
-        colour +=
-            sample_texture(textures, sampler, material.emissive_texture as u32, uv).truncate();
+        colour += texture_sampler
+            .sample(material.emissive_texture as u32)
+            .truncate();
     }
 
     colour += basic_brdf(BasicBrdfParams {
@@ -267,9 +280,9 @@ pub fn vertex_instanced(
     uv: Vec2,
     material: u32,
     translation: Vec3,
-    rotation_0: Vec3,
-    rotation_1: Vec3,
-    rotation_2: Vec3,
+    rotation_col_0: Vec3,
+    rotation_col_1: Vec3,
+    rotation_col_2: Vec3,
     scale: f32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
@@ -278,7 +291,7 @@ pub fn vertex_instanced(
     out_material: &mut u32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let rotation = Mat3::from_cols(rotation_0, rotation_1, rotation_2);
+    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
 
     let position = (rotation * position) * scale + translation;
 

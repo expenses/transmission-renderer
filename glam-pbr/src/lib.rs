@@ -70,13 +70,9 @@ impl<A, B> Clone for Dot<A, B> {
 impl<A, B> Copy for Dot<A, B> {}
 
 impl<A: ShadingVector, B: ShadingVector> Dot<A, B> {
-    pub fn new(a: &A, b: &B, epsilon: f32) -> Self {
-        fn clamp(value: f32, min: f32, max: f32) -> f32 {
-            value.max(min).min(max)
-        }
-
+    pub fn new(a: &A, b: &B) -> Self {
         Self {
-            value: clamp(a.vector().dot(b.vector()), epsilon, 1.0),
+            value: a.vector().dot(b.vector()).max(core::f32::EPSILON),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -211,10 +207,10 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
     let actual_roughness = perceptual_roughness.as_actual_roughness();
 
     let halfway = Halfway::new(&view, &light);
-    let normal_dot_halfway = Dot::new(&normal, &halfway, core::f32::EPSILON);
-    let light_dot_halfway = Dot::new(&light, &halfway, core::f32::EPSILON);
-    let normal_dot_view = Dot::new(&normal, &view, core::f32::EPSILON);
-    let normal_dot_light = Dot::new(&normal, &light, core::f32::EPSILON);
+    let normal_dot_halfway = Dot::new(&normal, &halfway);
+    let light_dot_halfway = Dot::new(&light, &halfway);
+    let normal_dot_view = Dot::new(&normal, &view);
+    let normal_dot_light = Dot::new(&normal, &light);
 
     let f0 = compute_f0(metallic, perceptual_dielectric_reflectance, diffuse_colour);
     let f90 = compute_f90(light_dot_halfway, actual_roughness);

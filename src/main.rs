@@ -779,7 +779,9 @@ fn main() -> anyhow::Result<()> {
 
                         device.cmd_draw_indexed(command_buffer, model_num_indices, 1, 0, 0, 0);
 
-                        if let Some((alpha_clip_indices, num_alpha_clip_indices)) = model_alpha_clip_indices.as_ref() {
+                        if let Some((alpha_clip_indices, num_alpha_clip_indices)) =
+                            model_alpha_clip_indices.as_ref()
+                        {
                             device.cmd_bind_pipeline(
                                 command_buffer,
                                 vk::PipelineBindPoint::GRAPHICS,
@@ -793,7 +795,14 @@ fn main() -> anyhow::Result<()> {
                                 vk::IndexType::UINT32,
                             );
 
-                            device.cmd_draw_indexed(command_buffer, *num_alpha_clip_indices, 1, 0, 0, 0);
+                            device.cmd_draw_indexed(
+                                command_buffer,
+                                *num_alpha_clip_indices,
+                                1,
+                                0,
+                                0,
+                                0,
+                            );
                         }
 
                         device.cmd_bind_pipeline(
