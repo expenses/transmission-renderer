@@ -63,52 +63,10 @@ pub fn fragment(
         sampler: *sampler,
     };
 
-    let diffuse = texture_sampler.sample(material.diffuse_texture);
+    let mut diffuse = material.diffuse_factor;
 
-    fragment_inner(
-        diffuse,
-        material,
-        position,
-        normal,
-        uv,
-        push_constants,
-        frag_coord,
-        point_lights,
-        tonemapper_params,
-        texture_sampler,
-        sun_uniform,
-        output,
-    );
-}
-
-#[spirv(fragment)]
-pub fn fragment_alpha_clip(
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    #[spirv(flat)] material_id: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(frag_coord)] frag_coord: Vec4,
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1, uniform)] tonemapper_params: &BakedLottesTonemapperParams,
-    #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 5, uniform)] sun_uniform: &SunUniform,
-    output: &mut Vec4,
-) {
-    let material = &materials[material_id as usize];
-
-    let texture_sampler = TextureSampler {
-        uv,
-        textures,
-        sampler: *sampler,
-    };
-
-    let diffuse = texture_sampler.sample(material.diffuse_texture);
-
-    if diffuse.w < 0.5 {
-        spirv_std::arch::kill();
+    if material.diffuse_texture != -1 {
+        diffuse *= texture_sampler.sample(material.diffuse_texture as u32)
     }
 
     fragment_inner(
@@ -164,17 +122,16 @@ fn fragment_inner(
             + cluster_xy.x
     };
 
-    let (metallic, roughness) = if material.metallic_roughness_texture != -1 {
+    let mut metallic = material.metallic_factor;
+    let mut roughness = material.roughness_factor;
+
+    if material.metallic_roughness_texture != -1 {
         let sample = texture_sampler.sample(material.metallic_roughness_texture as u32);
 
-        // Switched!
-        (sample.z, sample.y)
-    } else {
-        (
-            material.fallback_metallic_factor,
-            material.fallback_roughness_factor,
-        )
-    };
+        // These two are switched!
+        metallic *= sample.z;
+        roughness *= sample.y;
+    }
 
     let mut normal = normal.normalize();
 
@@ -201,11 +158,15 @@ fn fragment_inner(
 
     let mut colour = Vec3::ZERO;
 
+    let mut emission = Vec3::from(material.emissive_factor);
+
     if material.emissive_texture != -1 {
-        colour += texture_sampler
+        emission *= texture_sampler
             .sample(material.emissive_texture as u32)
             .truncate();
     }
+
+    colour += emission;
 
     colour += basic_brdf(BasicBrdfParams {
         light: Light(sun_uniform.dir.into()),
@@ -252,23 +213,72 @@ fn fragment_inner(
     *output = tonemapped_colour.extend(diffuse.w);
 }
 
+#[spirv(fragment)]
+pub fn depth_pre_pass_alpha_clip(
+    uv: Vec2,
+    #[spirv(flat)] material_id: u32,
+    #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
+) {
+    let material = &materials[material_id as usize];
+
+    let texture_sampler = TextureSampler {
+        uv,
+        textures,
+        sampler: *sampler,
+    };
+
+    let mut diffuse = material.diffuse_factor;
+
+    if material.diffuse_texture != -1 {
+        diffuse *= texture_sampler.sample(material.diffuse_texture as u32)
+    }
+
+    if diffuse.w < material.alpha_clipping_cutoff {
+        spirv_std::arch::kill();
+    }
+}
+
 #[spirv(vertex)]
-pub fn vertex(
+pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
-    normal: Vec3,
+    _normal: Vec3,
     uv: Vec2,
     material: u32,
+    translation: Vec3,
+    rotation_col_0: Vec3,
+    rotation_col_1: Vec3,
+    rotation_col_2: Vec3,
+    scale: f32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    out_position: &mut Vec3,
-    out_normal: &mut Vec3,
+    #[spirv(position)] builtin_pos: &mut Vec4,
     out_uv: &mut Vec2,
     out_material: &mut u32,
-    #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    *out_position = position;
-    *out_normal = normal;
+    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+
+    let position = (rotation * position) * scale + translation;
+
     *out_uv = uv;
     *out_material = material;
+    *builtin_pos = push_constants.proj_view * position.extend(1.0);
+}
+
+#[spirv(vertex)]
+pub fn depth_pre_pass_instanced(
+    position: Vec3,
+    translation: Vec3,
+    rotation_col_0: Vec3,
+    rotation_col_1: Vec3,
+    rotation_col_2: Vec3,
+    scale: f32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(position)] builtin_pos: &mut Vec4,
+) {
+    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+
+    let position = (rotation * position) * scale + translation;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }

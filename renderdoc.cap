@@ -2,7 +2,7 @@
     "rdocCaptureSettings": 1,
     "settings": {
         "autoStart": false,
-        "commandLine": "C:/Users/Ashley/Desktop/ray-tracing-gallery/glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf C:/Users/Ashley/Desktop/ray-tracing-gallery/glTF-Sample-Models/2.0/DamagedHelmet/glTF/DamagedHelmet.gltf",
+        "commandLine": "glTF-Sample-Models/2.0/Sponza/glTF/Sponza.gltf glTF-Sample-Models/2.0/DamagedHelmet/glTF/DamagedHelmet.gltf",
         "environment": [
         ],
         "executable": "C:\\Users\\Ashley\\Desktop\\nice-grass\\target\\debug\\nice-grass.exe",

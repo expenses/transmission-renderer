@@ -489,8 +489,9 @@ dependencies = [
 
 [[package]]
 name = "dolly"
-version = "0.1.3"
-source = "git+https://github.com/expenses/dolly?branch=bump-glam#5c4539f21b3d7db1cd13eaae42cf8a46302f5510"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc90faadd2147490aedcee30f3a4187165ad282ae62a949113edb2713873e94c"
 dependencies = [
  "glam 0.19.0",
 ]
@@ -568,8 +569,7 @@ dependencies = [
 [[package]]
 name = "gltf"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ff38b75359a0096dd0a8599b6e4f37a6ee41d5df300cc7669e62aafa697f7a2"
+source = "git+https://github.com/expenses/gltf?branch=prevent-importing-r8g8b8-textures#ab727d034f1f1e926679f7213c10967d6841642a"
 dependencies = [
  "base64",
  "byteorder",
@@ -581,8 +581,7 @@ dependencies = [
 [[package]]
 name = "gltf-derive"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f2a9333e0f9c7bca94dfc20bcf44fa12a61eeec662d6e007563ff748aa59c70"
+source = "git+https://github.com/expenses/gltf?branch=prevent-importing-r8g8b8-textures#ab727d034f1f1e926679f7213c10967d6841642a"
 dependencies = [
  "inflections",
  "proc-macro2",
@@ -593,8 +592,7 @@ dependencies = [
 [[package]]
 name = "gltf-json"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1414d3a98cbaabdb2f134328b1f6036d14b282febc1df51952a435d2ca17fb6"
+source = "git+https://github.com/expenses/gltf?branch=prevent-importing-r8g8b8-textures#ab727d034f1f1e926679f7213c10967d6841642a"
 dependencies = [
  "gltf-derive",
  "serde",

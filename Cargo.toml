@@ -10,8 +10,8 @@ members = [".", "glam-pbr", "shader", "shared-structs"]
 anyhow = "1.0.45"
 ash = "0.33.3"
 ash-window = "0.7.0"
-dolly = { git = "https://github.com/expenses/dolly", branch = "bump-glam" }
-gltf = { version = "0.16.0", default-features = false, features = ["utils", "import"] }
+dolly = "0.1.4"
+gltf = { git = "https://github.com/expenses/gltf", branch = "prevent-importing-r8g8b8-textures", default-features = false, features = ["utils", "import"] }
 gpu-allocator = "0.10.0"
 ash-abstractions = { package = "ash-opinionated-abstractions", path = "../ash-opinionated-abstractions" }
 winit = "0.25.0"

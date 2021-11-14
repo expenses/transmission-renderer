@@ -3,12 +3,11 @@ use ash::extensions::khr::{Surface as SurfaceLoader, Swapchain as SwapchainLoade
 use ash::vk;
 use ash_abstractions::CStrList;
 use std::ffi::{CStr, CString};
-use std::mem::ManuallyDrop;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
-use glam::{Mat3, Mat4, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use glam::{Mat3, Mat4, UVec2, Vec2, Vec3, Vec4};
 use shared_structs::PointLight;
 
 fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) -> Mat4 {
@@ -110,7 +109,7 @@ fn main() -> anyhow::Result<()> {
             .queue_family_index(graphics_queue_family)
             .queue_priorities(&[1.0])];
 
-        let device_features = vk::PhysicalDeviceFeatures::builder();
+        let device_features = vk::PhysicalDeviceFeatures::builder().multi_draw_indirect(true);
 
         let mut null_descriptor_feature =
             vk::PhysicalDeviceRobustness2FeaturesEXT::builder().null_descriptor(true);
@@ -220,7 +219,7 @@ fn main() -> anyhow::Result<()> {
         debug_utils_loader: Some(&debug_utils_loader),
     };
 
-    let mut image_manager = ImageManager::new(&device)?;
+    let mut image_manager = ImageManager::default();
     let mut buffers_to_cleanup = Vec::new();
 
     let window_size = window.inner_size();
@@ -233,29 +232,82 @@ fn main() -> anyhow::Result<()> {
     let filename = std::env::args().nth(1).unwrap();
 
     let mut materials = Vec::new();
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
 
-    let (model_vertices, model_indices, model_num_indices, model_alpha_clip_indices) = load_gltf(
+    let (model_opaque_slice, model_alpha_clip_slice) = load_gltf(
         &filename,
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
         &mut materials,
+        &mut vertices,
+        &mut indices,
     )?;
 
     let filename2 = std::env::args().nth(2).unwrap();
 
-    let (model2_vertices, model2_indices, model2_num_indices, _) = load_gltf(
+    let (model2_opaque_slice, model2_alpha_clip_slice) = load_gltf(
         &filename2,
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
         &mut materials,
+        &mut vertices,
+        &mut indices,
     )?;
 
     let model_materials = ash_abstractions::Buffer::new(
         unsafe { cast_slice(&materials) },
         "materials",
         vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources,
+    )?;
+
+    let vertices = ash_abstractions::Buffer::new(
+        unsafe { cast_slice(&vertices) },
+        "vertices",
+        vk::BufferUsageFlags::VERTEX_BUFFER,
+        &mut init_resources,
+    )?;
+
+    let indices = ash_abstractions::Buffer::new(
+        unsafe { cast_slice(&indices) },
+        "indices",
+        vk::BufferUsageFlags::INDEX_BUFFER,
+        &mut init_resources,
+    )?;
+
+    let draw_indirect_buffer = ash_abstractions::Buffer::new(
+        unsafe {
+            cast_slice(&[
+                // Opaque draws
+                vk::DrawIndexedIndirectCommand {
+                    index_count: model_opaque_slice.count,
+                    instance_count: 1,
+                    first_index: model_opaque_slice.offset,
+                    vertex_offset: 0,
+                    first_instance: 0,
+                },
+                vk::DrawIndexedIndirectCommand {
+                    index_count: model2_opaque_slice.count,
+                    instance_count: 1,
+                    first_index: model2_opaque_slice.offset,
+                    vertex_offset: 0,
+                    first_instance: 1,
+                },
+                // Alpha clip draws.
+                vk::DrawIndexedIndirectCommand {
+                    index_count: model_alpha_clip_slice.count,
+                    instance_count: 1,
+                    first_index: model_alpha_clip_slice.offset,
+                    vertex_offset: 0,
+                    first_instance: 0,
+                },
+            ])
+        },
+        "draw indirect",
+        vk::BufferUsageFlags::INDIRECT_BUFFER,
         &mut init_resources,
     )?;
 
@@ -281,11 +333,18 @@ fn main() -> anyhow::Result<()> {
 
     let instance_buffer = ash_abstractions::Buffer::new(
         unsafe {
-            cast_slice(&[Instance {
-                translation: Vec3::new(0.0, 250.0, 0.0),
-                rotation: Mat3::from_rotation_y(0.0) * Mat3::from_rotation_x(0.0),
-                scale: 100.0,
-            }])
+            cast_slice(&[
+                Instance {
+                    translation: Vec3::ZERO,
+                    rotation: Mat3::IDENTITY,
+                    scale: 1.0,
+                },
+                Instance {
+                    translation: Vec3::new(0.0, 250.0, 0.0),
+                    rotation: Mat3::IDENTITY,
+                    scale: 100.0,
+                },
+            ])
         },
         "instance",
         vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -309,7 +368,7 @@ fn main() -> anyhow::Result<()> {
         unsafe {
             bytes_of(&shared_structs::SunUniform {
                 dir: Vec3::new(1.0, 2.0, 1.0).normalize().into(),
-                intensity: Vec3::splat(1.5).into(),
+                intensity: Vec3::splat(3.0),
             })
         },
         "sun uniform",
@@ -438,6 +497,7 @@ fn main() -> anyhow::Result<()> {
             &vk::SamplerCreateInfo::builder()
                 .mag_filter(vk::Filter::LINEAR)
                 .min_filter(vk::Filter::LINEAR)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
                 .max_lod(vk::LOD_CLAMP_NONE),
             None,
         )
@@ -760,69 +820,62 @@ fn main() -> anyhow::Result<()> {
                         device.cmd_bind_pipeline(
                             command_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
-                            pipelines.normal,
+                            pipelines.depth_pre_pass,
                         );
 
                         device.cmd_bind_vertex_buffers(
                             command_buffer,
                             0,
-                            &[model_vertices.buffer],
-                            &[0],
+                            &[vertices.buffer, instance_buffer.buffer],
+                            &[0, 0],
                         );
 
                         device.cmd_bind_index_buffer(
                             command_buffer,
-                            model_indices.buffer,
+                            indices.buffer,
                             0,
                             vk::IndexType::UINT32,
                         );
 
-                        device.cmd_draw_indexed(command_buffer, model_num_indices, 1, 0, 0, 0);
+                        device.cmd_draw_indexed_indirect(
+                            command_buffer,
+                            draw_indirect_buffer.buffer,
+                            0,
+                            2,
+                            std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
+                        );
 
-                        if let Some((alpha_clip_indices, num_alpha_clip_indices)) =
-                            model_alpha_clip_indices.as_ref()
                         {
                             device.cmd_bind_pipeline(
                                 command_buffer,
                                 vk::PipelineBindPoint::GRAPHICS,
-                                pipelines.normal_alpha_clip,
+                                pipelines.depth_pre_pass_alpha_clip,
                             );
 
-                            device.cmd_bind_index_buffer(
+                            device.cmd_draw_indexed_indirect(
                                 command_buffer,
-                                alpha_clip_indices.buffer,
-                                0,
-                                vk::IndexType::UINT32,
-                            );
-
-                            device.cmd_draw_indexed(
-                                command_buffer,
-                                *num_alpha_clip_indices,
+                                draw_indirect_buffer.buffer,
+                                std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u64 * 2,
                                 1,
-                                0,
-                                0,
-                                0,
+                                std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
                             );
                         }
+
+                        device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
 
                         device.cmd_bind_pipeline(
                             command_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
-                            pipelines.instanced,
+                            pipelines.normal,
                         );
-                        device.cmd_bind_vertex_buffers(
+
+                        device.cmd_draw_indexed_indirect(
                             command_buffer,
+                            draw_indirect_buffer.buffer,
                             0,
-                            &[model2_vertices.buffer, instance_buffer.buffer],
-                            &[0, 0],
+                            3,
+                            std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
                         );
-                        device.cmd_bind_index_buffer(
-                            command_buffer,
-                            model2_indices.buffer,
-                            0,
-                            vk::IndexType::UINT32,
-                        );
-                        device.cmd_draw_indexed(command_buffer, model2_num_indices, 1, 0, 0, 0);
 
                         device.cmd_end_render_pass(command_buffer);
 
@@ -854,16 +907,15 @@ fn main() -> anyhow::Result<()> {
 
                     {
                         depthbuffer.cleanup(&device, &mut allocator)?;
-                        model_vertices.cleanup(&device, &mut allocator)?;
-                        model_indices.cleanup(&device, &mut allocator)?;
                         lights_buffer.cleanup(&device, &mut allocator)?;
                         tonemapping_params_buffer.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         model_materials.cleanup(&device, &mut allocator)?;
                         instance_buffer.cleanup(&device, &mut allocator)?;
                         sun_uniform_buffer.cleanup(&device, &mut allocator)?;
-                        model2_vertices.cleanup(&device, &mut allocator)?;
-                        model2_indices.cleanup(&device, &mut allocator)?;
+                        vertices.cleanup(&device, &mut allocator)?;
+                        indices.cleanup(&device, &mut allocator)?;
+                        draw_indirect_buffer.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -915,8 +967,8 @@ struct KeyboardState {
 
 struct Pipelines {
     normal: vk::Pipeline,
-    normal_alpha_clip: vk::Pipeline,
-    instanced: vk::Pipeline,
+    depth_pre_pass: vk::Pipeline,
+    depth_pre_pass_alpha_clip: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
 }
 
@@ -927,33 +979,40 @@ impl Pipelines {
         lights_dsl: vk::DescriptorSetLayout,
         pipeline_cache: vk::PipelineCache,
     ) -> anyhow::Result<Self> {
-        let vertex_entry_point = CString::new("vertex")?;
         let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
         let fragment_entry_point = CString::new("fragment")?;
-        let fragment_alpha_clip_entry_point = CString::new("fragment_alpha_clip")?;
+        let vertex_depth_pre_pass_entry_point = CString::new("depth_pre_pass_instanced")?;
+        let vertex_depth_pre_pass_alpha_clip_entry_point =
+            CString::new("depth_pre_pass_vertex_alpha_clip")?;
+        let fragment_depth_pre_pass_alpha_clip_entry_point =
+            CString::new("depth_pre_pass_alpha_clip")?;
 
-        let module =
-            ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), &device)?;
-
-        let vertex_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .name(&vertex_entry_point);
+        let module = ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), device)?;
 
         let fragment_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .name(&fragment_entry_point);
 
-        let fragment_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(&fragment_alpha_clip_entry_point);
-
         let vertex_instanced_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
             .name(&vertex_instanced_entry_point);
+
+        let vertex_depth_pre_pass_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .name(&vertex_depth_pre_pass_entry_point);
+
+        let vertex_depth_pre_pass_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .name(&vertex_depth_pre_pass_alpha_clip_entry_point);
+
+        let fragment_depth_pre_pass_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .name(&fragment_depth_pre_pass_alpha_clip_entry_point);
 
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -966,7 +1025,49 @@ impl Pipelines {
             )
         }?;
 
-        let graphics_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+        let vertex_attributes = ash_abstractions::create_vertex_attribute_descriptions(&[
+            &[
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec2,
+                ash_abstractions::VertexAttribute::Uint,
+            ],
+            &[
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Vec3,
+                ash_abstractions::VertexAttribute::Float,
+            ],
+        ]);
+
+        let normal_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::BACK,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: Some(ash_abstractions::DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: false,
+                depth_compare_op: vk::CompareOp::EQUAL,
+            }),
+            vertex_attributes: &vertex_attributes,
+            vertex_bindings: &[
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(0)
+                    .stride(std::mem::size_of::<Vertex>() as u32),
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(1)
+                    .stride(std::mem::size_of::<Instance>() as u32)
+                    .input_rate(vk::VertexInputRate::INSTANCE),
+            ],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)],
+        };
+
+        let depth_pre_pass_desc = ash_abstractions::GraphicsPipelineDescriptor {
             primitive_state: ash_abstractions::PrimitiveState {
                 cull_mode: vk::CullModeFlags::BACK,
                 topology: vk::PrimitiveTopology::TRIANGLE_LIST,
@@ -977,21 +1078,29 @@ impl Pipelines {
                 depth_write_enable: true,
                 depth_compare_op: vk::CompareOp::LESS,
             }),
-            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[&[
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec2,
-                ash_abstractions::VertexAttribute::Uint,
-            ]]),
-            vertex_bindings: &[*vk::VertexInputBindingDescription::builder()
-                .binding(0)
-                .stride(std::mem::size_of::<Vertex>() as u32)],
-            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
-                .blend_enable(false)],
+            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
+                &[ash_abstractions::VertexAttribute::Vec3],
+                &[
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Vec3,
+                    ash_abstractions::VertexAttribute::Float,
+                ],
+            ]),
+            vertex_bindings: &[
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(0)
+                    .stride(std::mem::size_of::<Vertex>() as u32),
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(1)
+                    .stride(std::mem::size_of::<Instance>() as u32)
+                    .input_rate(vk::VertexInputRate::INSTANCE),
+            ],
+            colour_attachments: &[],
         };
 
-        let instanced_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+        let depth_pre_pass_alpha_clip_desc = ash_abstractions::GraphicsPipelineDescriptor {
             primitive_state: ash_abstractions::PrimitiveState {
                 cull_mode: vk::CullModeFlags::BACK,
                 topology: vk::PrimitiveTopology::TRIANGLE_LIST,
@@ -1026,44 +1135,47 @@ impl Pipelines {
                     .stride(std::mem::size_of::<Instance>() as u32)
                     .input_rate(vk::VertexInputRate::INSTANCE),
             ],
-            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
-                .blend_enable(false)],
+            colour_attachments: &[],
         };
 
-        let baked = graphics_pipeline_desc.as_baked();
-        let instanced_baked = instanced_pipeline_desc.as_baked();
+        let normal_baked = normal_pipeline_desc.as_baked();
+        let depth_pre_pass_baked = depth_pre_pass_desc.as_baked();
+        let depth_pre_pass_alpha_clip_baked = depth_pre_pass_alpha_clip_desc.as_baked();
 
-        let stages = &[*vertex_stage, *fragment_stage];
+        let stages = &[*vertex_instanced_stage, *fragment_stage];
 
-        let graphics_pipeline_desc =
-            baked.as_pipeline_create_info(stages, pipeline_layout, render_passes.draw, 0);
+        let normal_pipeline_desc =
+            normal_baked.as_pipeline_create_info(stages, pipeline_layout, render_passes.draw, 1);
 
-        let instanced_stages = &[*vertex_instanced_stage, *fragment_stage];
+        let depth_pre_pass_stage = &[*vertex_depth_pre_pass_stage];
 
-        let instanced_pipeline_desc = instanced_baked.as_pipeline_create_info(
-            instanced_stages,
+        let depth_pre_pass_desc = depth_pre_pass_baked.as_pipeline_create_info(
+            depth_pre_pass_stage,
             pipeline_layout,
             render_passes.draw,
             0,
         );
 
-        let normal_alpha_clip_stages = &[*vertex_stage, *fragment_alpha_clip_stage];
+        let depth_pre_pass_alpha_clip_stages = &[
+            *vertex_depth_pre_pass_alpha_clip_stage,
+            *fragment_depth_pre_pass_alpha_clip_stage,
+        ];
 
-        let normal_alpha_clip_pipeline_desc = baked.as_pipeline_create_info(
-            normal_alpha_clip_stages,
-            pipeline_layout,
-            render_passes.draw,
-            0,
-        );
+        let depth_pre_pass_alpha_clip_desc = depth_pre_pass_alpha_clip_baked
+            .as_pipeline_create_info(
+                depth_pre_pass_alpha_clip_stages,
+                pipeline_layout,
+                render_passes.draw,
+                0,
+            );
 
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
                 &[
-                    *graphics_pipeline_desc,
-                    *normal_alpha_clip_pipeline_desc,
-                    *instanced_pipeline_desc,
+                    *normal_pipeline_desc,
+                    *depth_pre_pass_desc,
+                    *depth_pre_pass_alpha_clip_desc,
                 ],
                 None,
             )
@@ -1072,8 +1184,8 @@ impl Pipelines {
 
         Ok(Self {
             normal: pipelines[0],
-            normal_alpha_clip: pipelines[1],
-            instanced: pipelines[2],
+            depth_pre_pass: pipelines[1],
+            depth_pre_pass_alpha_clip: pipelines[2],
             pipeline_layout,
         })
     }
@@ -1094,7 +1206,6 @@ struct Instance {
 
 struct RenderPasses {
     draw: vk::RenderPass,
-    tonemap: vk::RenderPass,
 }
 
 impl RenderPasses {
@@ -1124,68 +1235,48 @@ impl RenderPasses {
             .attachment(1)
             .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-        let draw_subpass = [*vk::SubpassDescription::builder()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&hdr_framebuffer_ref)
-            .depth_stencil_attachment(&depth_attachment_ref)];
+        let draw_subpasses = [
+            // Depth pre-pass
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .depth_stencil_attachment(&depth_attachment_ref),
+            // Colour pass
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&hdr_framebuffer_ref)
+                .depth_stencil_attachment(&depth_attachment_ref),
+        ];
 
-        let draw_subpass_dependency = [*vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
+        let draw_subpass_dependencices = [
+            *vk::SubpassDependency::builder()
+                .src_subpass(vk::SUBPASS_EXTERNAL)
+                .dst_subpass(1)
+                .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
+                .src_access_mask(vk::AccessFlags::empty())
+                // We use late and not early fragment tests as we handle alpha clipping in the depth pre pass.
+                .dst_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
+                .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
+            *vk::SubpassDependency::builder()
+                .src_subpass(0)
+                .dst_subpass(1)
+                .src_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
+                .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
+                .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
+        ];
 
         let draw_render_pass = unsafe {
             device.create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&draw_attachments)
-                    .subpasses(&draw_subpass)
-                    .dependencies(&draw_subpass_dependency),
-                None,
-            )
-        }?;
-
-        let tonemap_attachments = [
-            // Swapchain framebuffer
-            *vk::AttachmentDescription::builder()
-                .format(surface_format)
-                .samples(vk::SampleCountFlags::TYPE_1)
-                .load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
-        ];
-
-        let swapchain_framebuffer_ref = [*vk::AttachmentReference::builder()
-            .attachment(0)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
-
-        let tonemap_subpass = [*vk::SubpassDescription::builder()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&swapchain_framebuffer_ref)];
-
-        let tonemap_subpass_dependency = [*vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
-
-        let tonemap_render_pass = unsafe {
-            device.create_render_pass(
-                &vk::RenderPassCreateInfo::builder()
-                    .attachments(&tonemap_attachments)
-                    .subpasses(&tonemap_subpass)
-                    .dependencies(&tonemap_subpass_dependency),
+                    .subpasses(&draw_subpasses)
+                    .dependencies(&draw_subpass_dependencices),
                 None,
             )
         }?;
 
         Ok(Self {
             draw: draw_render_pass,
-            tonemap: tonemap_render_pass,
         })
     }
 }
@@ -1210,22 +1301,23 @@ fn create_depthbuffer(
     )
 }
 
+struct IndexBufferSlice {
+    offset: u32,
+    count: u32,
+}
+
 fn load_gltf(
     path: &str,
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     materials: &mut Vec<shared_structs::MaterialInfo>,
-) -> anyhow::Result<(
-    ash_abstractions::Buffer,
-    ash_abstractions::Buffer,
-    u32,
-    Option<(ash_abstractions::Buffer, u32)>,
-)> {
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+) -> anyhow::Result<(IndexBufferSlice, IndexBufferSlice)> {
     let (gltf, buffers, images) = gltf::import(path)?;
 
-    let mut indices = Vec::new();
-    let mut vertices = Vec::new();
+    let mut opaque_indices = Vec::new();
     let mut alpha_clip_indices = Vec::new();
 
     for mesh in gltf.meshes() {
@@ -1233,9 +1325,12 @@ fn load_gltf(
             let material = primitive.material();
 
             let indices = match material.alpha_mode() {
-                gltf::material::AlphaMode::Opaque => &mut indices,
+                gltf::material::AlphaMode::Opaque => &mut opaque_indices,
                 gltf::material::AlphaMode::Mask => &mut alpha_clip_indices,
-                _ => panic!(),
+                mode => {
+                    dbg!(mode);
+                    &mut opaque_indices
+                }
             };
 
             let material_id = material.index().unwrap_or(0) + materials.len();
@@ -1263,143 +1358,114 @@ fn load_gltf(
         }
     }
 
+    let opaque_slice = IndexBufferSlice {
+        offset: indices.len() as u32,
+        count: opaque_indices.len() as u32,
+    };
+
+    indices.extend_from_slice(&opaque_indices);
+
+    let alpha_clip_slice = IndexBufferSlice {
+        offset: indices.len() as u32,
+        count: alpha_clip_indices.len() as u32,
+    };
+
+    indices.extend_from_slice(&alpha_clip_indices);
+
     for (i, material) in gltf.materials().enumerate() {
+        let mut load_optional_texture =
+            |optional_texture_info: Option<gltf::texture::Texture>, name: &str, srgb| {
+                match optional_texture_info {
+                    Some(info) => {
+                        let image = &images[info.index()];
+
+                        let texture = load_texture_from_gltf(
+                            image,
+                            srgb,
+                            &format!("{} {} {}", path, name, i),
+                            init_resources,
+                            buffers_to_cleanup,
+                        )?;
+
+                        Ok::<_, anyhow::Error>(image_manager.push_image(texture) as i32)
+                    }
+                    None => Ok(-1),
+                }
+            };
+
         let pbr = material.pbr_metallic_roughness();
 
-        let diffuse_texture = pbr.base_color_texture().unwrap();
-
-        let diffuse_texture = &images[diffuse_texture.texture().index()];
-
-        let diffuse_texture = load_texture_from_gltf(
-            diffuse_texture,
+        let diffuse_texture = load_optional_texture(
+            pbr.base_color_texture().map(|info| info.texture()),
+            "diffuse",
             true,
-            &format!("{} diffuse {}", path, i),
-            init_resources,
-            buffers_to_cleanup,
         )?;
 
-        let metallic_roughness_texture = match pbr.metallic_roughness_texture() {
-            Some(metallic_roughness_texture) => {
-                let metallic_roughness_texture =
-                    &images[metallic_roughness_texture.texture().index()];
-
-                let metallic_roughness_texture = load_texture_from_gltf(
-                    metallic_roughness_texture,
-                    false,
-                    &format!("{} metallic roughness {}", path, i),
-                    init_resources,
-                    buffers_to_cleanup,
-                )?;
-
-                image_manager.push_image(metallic_roughness_texture) as i32
-            }
-            None => -1,
-        };
-
-        let normal_map_texture = match material.normal_texture() {
-            Some(normal_map_texture) => {
-                let normal_map_texture = &images[normal_map_texture.texture().index()];
-
-                let normal_map_texture = load_texture_from_gltf(
-                    normal_map_texture,
-                    false,
-                    &format!("{} normal map {}", path, i),
-                    init_resources,
-                    buffers_to_cleanup,
-                )?;
-
-                image_manager.push_image(normal_map_texture) as i32
-            }
-            None => -1,
-        };
-
-        let emissive_texture = match material.emissive_texture() {
-            Some(emissive_texture) => {
-                let emissive_texture = &images[emissive_texture.texture().index()];
-
-                let emissive_texture = load_texture_from_gltf(
-                    emissive_texture,
-                    true,
-                    &format!("{} emissive {}", path, i),
-                    init_resources,
-                    buffers_to_cleanup,
-                )?;
-
-                image_manager.push_image(emissive_texture) as i32
-            }
-            None => -1,
-        };
-
         materials.push(shared_structs::MaterialInfo {
-            diffuse_texture: image_manager.push_image(diffuse_texture),
-            metallic_roughness_texture,
-            normal_map_texture,
-            emissive_texture,
-            fallback_metallic_factor: pbr.metallic_factor(),
-            fallback_roughness_factor: pbr.roughness_factor(),
+            diffuse_texture,
+            metallic_roughness_texture: load_optional_texture(
+                pbr.metallic_roughness_texture().map(|info| info.texture()),
+                "metallic roughness",
+                false,
+            )?,
+            normal_map_texture: load_optional_texture(
+                material.normal_texture().map(|info| info.texture()),
+                "normal map",
+                false,
+            )?,
+            emissive_texture: load_optional_texture(
+                material.emissive_texture().map(|info| info.texture()),
+                "emissive",
+                true,
+            )?,
+            metallic_factor: pbr.metallic_factor(),
+            roughness_factor: pbr.roughness_factor(),
+            alpha_clipping_cutoff: material.alpha_cutoff().unwrap_or(0.5),
+            diffuse_factor: pbr.base_color_factor().into(),
+            emissive_factor: material.emissive_factor().into(),
+            normal_map_scale: material
+                .normal_texture()
+                .map(|normal_texture| normal_texture.scale())
+                .unwrap_or_default(),
         });
     }
 
-    let num_indices = indices.len() as u32;
-
-    let vertices = ash_abstractions::Buffer::new(
-        unsafe { cast_slice(&vertices) },
-        &format!("{} vertices", path),
-        vk::BufferUsageFlags::VERTEX_BUFFER,
-        init_resources,
-    )?;
-
-    let indices = ash_abstractions::Buffer::new(
-        unsafe { cast_slice(&indices) },
-        &format!("{} indices", path),
-        vk::BufferUsageFlags::INDEX_BUFFER,
-        init_resources,
-    )?;
-
-    let alpha_clip_indices = if !alpha_clip_indices.is_empty() {
-        let buffer = ash_abstractions::Buffer::new(
-            unsafe { cast_slice(&alpha_clip_indices) },
-            &format!("{} alpha clip indices", path),
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            init_resources,
-        )?;
-
-        Some((buffer, alpha_clip_indices.len() as u32))
-    } else {
-        None
-    };
-
-    Ok((vertices, indices, num_indices, alpha_clip_indices))
+    Ok((opaque_slice, alpha_clip_slice))
 }
 
 fn load_texture_from_gltf(
     image: &gltf::image::Data,
     srgb: bool,
-    label: &str,
+    name: &str,
     init_resources: &mut ash_abstractions::InitResources,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
 ) -> anyhow::Result<ash_abstractions::Image> {
     let format = match (image.format, srgb) {
         (gltf::image::Format::R8G8B8A8, true) => vk::Format::R8G8B8A8_SRGB,
         (gltf::image::Format::R8G8B8A8, false) => vk::Format::R8G8B8A8_UNORM,
-        (gltf::image::Format::R8G8B8, true) => vk::Format::R8G8B8_SRGB,
-        (gltf::image::Format::R8G8B8, false) => vk::Format::R8G8B8_UNORM,
         format => panic!("unsupported format: {:?}", format),
     };
 
-    let (image, staging_buffer) = ash_abstractions::create_image_from_bytes(
-        &image.pixels,
-        vk::Extent3D {
-            width: image.width,
-            height: image.height,
-            depth: 1,
+    let mip_levels = (image.width.min(image.height) as f32).log2() as u32;
+
+    let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
+        &ash_abstractions::LoadImageDescriptor {
+            bytes: &image.pixels,
+            extent: vk::Extent3D {
+                width: image.width,
+                height: image.height,
+                depth: 1,
+            },
+            view_ty: vk::ImageViewType::TYPE_2D,
+            format,
+            name,
+            next_accesses: &[
+                vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+            ],
+            next_layout: vk_sync::ImageLayout::Optimal,
+            mip_levels,
         },
-        vk::ImageViewType::TYPE_2D,
-        format,
-        label,
         init_resources,
-        &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
-        vk_sync::ImageLayout::Optimal,
     )?;
 
     buffers_to_cleanup.push(staging_buffer);
@@ -1418,19 +1484,13 @@ unsafe fn bytes_of<T>(reference: &T) -> &[u8] {
     std::slice::from_raw_parts(reference as *const T as *const u8, std::mem::size_of::<T>())
 }
 
+#[derive(Default)]
 pub struct ImageManager {
     images: Vec<ash_abstractions::Image>,
     image_infos: Vec<vk::DescriptorImageInfo>,
 }
 
 impl ImageManager {
-    pub fn new(device: &ash::Device) -> anyhow::Result<Self> {
-        Ok(Self {
-            images: Default::default(),
-            image_infos: Default::default(),
-        })
-    }
-
     pub fn push_image(&mut self, image: ash_abstractions::Image) -> u32 {
         let index = self.images.len() as u32;
 

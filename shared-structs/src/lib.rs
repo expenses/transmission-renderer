@@ -22,10 +22,14 @@ pub struct PointLight {
 }
 
 pub struct MaterialInfo {
-    pub diffuse_texture: u32,
+    pub diffuse_texture: i32,
     pub metallic_roughness_texture: i32,
     pub normal_map_texture: i32,
     pub emissive_texture: i32,
-    pub fallback_metallic_factor: f32,
-    pub fallback_roughness_factor: f32,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub alpha_clipping_cutoff: f32,
+    pub diffuse_factor: Vec4,
+    pub emissive_factor: Vec3A,
+    pub normal_map_scale: f32,
 }
