@@ -131,7 +131,7 @@ fn main() -> anyhow::Result<()> {
 
     let render_passes = RenderPasses::new(&device, surface_format.format)?;
 
-    let max_images = 196;
+    let max_images = 195;
 
     let lights_dsl = unsafe {
         device.create_descriptor_set_layout(
@@ -159,6 +159,11 @@ fn main() -> anyhow::Result<()> {
                 *vk::DescriptorSetLayoutBinding::builder()
                     .binding(4)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                *vk::DescriptorSetLayoutBinding::builder()
+                    .binding(5)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT),
             ]),
@@ -229,8 +234,18 @@ fn main() -> anyhow::Result<()> {
 
     let mut materials = Vec::new();
 
-    let (model_vertices, model_indices, model_num_indices) = load_gltf(
+    let (model_vertices, model_indices, model_num_indices, model_alpha_clip_indices) = load_gltf(
         &filename,
+        &mut init_resources,
+        &mut image_manager,
+        &mut buffers_to_cleanup,
+        &mut materials,
+    )?;
+
+    let filename2 = std::env::args().nth(2).unwrap();
+
+    let (model2_vertices, model2_indices, model2_num_indices, _) = load_gltf(
+        &filename2,
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -267,9 +282,9 @@ fn main() -> anyhow::Result<()> {
     let instance_buffer = ash_abstractions::Buffer::new(
         unsafe {
             cast_slice(&[Instance {
-                translation: Vec3::new(0.0, 500.0, 0.0),
-                rotation: Mat3::from_rotation_y(1.0) * Mat3::from_rotation_x(2.0),
-                scale: 0.1,
+                translation: Vec3::new(0.0, 250.0, 0.0),
+                rotation: Mat3::from_rotation_y(0.0) * Mat3::from_rotation_x(0.0),
+                scale: 100.0,
             }])
         },
         "instance",
@@ -286,6 +301,18 @@ fn main() -> anyhow::Result<()> {
             ))
         },
         "tonemapping params",
+        vk::BufferUsageFlags::UNIFORM_BUFFER,
+        &mut init_resources,
+    )?;
+
+    let sun_uniform_buffer = ash_abstractions::Buffer::new(
+        unsafe {
+            bytes_of(&shared_structs::SunUniform {
+                dir: Vec3::new(1.0, 2.0, 1.0).normalize().into(),
+                intensity: Vec3::splat(1.5).into(),
+            })
+        },
+        "sun uniform",
         vk::BufferUsageFlags::UNIFORM_BUFFER,
         &mut init_resources,
     )?;
@@ -362,17 +389,16 @@ fn main() -> anyhow::Result<()> {
         0.1,
     );
 
-    let num_tiles = UVec2::splat(16);
+    let num_tiles = UVec2::new(12, 8);
 
     let mut push_constants = shared_structs::PushConstants {
         // Updated every frame.
         proj_view: Default::default(),
         view_position: Default::default(),
-        sun_dir: Vec3::new(1.0, 10.0, 1.0).normalize().into(),
-        sun_intensity: Vec3::ONE.into(),
         num_tiles,
         tile_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
             / num_tiles.as_vec2(),
+        debug_froxels: 0,
     };
 
     let descriptor_pool = unsafe {
@@ -384,7 +410,7 @@ fn main() -> anyhow::Result<()> {
                         .descriptor_count(2),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                        .descriptor_count(1),
+                        .descriptor_count(2),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::SAMPLED_IMAGE)
                         .descriptor_count(max_images),
@@ -446,6 +472,13 @@ fn main() -> anyhow::Result<()> {
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(model_materials.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(lights_ds)
+                    .dst_binding(5)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(sun_uniform_buffer.buffer)
                         .range(vk::WHOLE_SIZE)]),
             ],
             &[],
@@ -707,12 +740,6 @@ fn main() -> anyhow::Result<()> {
                         device.cmd_set_scissor(command_buffer, 0, &[area]);
                         device.cmd_set_viewport(command_buffer, 0, &[viewport]);
 
-                        device.cmd_bind_pipeline(
-                            command_buffer,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            pipelines.grass,
-                        );
-
                         device.cmd_bind_descriptor_sets(
                             command_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
@@ -720,6 +747,20 @@ fn main() -> anyhow::Result<()> {
                             0,
                             &[lights_ds],
                             &[],
+                        );
+
+                        device.cmd_push_constants(
+                            command_buffer,
+                            pipelines.pipeline_layout,
+                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                            0,
+                            bytes_of(&push_constants),
+                        );
+
+                        device.cmd_bind_pipeline(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.normal,
                         );
 
                         device.cmd_bind_vertex_buffers(
@@ -736,15 +777,24 @@ fn main() -> anyhow::Result<()> {
                             vk::IndexType::UINT32,
                         );
 
-                        device.cmd_push_constants(
-                            command_buffer,
-                            pipelines.pipeline_layout,
-                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                            0,
-                            bytes_of(&push_constants),
-                        );
-
                         device.cmd_draw_indexed(command_buffer, model_num_indices, 1, 0, 0, 0);
+
+                        if let Some((alpha_clip_indices, num_alpha_clip_indices)) = model_alpha_clip_indices.as_ref() {
+                            device.cmd_bind_pipeline(
+                                command_buffer,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                pipelines.normal_alpha_clip,
+                            );
+
+                            device.cmd_bind_index_buffer(
+                                command_buffer,
+                                alpha_clip_indices.buffer,
+                                0,
+                                vk::IndexType::UINT32,
+                            );
+
+                            device.cmd_draw_indexed(command_buffer, *num_alpha_clip_indices, 1, 0, 0, 0);
+                        }
 
                         device.cmd_bind_pipeline(
                             command_buffer,
@@ -754,10 +804,16 @@ fn main() -> anyhow::Result<()> {
                         device.cmd_bind_vertex_buffers(
                             command_buffer,
                             0,
-                            &[model_vertices.buffer, instance_buffer.buffer],
+                            &[model2_vertices.buffer, instance_buffer.buffer],
                             &[0, 0],
                         );
-                        device.cmd_draw_indexed(command_buffer, model_num_indices, 1, 0, 0, 0);
+                        device.cmd_bind_index_buffer(
+                            command_buffer,
+                            model2_indices.buffer,
+                            0,
+                            vk::IndexType::UINT32,
+                        );
+                        device.cmd_draw_indexed(command_buffer, model2_num_indices, 1, 0, 0, 0);
 
                         device.cmd_end_render_pass(command_buffer);
 
@@ -795,6 +851,10 @@ fn main() -> anyhow::Result<()> {
                         tonemapping_params_buffer.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         model_materials.cleanup(&device, &mut allocator)?;
+                        instance_buffer.cleanup(&device, &mut allocator)?;
+                        sun_uniform_buffer.cleanup(&device, &mut allocator)?;
+                        model2_vertices.cleanup(&device, &mut allocator)?;
+                        model2_indices.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -845,7 +905,8 @@ struct KeyboardState {
 }
 
 struct Pipelines {
-    grass: vk::Pipeline,
+    normal: vk::Pipeline,
+    normal_alpha_clip: vk::Pipeline,
     instanced: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
 }
@@ -860,6 +921,7 @@ impl Pipelines {
         let vertex_entry_point = CString::new("vertex")?;
         let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
         let fragment_entry_point = CString::new("fragment")?;
+        let fragment_alpha_clip_entry_point = CString::new("fragment_alpha_clip")?;
 
         let module =
             ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), &device)?;
@@ -873,6 +935,11 @@ impl Pipelines {
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .name(&fragment_entry_point);
+
+        let fragment_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .name(&fragment_alpha_clip_entry_point);
 
         let vertex_instanced_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
@@ -972,18 +1039,32 @@ impl Pipelines {
             0,
         );
 
+        let normal_alpha_clip_stages = &[*vertex_stage, *fragment_alpha_clip_stage];
+
+        let normal_alpha_clip_pipeline_desc = baked.as_pipeline_create_info(
+            normal_alpha_clip_stages,
+            pipeline_layout,
+            render_passes.draw,
+            0,
+        );
+
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
-                &[*graphics_pipeline_desc, *instanced_pipeline_desc],
+                &[
+                    *graphics_pipeline_desc,
+                    *normal_alpha_clip_pipeline_desc,
+                    *instanced_pipeline_desc,
+                ],
                 None,
             )
         }
         .map_err(|(_, err)| err)?;
 
         Ok(Self {
-            grass: pipelines[0],
-            instanced: pipelines[1],
+            normal: pipelines[0],
+            normal_alpha_clip: pipelines[1],
+            instanced: pipelines[2],
             pipeline_layout,
         })
     }
@@ -1126,15 +1207,29 @@ fn load_gltf(
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     materials: &mut Vec<shared_structs::MaterialInfo>,
-) -> anyhow::Result<(ash_abstractions::Buffer, ash_abstractions::Buffer, u32)> {
+) -> anyhow::Result<(
+    ash_abstractions::Buffer,
+    ash_abstractions::Buffer,
+    u32,
+    Option<(ash_abstractions::Buffer, u32)>,
+)> {
     let (gltf, buffers, images) = gltf::import(path)?;
 
     let mut indices = Vec::new();
     let mut vertices = Vec::new();
+    let mut alpha_clip_indices = Vec::new();
 
     for mesh in gltf.meshes() {
         for primitive in mesh.primitives() {
-            let material_id = primitive.material().index().unwrap_or(0) + materials.len();
+            let material = primitive.material();
+
+            let indices = match material.alpha_mode() {
+                gltf::material::AlphaMode::Opaque => &mut indices,
+                gltf::material::AlphaMode::Mask => &mut alpha_clip_indices,
+                _ => panic!(),
+            };
+
+            let material_id = material.index().unwrap_or(0) + materials.len();
 
             let reader = primitive.reader(|i| Some(&buffers[i.index()]));
 
@@ -1169,22 +1264,28 @@ fn load_gltf(
         let diffuse_texture = load_texture_from_gltf(
             diffuse_texture,
             true,
-            "diffuse",
+            &format!("{} diffuse {}", path, i),
             init_resources,
             buffers_to_cleanup,
         )?;
 
-        let metallic_roughness_texture = pbr.base_color_texture().unwrap();
+        let metallic_roughness_texture = match pbr.metallic_roughness_texture() {
+            Some(metallic_roughness_texture) => {
+                let metallic_roughness_texture =
+                    &images[metallic_roughness_texture.texture().index()];
 
-        let metallic_roughness_texture = &images[metallic_roughness_texture.texture().index()];
+                let metallic_roughness_texture = load_texture_from_gltf(
+                    metallic_roughness_texture,
+                    false,
+                    &format!("{} metallic roughness {}", path, i),
+                    init_resources,
+                    buffers_to_cleanup,
+                )?;
 
-        let metallic_roughness_texture = load_texture_from_gltf(
-            metallic_roughness_texture,
-            false,
-            "metallic roughness",
-            init_resources,
-            buffers_to_cleanup,
-        )?;
+                image_manager.push_image(metallic_roughness_texture) as i32
+            }
+            None => -1,
+        };
 
         let normal_map_texture = match material.normal_texture() {
             Some(normal_map_texture) => {
@@ -1193,7 +1294,7 @@ fn load_gltf(
                 let normal_map_texture = load_texture_from_gltf(
                     normal_map_texture,
                     false,
-                    "normal map",
+                    &format!("{} normal map {}", path, i),
                     init_resources,
                     buffers_to_cleanup,
                 )?;
@@ -1203,10 +1304,30 @@ fn load_gltf(
             None => -1,
         };
 
+        let emissive_texture = match material.emissive_texture() {
+            Some(emissive_texture) => {
+                let emissive_texture = &images[emissive_texture.texture().index()];
+
+                let emissive_texture = load_texture_from_gltf(
+                    emissive_texture,
+                    true,
+                    &format!("{} emissive {}", path, i),
+                    init_resources,
+                    buffers_to_cleanup,
+                )?;
+
+                image_manager.push_image(emissive_texture) as i32
+            }
+            None => -1,
+        };
+
         materials.push(shared_structs::MaterialInfo {
             diffuse_texture: image_manager.push_image(diffuse_texture),
-            metallic_roughness_texture: image_manager.push_image(metallic_roughness_texture),
+            metallic_roughness_texture,
             normal_map_texture,
+            emissive_texture,
+            fallback_metallic_factor: pbr.metallic_factor(),
+            fallback_roughness_factor: pbr.roughness_factor(),
         });
     }
 
@@ -1214,19 +1335,32 @@ fn load_gltf(
 
     let vertices = ash_abstractions::Buffer::new(
         unsafe { cast_slice(&vertices) },
-        "vertices",
+        &format!("{} vertices", path),
         vk::BufferUsageFlags::VERTEX_BUFFER,
         init_resources,
     )?;
 
     let indices = ash_abstractions::Buffer::new(
         unsafe { cast_slice(&indices) },
-        "indices",
+        &format!("{} indices", path),
         vk::BufferUsageFlags::INDEX_BUFFER,
         init_resources,
     )?;
 
-    Ok((vertices, indices, num_indices))
+    let alpha_clip_indices = if !alpha_clip_indices.is_empty() {
+        let buffer = ash_abstractions::Buffer::new(
+            unsafe { cast_slice(&alpha_clip_indices) },
+            &format!("{} alpha clip indices", path),
+            vk::BufferUsageFlags::INDEX_BUFFER,
+            init_resources,
+        )?;
+
+        Some((buffer, alpha_clip_indices.len() as u32))
+    } else {
+        None
+    };
+
+    Ok((vertices, indices, num_indices, alpha_clip_indices))
 }
 
 fn load_texture_from_gltf(

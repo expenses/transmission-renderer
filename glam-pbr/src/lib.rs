@@ -211,10 +211,10 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
     let actual_roughness = perceptual_roughness.as_actual_roughness();
 
     let halfway = Halfway::new(&view, &light);
-    let normal_dot_halfway = Dot::new(&normal, &halfway, 0.0);
-    let light_dot_halfway = Dot::new(&light, &halfway, 0.0);
-    let normal_dot_view = Dot::new(&normal, &view, 0.0);
-    let normal_dot_light = Dot::new(&normal, &light, 0.0);
+    let normal_dot_halfway = Dot::new(&normal, &halfway, core::f32::EPSILON);
+    let light_dot_halfway = Dot::new(&light, &halfway, core::f32::EPSILON);
+    let normal_dot_view = Dot::new(&normal, &view, core::f32::EPSILON);
+    let normal_dot_light = Dot::new(&normal, &light, core::f32::EPSILON);
 
     let f0 = compute_f0(metallic, perceptual_dielectric_reflectance, diffuse_colour);
     let f90 = compute_f90(light_dot_halfway, actual_roughness);

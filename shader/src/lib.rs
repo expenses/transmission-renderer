@@ -12,9 +12,9 @@ extern crate spirv_std;
 use glam_pbr::{
     basic_brdf, BasicBrdfParams, Light, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, PointLight, PushConstants};
+use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
 use spirv_std::{
-    glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
+    glam::{const_vec3, Mat3, UVec2, Vec2, Vec3, Vec4},
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
@@ -58,44 +58,145 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 5, uniform)] sun_uniform: &SunUniform,
     output: &mut Vec4,
 ) {
-    let cluster_id = {
-        let cluster_xy =
-            (Vec2::new(frag_coord.x, frag_coord.y) / push_constants.tile_size_in_pixels).as_uvec2();
-        cluster_xy.y * push_constants.num_tiles.x + cluster_xy.x
-    };
-
     let material = &materials[material_id as usize];
 
     let diffuse = sample_texture(textures, sampler, material.diffuse_texture, uv);
-    let metallic_roughness = sample_texture(textures, sampler, material.diffuse_texture, uv);
+
+    fragment_inner(
+        diffuse,
+        material,
+        position,
+        normal,
+        uv,
+        push_constants,
+        frag_coord,
+        point_lights,
+        tonemapper_params,
+        textures,
+        sampler,
+        sun_uniform,
+        output,
+    );
+}
+
+#[spirv(fragment)]
+pub fn fragment_alpha_clip(
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    #[spirv(flat)] material_id: u32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(frag_coord)] frag_coord: Vec4,
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 0, binding = 1, uniform)] tonemapper_params: &BakedLottesTonemapperParams,
+    #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 5, uniform)] sun_uniform: &SunUniform,
+    output: &mut Vec4,
+) {
+    let material = &materials[material_id as usize];
+
+    let diffuse = sample_texture(textures, sampler, material.diffuse_texture, uv);
+
+    if diffuse.w < 0.5 {
+        spirv_std::arch::kill();
+    }
+
+    fragment_inner(
+        diffuse,
+        material,
+        position,
+        normal,
+        uv,
+        push_constants,
+        frag_coord,
+        point_lights,
+        tonemapper_params,
+        textures,
+        sampler,
+        sun_uniform,
+        output,
+    );
+}
+
+fn fragment_inner(
+    diffuse: Vec4,
+    material: &MaterialInfo,
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    push_constants: &PushConstants,
+    frag_coord: Vec4,
+    point_lights: &[PointLight],
+    tonemapper_params: &BakedLottesTonemapperParams,
+    textures: &Textures,
+    sampler: &Sampler,
+    sun_uniform: &SunUniform,
+    output: &mut Vec4,
+) {
+    let cluster_id = {
+        let cluster_z = ((frag_coord.z * 16000.0) % 16.0) as u32;
+
+        let cluster_xy =
+            (Vec2::new(frag_coord.x, frag_coord.y) / push_constants.tile_size_in_pixels).as_uvec2();
+        cluster_z * push_constants.num_tiles.x * push_constants.num_tiles.y
+            + cluster_xy.y * push_constants.num_tiles.x
+            + cluster_xy.x
+    };
+
+    let (metallic, roughness) = if material.metallic_roughness_texture != -1 {
+        let sample = sample_texture(
+            textures,
+            sampler,
+            material.metallic_roughness_texture as u32,
+            uv,
+        );
+
+        // Switched!
+        (sample.z, sample.y)
+    } else {
+        (
+            material.fallback_metallic_factor,
+            material.fallback_roughness_factor,
+        )
+    };
 
     let mut normal = normal.normalize();
+
+    let view_vector = Vec3::from(push_constants.view_position) - position;
 
     if material.normal_map_texture != -1 {
         let map_normal =
             sample_texture(textures, sampler, material.normal_map_texture as u32, uv).truncate();
         let map_normal = map_normal * 2.0 - 1.0;
 
-        normal = (compute_cotangent_frame(normal, position, uv) * map_normal).normalize();
+        normal = (compute_cotangent_frame(normal, -view_vector, uv) * map_normal).normalize();
     };
 
-    let view = View((Vec3::from(push_constants.view_position) - position).normalize());
+    let view = View(view_vector.normalize());
     let normal = Normal(normal);
 
     let material_params = MaterialParams {
         diffuse_colour: diffuse.truncate(),
-        metallic: metallic_roughness.y,
-        perceptual_roughness: PerceptualRoughness(metallic_roughness.z),
+        metallic,
+        perceptual_roughness: PerceptualRoughness(roughness),
         perceptual_dielectric_reflectance: Default::default(),
     };
 
     let mut colour = Vec3::ZERO;
 
+    if material.emissive_texture != -1 {
+        colour +=
+            sample_texture(textures, sampler, material.emissive_texture as u32, uv).truncate();
+    }
+
     colour += basic_brdf(BasicBrdfParams {
-        light: Light(push_constants.sun_dir.into()),
-        light_intensity: push_constants.sun_intensity.into(),
+        light: Light(sun_uniform.dir.into()),
+        light_intensity: sun_uniform.intensity,
         normal,
         view,
         material_params,
@@ -127,9 +228,15 @@ pub fn fragment(
         i += 1;
     }
 
-    *output = LottesTonemapper
-        .tonemap(colour, *tonemapper_params)
-        .extend(diffuse.w);
+    let mut tonemapped_colour = LottesTonemapper.tonemap(colour, *tonemapper_params);
+
+    if push_constants.debug_froxels != 0 {
+        let debug_colour = debug_colour_for_id(cluster_id);
+
+        tonemapped_colour = tonemapped_colour * debug_colour + debug_colour * 0.01;
+    }
+
+    *output = tonemapped_colour.extend(diffuse.w);
 }
 
 #[spirv(vertex)]
