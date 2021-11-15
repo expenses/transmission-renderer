@@ -106,47 +106,18 @@ pub fn v_smith_ggx_correlated(
 
 // Fresnel
 
-pub fn fresnel_schlick(light_dot_halfway: Dot<Light, Halfway>, f0: Vec3, f90: Vec3) -> Vec3 {
-    f0 + (f90 - f0) * (1.0 - light_dot_halfway.value).powf(5.0)
-}
-
-// Diffuse
-
-pub const fn fd_lambert() -> f32 {
-    FRAC_1_PI
-}
-
-// Disney diffuse (more fun!)
-
-/// Compute f90 according to burley.
-pub fn compute_f90(light_dot_halfway: Dot<Light, Halfway>, roughness: ActualRoughness) -> f32 {
-    let loh = light_dot_halfway.value;
-
-    0.5 + 2.0 * roughness.0 * loh * loh
-}
-
-pub fn fd_burley(
-    normal_dot_view: Dot<Normal, View>,
-    normal_dot_light: Dot<Normal, Light>,
-    light_dot_halfway: Dot<Light, Halfway>,
-    roughness: ActualRoughness,
-) -> f32 {
-    // Internal untyped fresnel function for burley.
-    fn fresnel_schlick(u: f32, f0: f32, f90: f32) -> f32 {
-        f0 + (f90 - f0) * (1.0 - u).powf(5.0)
-    }
-
-    let nov = normal_dot_view.value;
-    let nol = normal_dot_light.value;
-
-    let f90 = compute_f90(light_dot_halfway, roughness);
-    let light_scatter = fresnel_schlick(nol, 1.0, f90);
-    let view_scatter = fresnel_schlick(nov, 1.0, f90);
-    light_scatter * view_scatter * FRAC_1_PI
+pub fn fresnel_schlick(view_dot_halfway: Dot<View, Halfway>, f0: Vec3, f90: Vec3) -> Vec3 {
+    f0 + (f90 - f0) * (1.0 - view_dot_halfway.value).powf(5.0)
 }
 
 #[derive(Copy, Clone)]
 pub struct ActualRoughness(f32);
+
+impl ActualRoughness {
+    fn apply_ior(self, ior: IndexOfRefraction) -> ActualRoughness {
+        ActualRoughness(self.0 * clamp(ior.0 * 2.0 - 2.0, 0.0, 1.0))
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct PerceptualRoughness(pub f32);
@@ -170,23 +141,75 @@ pub struct MaterialParams {
     pub diffuse_colour: Vec3,
     pub metallic: f32,
     pub perceptual_roughness: PerceptualRoughness,
-    pub perceptual_dielectric_reflectance: PerceptualDielectricReflectance,
+    pub index_of_refraction: IndexOfRefraction,
 }
 
 #[derive(Clone, Copy)]
-pub struct PerceptualDielectricReflectance(pub f32);
+pub struct IndexOfRefraction(pub f32);
 
-/// Corresponds a f0 of 4% reflectance on non-metallic (dielectric) materials (0.16 * 0.5 * 0.5).
-impl Default for PerceptualDielectricReflectance {
+/// Corresponds a f0 of 4% reflectance on dielectrics ((1.0 - ior) / (1.0 + ior)) ^ 2.
+impl Default for IndexOfRefraction {
     fn default() -> Self {
-        Self(0.5)
+        Self(1.5)
     }
 }
 
-impl PerceptualDielectricReflectance {
+impl IndexOfRefraction {
     pub fn to_dielectric_f0(&self) -> f32 {
-        0.16 * self.0 * self.0
+        let root = (1.0 - self.0) / (1.0 + self.0);
+        root * root
     }
+}
+
+/*
+fn specular_btdf(
+    actual_roughness: ActualRoughness,
+    index_of_refraction: IndexOfRefraction,
+    normal: Normal,
+    view: View,
+    light: Light,
+    base: Vec3,
+    f0: Vec3,
+    f90: Vec3,
+) -> Vec3 {
+    let transmission_roughness = actual_roughness.apply_ior(index_of_refraction);
+
+    let light_mirrored = Light((light.0 * 2.0 * normal.0 * (-light.0).dot(normal.0)).normalize());
+
+    let halfway = Halfway::new(&view, &light_mirrored);
+    let normal_dot_halfway = Dot::new(&normal, &halfway);
+    let view_dot_halfway = Dot::new(&view, &halfway);
+    let normal_dot_view = Dot::new(&normal, &view);
+    let normal_dot_light_mirrored = Dot::new(&normal, &light_mirrored);
+
+    let distribution = d_ggx(normal_dot_halfway, transmission_roughness);
+
+    let geometric_shadowing =
+        v_smith_ggx_correlated(normal_dot_view, normal_dot_light_mirrored, transmission_roughness);
+
+    let fresnel = fresnel_schlick(view_dot_halfway, f0, f90);
+
+    (1.0 - fresnel) * base * distribution * geometric_shadowing
+}
+*/
+
+fn diffuse_brdf(base: Vec3, fresnel: Vec3) -> Vec3 {
+    (1.0 - fresnel) * FRAC_1_PI * base
+}
+
+fn specular_brdf(
+    normal_dot_view: Dot<Normal, View>,
+    normal_dot_light: Dot<Normal, Light>,
+    normal_dot_halfway: Dot<Normal, Halfway>,
+    actual_roughness: ActualRoughness,
+    fresnel: Vec3,
+) -> Vec3 {
+    let distribution_function = d_ggx(normal_dot_halfway, actual_roughness);
+
+    let geometric_shadowing =
+        v_smith_ggx_correlated(normal_dot_view, normal_dot_light, actual_roughness);
+
+    (distribution_function * geometric_shadowing) * fresnel
 }
 
 pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
@@ -200,7 +223,7 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
                 diffuse_colour,
                 metallic,
                 perceptual_roughness,
-                perceptual_dielectric_reflectance,
+                index_of_refraction,
             },
     } = params;
 
@@ -208,45 +231,49 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
 
     let halfway = Halfway::new(&view, &light);
     let normal_dot_halfway = Dot::new(&normal, &halfway);
-    let light_dot_halfway = Dot::new(&light, &halfway);
     let normal_dot_view = Dot::new(&normal, &view);
     let normal_dot_light = Dot::new(&normal, &light);
+    let view_dot_halfway = Dot::new(&view, &halfway);
 
-    let f0 = compute_f0(metallic, perceptual_dielectric_reflectance, diffuse_colour);
-    let f90 = compute_f90(light_dot_halfway, actual_roughness);
-    let fresnel = fresnel_schlick(light_dot_halfway, f0, Vec3::splat(f90));
+    let c_diff = diffuse_colour.lerp(Vec3::ZERO, metallic);
+    let f0 = {
+        Vec3::splat(index_of_refraction.to_dielectric_f0()).lerp(diffuse_colour, metallic)
+    };
 
-    let distribution_function = d_ggx(normal_dot_halfway, actual_roughness);
+    let fresnel = fresnel_schlick(view_dot_halfway, f0, Vec3::splat(1.0));
 
-    let geometric_shadowing =
-        v_smith_ggx_correlated(normal_dot_view, normal_dot_light, actual_roughness);
+    let material = diffuse_brdf(c_diff, fresnel) + specular_brdf(normal_dot_view, normal_dot_light, normal_dot_halfway, actual_roughness, fresnel);
 
-    // Specular BRDF factor.
-    let specular_brdf_factor = (distribution_function * geometric_shadowing) * fresnel;
-
-    // Diffuse BRDF factor.
-    let diffuse_brdf_factor = diffuse_colour
-        * fd_burley(
-            normal_dot_view,
-            normal_dot_light,
-            light_dot_halfway,
-            actual_roughness,
-        );
-
-    let combined_factor = diffuse_brdf_factor + specular_brdf_factor;
-
-    light_intensity * normal_dot_light.value * combined_factor
+    light_intensity * normal_dot_light.value * material
 }
 
 pub fn compute_f0(
     metallic: f32,
-    perceptual_dielectric_reflectance: PerceptualDielectricReflectance,
+    index_of_refraction: IndexOfRefraction,
     diffuse_colour: Vec3,
 ) -> Vec3 {
     // from:
     // https://google.github.io/filament/Filament.md.html#materialsystem/parameterization/remapping
-    let dielectric_f0 = perceptual_dielectric_reflectance.to_dielectric_f0();
+    let dielectric_f0 = index_of_refraction.to_dielectric_f0();
     let metallic_f0 = diffuse_colour;
 
     (1.0 - metallic) * dielectric_f0 + metallic * metallic_f0
+}
+
+#[test]
+fn test_i_havent_broken_anything() {
+    let params = BasicBrdfParams {
+        normal: Normal(Vec3::Y),
+        light: Light(Vec3::new(1.0, 1.0, 0.0).normalize()),
+        light_intensity: Vec3::ONE,
+        view: View(Vec3::new(0.0, 1.0, 1.0).normalize()),
+        material_params: MaterialParams {
+            diffuse_colour: Vec3::ONE,
+            metallic: 0.25,
+            perceptual_roughness: PerceptualRoughness(0.25),
+            index_of_refraction: Default::default()
+        }
+    };
+
+    assert_eq!(basic_brdf(params), Vec3::splat(0.22577369));
 }

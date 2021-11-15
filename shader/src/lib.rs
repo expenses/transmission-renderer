@@ -10,13 +10,13 @@
 extern crate spirv_std;
 
 use glam_pbr::{
-    basic_brdf, BasicBrdfParams, Light, MaterialParams, Normal, PerceptualRoughness, View,
+    basic_brdf, BasicBrdfParams, Light, MaterialParams, Normal, PerceptualRoughness, View, IndexOfRefraction
 };
 use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
 use spirv_std::{
     glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
     num_traits::Float,
-    Image, RuntimeArray, Sampler,
+    Image, RuntimeArray, Sampler, image::SampledImage,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -40,7 +40,7 @@ fn compute_cotangent_frame(normal: Vec3, position: Vec3, uv: Vec2) -> Mat3 {
 }
 
 #[spirv(fragment)]
-pub fn fragment(
+pub fn fragment_transmission(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
@@ -48,11 +48,10 @@ pub fn fragment(
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1, uniform)] tonemapper_params: &BakedLottesTonemapperParams,
-    #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 5, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
     output: &mut Vec4,
 ) {
     let material = &materials[material_id as usize];
@@ -65,8 +64,14 @@ pub fn fragment(
 
     let mut diffuse = material.diffuse_factor;
 
-    if material.diffuse_texture != -1 {
-        diffuse *= texture_sampler.sample(material.diffuse_texture as u32)
+    if material.textures.diffuse != -1 {
+        diffuse *= texture_sampler.sample(material.textures.diffuse as u32);
+    }
+
+    let mut transmission = material.transmission_factor;
+
+    if material.textures.transmission != -1 {
+        transmission *= texture_sampler.sample(material.textures.transmission as u32).x;
     }
 
     fragment_inner(
@@ -78,7 +83,53 @@ pub fn fragment(
         push_constants,
         frag_coord,
         point_lights,
-        tonemapper_params,
+        texture_sampler,
+        sun_uniform,
+        output,
+    );
+
+    output.w = 1.0 - transmission;
+}
+
+
+#[spirv(fragment)]
+pub fn fragment(
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    #[spirv(flat)] material_id: u32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(frag_coord)] frag_coord: Vec4,
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
+    output: &mut Vec4,
+) {
+    let material = &materials[material_id as usize];
+
+    let texture_sampler = TextureSampler {
+        uv,
+        textures,
+        sampler: *sampler,
+    };
+
+    let mut diffuse = material.diffuse_factor;
+
+    if material.textures.diffuse != -1 {
+        diffuse *= texture_sampler.sample(material.textures.diffuse as u32)
+    }
+
+    fragment_inner(
+        diffuse,
+        material,
+        position,
+        normal,
+        uv,
+        push_constants,
+        frag_coord,
+        point_lights,
         texture_sampler,
         sun_uniform,
         output,
@@ -107,7 +158,6 @@ fn fragment_inner(
     push_constants: &PushConstants,
     frag_coord: Vec4,
     point_lights: &[PointLight],
-    tonemapper_params: &BakedLottesTonemapperParams,
     texture_sampler: TextureSampler,
     sun_uniform: &SunUniform,
     output: &mut Vec4,
@@ -125,8 +175,8 @@ fn fragment_inner(
     let mut metallic = material.metallic_factor;
     let mut roughness = material.roughness_factor;
 
-    if material.metallic_roughness_texture != -1 {
-        let sample = texture_sampler.sample(material.metallic_roughness_texture as u32);
+    if material.textures.metallic_roughness != -1 {
+        let sample = texture_sampler.sample(material.textures.metallic_roughness as u32);
 
         // These two are switched!
         metallic *= sample.z;
@@ -137,9 +187,9 @@ fn fragment_inner(
 
     let view_vector = Vec3::from(push_constants.view_position) - position;
 
-    if material.normal_map_texture != -1 {
+    if material.textures.normal_map != -1 {
         let map_normal = texture_sampler
-            .sample(material.normal_map_texture as u32)
+            .sample(material.textures.normal_map as u32)
             .truncate();
         let map_normal = map_normal * 255.0 / 127.0 - 128.0 / 127.0;
 
@@ -153,16 +203,16 @@ fn fragment_inner(
         diffuse_colour: diffuse.truncate(),
         metallic,
         perceptual_roughness: PerceptualRoughness(roughness),
-        perceptual_dielectric_reflectance: Default::default(),
+        index_of_refraction: IndexOfRefraction(material.index_of_refraction),
     };
 
     let mut colour = Vec3::ZERO;
 
     let mut emission = Vec3::from(material.emissive_factor);
 
-    if material.emissive_texture != -1 {
+    if material.textures.emissive != -1 {
         emission *= texture_sampler
-            .sample(material.emissive_texture as u32)
+            .sample(material.textures.emissive as u32)
             .truncate();
     }
 
@@ -202,24 +252,31 @@ fn fragment_inner(
         i += 1;
     }
 
-    let mut tonemapped_colour = LottesTonemapper.tonemap(colour, *tonemapper_params);
+    // todo: should only be applied to ambient light.
+    /*
+    if material.textures.occlusion != -1 {
+        let map_occlusion = texture_sampler.sample(material.textures.occlusion as u32).x;
+        let factor = 1.0 + material.occlusion_strength * (map_occlusion - 1.0);
+        colour *= factor;
+    }
+    */
 
     if push_constants.debug_froxels != 0 {
         let debug_colour = debug_colour_for_id(cluster_id);
 
-        tonemapped_colour = tonemapped_colour * debug_colour + debug_colour * 0.01;
+        colour = colour * debug_colour + debug_colour * 0.01;
     }
 
-    *output = tonemapped_colour.extend(diffuse.w);
+    *output = colour.extend(diffuse.w);
 }
 
 #[spirv(fragment)]
 pub fn depth_pre_pass_alpha_clip(
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
-    #[spirv(descriptor_set = 0, binding = 2)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
 ) {
     let material = &materials[material_id as usize];
 
@@ -231,8 +288,8 @@ pub fn depth_pre_pass_alpha_clip(
 
     let mut diffuse = material.diffuse_factor;
 
-    if material.diffuse_texture != -1 {
-        diffuse *= texture_sampler.sample(material.diffuse_texture as u32)
+    if material.textures.diffuse != -1 {
+        diffuse *= texture_sampler.sample(material.textures.diffuse as u32)
     }
 
     if diffuse.w < material.alpha_clipping_cutoff {
@@ -331,6 +388,34 @@ const DEBUG_COLOURS: [Vec3; 13] = [
 
 fn debug_colour_for_id(id: u32) -> Vec3 {
     DEBUG_COLOURS[(id as usize % DEBUG_COLOURS.len())]
+}
+
+#[spirv(vertex)]
+pub fn fullscreen_tri(
+    #[spirv(vertex_index)] vert_idx: i32,
+    uv: &mut Vec2,
+    #[spirv(position)] builtin_pos: &mut Vec4,
+) {
+    *uv = Vec2::new(((vert_idx << 1) & 2) as f32, (vert_idx & 2) as f32);
+    let pos = 2.0 * *uv - Vec2::ONE;
+
+    *builtin_pos = Vec4::new(pos.x, pos.y, 0.0, 1.0);
+}
+
+#[spirv(fragment)]
+pub fn fragment_tonemap(
+    uv: Vec2,
+    #[spirv(descriptor_set = 0, binding = 0)] texture: &SampledImage<Image!(2D, type=f32, sampled)>,
+    #[spirv(push_constant)] params: &BakedLottesTonemapperParams,
+    output: &mut Vec4,
+) {
+    let sample: Vec4 = unsafe {
+        texture.sample(uv)
+    };
+
+    *output = LottesTonemapper
+        .tonemap(sample.truncate(), *params)
+        .extend(1.0);
 }
 
 // This is just lifted from

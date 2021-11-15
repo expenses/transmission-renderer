@@ -21,15 +21,26 @@ pub struct PointLight {
     pub colour_and_intensity: Vec4,
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+pub struct Textures {
+    pub diffuse: i32,
+    pub metallic_roughness: i32,
+    pub normal_map: i32,
+    pub emissive: i32,
+    pub occlusion: i32,
+    pub transmission: i32,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 pub struct MaterialInfo {
-    pub diffuse_texture: i32,
-    pub metallic_roughness_texture: i32,
-    pub normal_map_texture: i32,
-    pub emissive_texture: i32,
+    pub textures: Textures,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
     pub alpha_clipping_cutoff: f32,
     pub diffuse_factor: Vec4,
     pub emissive_factor: Vec3A,
     pub normal_map_scale: f32,
+    pub occlusion_strength: f32,
+    pub index_of_refraction: f32,
+    pub transmission_factor: f32,
 }

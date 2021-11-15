@@ -23,6 +23,9 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
     )
 }
 
+pub const DRAW_COMMAND_SIZE: usize = std::mem::size_of::<vk::DrawIndexedIndirectCommand>();
+pub const MAX_IMAGES: u32 = 195;
+
 fn main() -> anyhow::Result<()> {
     {
         use simplelog::*;
@@ -129,51 +132,17 @@ fn main() -> anyhow::Result<()> {
     };
 
     let render_passes = RenderPasses::new(&device, surface_format.format)?;
-
-    let max_images = 195;
-
-    let lights_dsl = unsafe {
-        device.create_descriptor_set_layout(
-            &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                *vk::DescriptorSetLayoutBinding::builder()
-                    .binding(0)
-                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                *vk::DescriptorSetLayoutBinding::builder()
-                    .binding(1)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                *vk::DescriptorSetLayoutBinding::builder()
-                    .binding(2)
-                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                    .descriptor_count(max_images)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                *vk::DescriptorSetLayoutBinding::builder()
-                    .binding(3)
-                    .descriptor_type(vk::DescriptorType::SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                *vk::DescriptorSetLayoutBinding::builder()
-                    .binding(4)
-                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                *vk::DescriptorSetLayoutBinding::builder()
-                    .binding(5)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-            ]),
-            None,
-        )
-    }?;
+    let descriptor_set_layouts = DescriptorSetLayouts::new(&device)?;
 
     let pipeline_cache =
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
-    let pipelines = Pipelines::new(&device, &render_passes, lights_dsl, pipeline_cache)?;
+    let pipelines = Pipelines::new(
+        &device,
+        &render_passes,
+        &descriptor_set_layouts,
+        pipeline_cache,
+    )?;
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
@@ -235,7 +204,7 @@ fn main() -> anyhow::Result<()> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
-    let (model_opaque_slice, model_alpha_clip_slice) = load_gltf(
+    let (model_opaque_slice, model_alpha_clip_slice, model_transmission_slice) = load_gltf(
         &filename,
         &mut init_resources,
         &mut image_manager,
@@ -247,7 +216,7 @@ fn main() -> anyhow::Result<()> {
 
     let filename2 = std::env::args().nth(2).unwrap();
 
-    let (model2_opaque_slice, model2_alpha_clip_slice) = load_gltf(
+    let (model2_opaque_slice, model2_alpha_clip_slice, model2_transmission_slice) = load_gltf(
         &filename2,
         &mut init_resources,
         &mut image_manager,
@@ -304,6 +273,28 @@ fn main() -> anyhow::Result<()> {
                     vertex_offset: 0,
                     first_instance: 0,
                 },
+                vk::DrawIndexedIndirectCommand {
+                    index_count: model2_alpha_clip_slice.count,
+                    instance_count: 1,
+                    first_index: model2_alpha_clip_slice.offset,
+                    vertex_offset: 0,
+                    first_instance: 1,
+                },
+                // Transmission draws
+                vk::DrawIndexedIndirectCommand {
+                    index_count: model_transmission_slice.count,
+                    instance_count: 1,
+                    first_index: model_transmission_slice.offset,
+                    vertex_offset: 0,
+                    first_instance: 0,
+                },
+                vk::DrawIndexedIndirectCommand {
+                    index_count: model2_transmission_slice.count,
+                    instance_count: 1,
+                    first_index: model2_transmission_slice.offset,
+                    vertex_offset: 0,
+                    first_instance: 1,
+                },
             ])
         },
         "draw indirect",
@@ -312,6 +303,8 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+    let mut hdr_framebuffer =
+        create_hdr_framebuffer(extent.width, extent.height, &mut init_resources)?;
 
     let lights_buffer = ash_abstractions::Buffer::new(
         unsafe {
@@ -351,18 +344,11 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
-    let tonemapping_params_buffer = ash_abstractions::Buffer::new(
-        unsafe {
-            bytes_of(&colstodian::tonemap::BakedLottesTonemapperParams::from(
-                colstodian::tonemap::LottesTonemapperParams {
-                    ..Default::default()
-                },
-            ))
+    let tonemapping_params = colstodian::tonemap::BakedLottesTonemapperParams::from(
+        colstodian::tonemap::LottesTonemapperParams {
+            ..Default::default()
         },
-        "tonemapping params",
-        vk::BufferUsageFlags::UNIFORM_BUFFER,
-        &mut init_resources,
-    )?;
+    );
 
     let sun_uniform_buffer = ash_abstractions::Buffer::new(
         unsafe {
@@ -395,7 +381,7 @@ fn main() -> anyhow::Result<()> {
         buffer.cleanup_and_drop(&device, &mut allocator)?;
     }
 
-    image_manager.fill_with_dummy_images_up_to(max_images as usize);
+    image_manager.fill_with_dummy_images_up_to(MAX_IMAGES as usize);
 
     // Swapchain
 
@@ -426,11 +412,14 @@ fn main() -> anyhow::Result<()> {
     let mut swapchain =
         ash_abstractions::Swapchain::new(&device, &swapchain_loader, swapchain_info)?;
 
-    let mut swapchain_image_framebuffers = create_swapchain_image_framebuffers(
+    let mut swapchain_image_framebuffers =
+        create_swapchain_image_framebuffers(&device, extent, &swapchain, &render_passes)?;
+
+    let mut draw_framebuffer = create_draw_framebuffer(
         &device,
         extent,
-        &swapchain,
         &render_passes,
+        &hdr_framebuffer,
         &depthbuffer,
     )?;
 
@@ -472,12 +461,15 @@ fn main() -> anyhow::Result<()> {
                         .descriptor_count(2),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                        .descriptor_count(max_images),
+                        .descriptor_count(MAX_IMAGES),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::SAMPLER)
                         .descriptor_count(1),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .descriptor_count(1),
                 ])
-                .max_sets(1),
+                .max_sets(2),
             None,
         )
     }?;
@@ -485,12 +477,16 @@ fn main() -> anyhow::Result<()> {
     let descriptor_sets = unsafe {
         device.allocate_descriptor_sets(
             &vk::DescriptorSetAllocateInfo::builder()
-                .set_layouts(&[lights_dsl])
+                .set_layouts(&[
+                    descriptor_set_layouts.main,
+                    descriptor_set_layouts.hdr_framebuffer,
+                ])
                 .descriptor_pool(descriptor_pool),
         )
     }?;
 
-    let lights_ds = descriptor_sets[0];
+    let main_ds = descriptor_sets[0];
+    let hdr_framebuffer_ds = descriptor_sets[1];
 
     let sampler = unsafe {
         device.create_sampler(
@@ -507,39 +503,40 @@ fn main() -> anyhow::Result<()> {
         device.update_descriptor_sets(
             &[
                 *vk::WriteDescriptorSet::builder()
-                    .dst_set(lights_ds)
+                    .dst_set(main_ds)
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(lights_buffer.buffer)
                         .range(vk::WHOLE_SIZE)]),
+                *image_manager.write_descriptor_set(main_ds, 1),
                 *vk::WriteDescriptorSet::builder()
-                    .dst_set(lights_ds)
-                    .dst_binding(1)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(tonemapping_params_buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
-                *image_manager.write_descriptor_set(lights_ds, 2),
-                *vk::WriteDescriptorSet::builder()
-                    .dst_set(lights_ds)
-                    .dst_binding(3)
+                    .dst_set(main_ds)
+                    .dst_binding(2)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(sampler)]),
                 *vk::WriteDescriptorSet::builder()
-                    .dst_set(lights_ds)
-                    .dst_binding(4)
+                    .dst_set(main_ds)
+                    .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(model_materials.buffer)
                         .range(vk::WHOLE_SIZE)]),
                 *vk::WriteDescriptorSet::builder()
-                    .dst_set(lights_ds)
-                    .dst_binding(5)
+                    .dst_set(main_ds)
+                    .dst_binding(4)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(sun_uniform_buffer.buffer)
                         .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(hdr_framebuffer_ds)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(&[*vk::DescriptorImageInfo::builder()
+                        .image_view(hdr_framebuffer.view)
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .sampler(sampler)]),
             ],
             &[],
         )
@@ -664,6 +661,7 @@ fn main() -> anyhow::Result<()> {
                         }
 
                         depthbuffer.cleanup(&device, &mut allocator)?;
+                        hdr_framebuffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
                             command_buffer,
@@ -674,6 +672,11 @@ fn main() -> anyhow::Result<()> {
 
                         depthbuffer =
                             create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+                        hdr_framebuffer = create_hdr_framebuffer(
+                            extent.width,
+                            extent.height,
+                            &mut init_resources,
+                        )?;
 
                         drop(init_resources);
 
@@ -689,6 +692,18 @@ fn main() -> anyhow::Result<()> {
                             )?;
 
                             device.wait_for_fences(&[fence], true, u64::MAX)?;
+
+                            device.update_descriptor_sets(
+                                &[*vk::WriteDescriptorSet::builder()
+                                    .dst_set(hdr_framebuffer_ds)
+                                    .dst_binding(0)
+                                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                                    .image_info(&[*vk::DescriptorImageInfo::builder()
+                                        .image_view(hdr_framebuffer.view)
+                                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                                        .sampler(sampler)])],
+                                &[],
+                            )
                         }
 
                         swapchain_image_framebuffers = create_swapchain_image_framebuffers(
@@ -696,6 +711,13 @@ fn main() -> anyhow::Result<()> {
                             extent,
                             &swapchain,
                             &render_passes,
+                        )?;
+
+                        draw_framebuffer = create_draw_framebuffer(
+                            &device,
+                            extent,
+                            &render_passes,
+                            &hdr_framebuffer,
                             &depthbuffer,
                         )?;
                     }
@@ -748,22 +770,28 @@ fn main() -> anyhow::Result<()> {
                         }
                     };
 
-                    let draw_framebuffer =
+                    let tonemap_framebuffer =
                         swapchain_image_framebuffers[swapchain_image_index as usize];
 
                     let draw_clear_values = [
-                        vk::ClearValue {
-                            color: vk::ClearColorValue {
-                                float32: [0.0, 0.0, 0.0, 1.0],
-                            },
-                        },
                         vk::ClearValue {
                             depth_stencil: vk::ClearDepthStencilValue {
                                 depth: 1.0,
                                 stencil: 0,
                             },
                         },
+                        vk::ClearValue {
+                            color: vk::ClearColorValue {
+                                float32: [0.0, 0.0, 0.0, 1.0],
+                            },
+                        },
                     ];
+
+                    let tonemap_clear_values = [vk::ClearValue {
+                        color: vk::ClearColorValue {
+                            float32: [0.0, 0.0, 0.0, 1.0],
+                        },
+                    }];
 
                     let area = vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
@@ -775,6 +803,12 @@ fn main() -> anyhow::Result<()> {
                         .framebuffer(draw_framebuffer)
                         .render_area(area)
                         .clear_values(&draw_clear_values);
+
+                    let tonemap_render_pass_info = vk::RenderPassBeginInfo::builder()
+                        .render_pass(render_passes.tonemap)
+                        .framebuffer(tonemap_framebuffer)
+                        .render_area(area)
+                        .clear_values(&tonemap_clear_values);
 
                     let viewport = *vk::Viewport::builder()
                         .x(0.0)
@@ -805,7 +839,7 @@ fn main() -> anyhow::Result<()> {
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.pipeline_layout,
                             0,
-                            &[lights_ds],
+                            &[main_ds],
                             &[],
                         );
 
@@ -842,24 +876,22 @@ fn main() -> anyhow::Result<()> {
                             draw_indirect_buffer.buffer,
                             0,
                             2,
-                            std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
+                            DRAW_COMMAND_SIZE as u32,
                         );
 
-                        {
-                            device.cmd_bind_pipeline(
-                                command_buffer,
-                                vk::PipelineBindPoint::GRAPHICS,
-                                pipelines.depth_pre_pass_alpha_clip,
-                            );
+                        device.cmd_bind_pipeline(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.depth_pre_pass_alpha_clip,
+                        );
 
-                            device.cmd_draw_indexed_indirect(
-                                command_buffer,
-                                draw_indirect_buffer.buffer,
-                                std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u64 * 2,
-                                1,
-                                std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
-                            );
-                        }
+                        device.cmd_draw_indexed_indirect(
+                            command_buffer,
+                            draw_indirect_buffer.buffer,
+                            DRAW_COMMAND_SIZE as u64 * 2,
+                            2,
+                            DRAW_COMMAND_SIZE as u32,
+                        );
 
                         device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
 
@@ -873,9 +905,56 @@ fn main() -> anyhow::Result<()> {
                             command_buffer,
                             draw_indirect_buffer.buffer,
                             0,
-                            3,
-                            std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
+                            4,
+                            DRAW_COMMAND_SIZE as u32,
                         );
+
+                        device.cmd_bind_pipeline(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.transmission,
+                        );
+
+                        device.cmd_draw_indexed_indirect(
+                            command_buffer,
+                            draw_indirect_buffer.buffer,
+                            DRAW_COMMAND_SIZE as u64 * 4,
+                            2,
+                            DRAW_COMMAND_SIZE as u32,
+                        );
+
+                        device.cmd_end_render_pass(command_buffer);
+
+                        device.cmd_begin_render_pass(
+                            command_buffer,
+                            &tonemap_render_pass_info,
+                            vk::SubpassContents::INLINE,
+                        );
+
+                        device.cmd_bind_descriptor_sets(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.tonemap_pipeline_layout,
+                            0,
+                            &[hdr_framebuffer_ds],
+                            &[],
+                        );
+
+                        device.cmd_push_constants(
+                            command_buffer,
+                            pipelines.tonemap_pipeline_layout,
+                            vk::ShaderStageFlags::FRAGMENT,
+                            0,
+                            bytes_of(&tonemapping_params),
+                        );
+
+                        device.cmd_bind_pipeline(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.tonemap,
+                        );
+
+                        device.cmd_draw(command_buffer, 3, 1, 0, 0);
 
                         device.cmd_end_render_pass(command_buffer);
 
@@ -908,7 +987,6 @@ fn main() -> anyhow::Result<()> {
                     {
                         depthbuffer.cleanup(&device, &mut allocator)?;
                         lights_buffer.cleanup(&device, &mut allocator)?;
-                        tonemapping_params_buffer.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         model_materials.cleanup(&device, &mut allocator)?;
                         instance_buffer.cleanup(&device, &mut allocator)?;
@@ -930,12 +1008,87 @@ fn main() -> anyhow::Result<()> {
     });
 }
 
+struct DescriptorSetLayouts {
+    main: vk::DescriptorSetLayout,
+    hdr_framebuffer: vk::DescriptorSetLayout,
+}
+
+impl DescriptorSetLayouts {
+    fn new(device: &ash::Device) -> anyhow::Result<Self> {
+        Ok(Self {
+            main: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(1)
+                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                            .descriptor_count(MAX_IMAGES)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(2)
+                            .descriptor_type(vk::DescriptorType::SAMPLER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(3)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(4)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                    ]),
+                    None,
+                )?
+            },
+            hdr_framebuffer: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                    ]),
+                    None,
+                )?
+            },
+        })
+    }
+}
+
+fn create_draw_framebuffer(
+    device: &ash::Device,
+    extent: vk::Extent2D,
+    render_passes: &RenderPasses,
+    hdr_framebuffer: &ash_abstractions::Image,
+    depthbuffer: &ash_abstractions::Image,
+) -> anyhow::Result<vk::Framebuffer> {
+    Ok(unsafe {
+        device.create_framebuffer(
+            &vk::FramebufferCreateInfo::builder()
+                .render_pass(render_passes.draw)
+                .attachments(&[depthbuffer.view, hdr_framebuffer.view])
+                .width(extent.width)
+                .height(extent.height)
+                .layers(1),
+            None,
+        )
+    }?)
+}
+
 fn create_swapchain_image_framebuffers(
     device: &ash::Device,
     extent: vk::Extent2D,
     swapchain: &ash_abstractions::Swapchain,
     render_passes: &RenderPasses,
-    depthbuffer: &ash_abstractions::Image,
 ) -> anyhow::Result<Vec<vk::Framebuffer>> {
     swapchain
         .image_views
@@ -944,8 +1097,8 @@ fn create_swapchain_image_framebuffers(
             unsafe {
                 device.create_framebuffer(
                     &vk::FramebufferCreateInfo::builder()
-                        .render_pass(render_passes.draw)
-                        .attachments(&[*image_view, depthbuffer.view])
+                        .render_pass(render_passes.tonemap)
+                        .attachments(&[*image_view])
                         .width(extent.width)
                         .height(extent.height)
                         .layers(1),
@@ -969,14 +1122,17 @@ struct Pipelines {
     normal: vk::Pipeline,
     depth_pre_pass: vk::Pipeline,
     depth_pre_pass_alpha_clip: vk::Pipeline,
+    transmission: vk::Pipeline,
+    tonemap: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
+    tonemap_pipeline_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
     fn new(
         device: &ash::Device,
         render_passes: &RenderPasses,
-        lights_dsl: vk::DescriptorSetLayout,
+        descriptor_set_layouts: &DescriptorSetLayouts,
         pipeline_cache: vk::PipelineCache,
     ) -> anyhow::Result<Self> {
         let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
@@ -986,6 +1142,9 @@ impl Pipelines {
             CString::new("depth_pre_pass_vertex_alpha_clip")?;
         let fragment_depth_pre_pass_alpha_clip_entry_point =
             CString::new("depth_pre_pass_alpha_clip")?;
+        let fragment_transmission_entry_point = CString::new("fragment_transmission")?;
+        let fullscreen_tri_entry_point = CString::new("fullscreen_tri")?;
+        let fragment_tonemap_entry_point = CString::new("fragment_tonemap")?;
 
         let module = ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), device)?;
 
@@ -993,6 +1152,11 @@ impl Pipelines {
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .name(&fragment_entry_point);
+
+        let fragment_transmission_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .name(&fragment_transmission_entry_point);
 
         let vertex_instanced_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
@@ -1014,10 +1178,20 @@ impl Pipelines {
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .name(&fragment_depth_pre_pass_alpha_clip_entry_point);
 
+        let fullscreen_tri_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .name(&fullscreen_tri_entry_point);
+
+        let fragment_tonemap_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .name(&fragment_tonemap_entry_point);
+
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[lights_dsl])
+                    .set_layouts(&[descriptor_set_layouts.main])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
@@ -1025,21 +1199,34 @@ impl Pipelines {
             )
         }?;
 
-        let vertex_attributes = ash_abstractions::create_vertex_attribute_descriptions(&[
-            &[
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec2,
-                ash_abstractions::VertexAttribute::Uint,
-            ],
-            &[
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Vec3,
-                ash_abstractions::VertexAttribute::Float,
-            ],
-        ]);
+        let tonemap_pipeline_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[descriptor_set_layouts.hdr_framebuffer])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                        .size(
+                            std::mem::size_of::<colstodian::tonemap::BakedLottesTonemapperParams>()
+                                as u32,
+                        )]),
+                None,
+            )
+        }?;
+
+        let full_vertex_attributes = &[
+            ash_abstractions::VertexAttribute::Vec3,
+            ash_abstractions::VertexAttribute::Vec3,
+            ash_abstractions::VertexAttribute::Vec2,
+            ash_abstractions::VertexAttribute::Uint,
+        ];
+
+        let instance_attributes = &[
+            ash_abstractions::VertexAttribute::Vec3,
+            ash_abstractions::VertexAttribute::Vec3,
+            ash_abstractions::VertexAttribute::Vec3,
+            ash_abstractions::VertexAttribute::Vec3,
+            ash_abstractions::VertexAttribute::Float,
+        ];
 
         let normal_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
             primitive_state: ash_abstractions::PrimitiveState {
@@ -1052,7 +1239,10 @@ impl Pipelines {
                 depth_write_enable: false,
                 depth_compare_op: vk::CompareOp::EQUAL,
             }),
-            vertex_attributes: &vertex_attributes,
+            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
+                full_vertex_attributes,
+                instance_attributes,
+            ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
                     .binding(0)
@@ -1065,6 +1255,41 @@ impl Pipelines {
             colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
                 .color_write_mask(vk::ColorComponentFlags::all())
                 .blend_enable(false)],
+        };
+
+        let transmission_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::BACK,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: Some(ash_abstractions::DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                depth_compare_op: vk::CompareOp::LESS,
+            }),
+            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
+                full_vertex_attributes,
+                instance_attributes,
+            ]),
+            vertex_bindings: &[
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(0)
+                    .stride(std::mem::size_of::<Vertex>() as u32),
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(1)
+                    .stride(std::mem::size_of::<Instance>() as u32)
+                    .input_rate(vk::VertexInputRate::INSTANCE),
+            ],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .dst_alpha_blend_factor(vk::BlendFactor::ONE)
+                .alpha_blend_op(vk::BlendOp::ADD)],
         };
 
         let depth_pre_pass_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -1080,13 +1305,7 @@ impl Pipelines {
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
                 &[ash_abstractions::VertexAttribute::Vec3],
-                &[
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Float,
-                ],
+                instance_attributes,
             ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
@@ -1112,19 +1331,8 @@ impl Pipelines {
                 depth_compare_op: vk::CompareOp::LESS,
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
-                &[
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec2,
-                    ash_abstractions::VertexAttribute::Uint,
-                ],
-                &[
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Vec3,
-                    ash_abstractions::VertexAttribute::Float,
-                ],
+                full_vertex_attributes,
+                instance_attributes,
             ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
@@ -1138,9 +1346,25 @@ impl Pipelines {
             colour_attachments: &[],
         };
 
+        let tonemap_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::NONE,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: None,
+            vertex_attributes: &[],
+            vertex_bindings: &[],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)],
+        };
+
         let normal_baked = normal_pipeline_desc.as_baked();
         let depth_pre_pass_baked = depth_pre_pass_desc.as_baked();
         let depth_pre_pass_alpha_clip_baked = depth_pre_pass_alpha_clip_desc.as_baked();
+        let transmission_baked = transmission_pipeline_desc.as_baked();
+        let tonemap_pipeline_baked = tonemap_pipeline_desc.as_baked();
 
         let stages = &[*vertex_instanced_stage, *fragment_stage];
 
@@ -1169,6 +1393,24 @@ impl Pipelines {
                 0,
             );
 
+        let transmission_stages = &[*vertex_instanced_stage, *fragment_transmission_stage];
+
+        let transmission_pipeline_desc = transmission_baked.as_pipeline_create_info(
+            transmission_stages,
+            pipeline_layout,
+            render_passes.draw,
+            1,
+        );
+
+        let tonemap_stages = &[*fullscreen_tri_stage, *fragment_tonemap_stage];
+
+        let tonemap_pipeline_desc = tonemap_pipeline_baked.as_pipeline_create_info(
+            tonemap_stages,
+            tonemap_pipeline_layout,
+            render_passes.tonemap,
+            0,
+        );
+
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
@@ -1176,6 +1418,8 @@ impl Pipelines {
                     *normal_pipeline_desc,
                     *depth_pre_pass_desc,
                     *depth_pre_pass_alpha_clip_desc,
+                    *transmission_pipeline_desc,
+                    *tonemap_pipeline_desc,
                 ],
                 None,
             )
@@ -1186,7 +1430,10 @@ impl Pipelines {
             normal: pipelines[0],
             depth_pre_pass: pipelines[1],
             depth_pre_pass_alpha_clip: pipelines[2],
+            transmission: pipelines[3],
+            tonemap: pipelines[4],
             pipeline_layout,
+            tonemap_pipeline_layout,
         })
     }
 }
@@ -1206,18 +1453,12 @@ struct Instance {
 
 struct RenderPasses {
     draw: vk::RenderPass,
+    tonemap: vk::RenderPass,
 }
 
 impl RenderPasses {
     fn new(device: &ash::Device, surface_format: vk::Format) -> anyhow::Result<Self> {
         let draw_attachments = [
-            // HDR framebuffer
-            *vk::AttachmentDescription::builder()
-                .format(surface_format)
-                .samples(vk::SampleCountFlags::TYPE_1)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .final_layout(vk::ImageLayout::PRESENT_SRC_KHR),
             // Depth buffer
             *vk::AttachmentDescription::builder()
                 .format(vk::Format::D32_SFLOAT)
@@ -1225,15 +1466,22 @@ impl RenderPasses {
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+            // HDR framebuffer
+            *vk::AttachmentDescription::builder()
+                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         ];
 
-        let hdr_framebuffer_ref = [*vk::AttachmentReference::builder()
-            .attachment(0)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
-
         let depth_attachment_ref = *vk::AttachmentReference::builder()
-            .attachment(1)
+            .attachment(0)
             .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+        let hdr_framebuffer_ref = [*vk::AttachmentReference::builder()
+            .attachment(1)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
         let draw_subpasses = [
             // Depth pre-pass
@@ -1275,8 +1523,48 @@ impl RenderPasses {
             )
         }?;
 
+        let tonemap_attachments = [
+            // swapchain image
+            *vk::AttachmentDescription::builder()
+                .format(surface_format)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .final_layout(vk::ImageLayout::PRESENT_SRC_KHR),
+        ];
+
+        let swapchain_image_ref = [*vk::AttachmentReference::builder()
+            .attachment(0)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
+
+        let tonemap_subpasses = [
+            // Tonemapping pass
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&swapchain_image_ref),
+        ];
+
+        let tonemap_subpass_dependencies = [*vk::SubpassDependency::builder()
+            .src_subpass(vk::SUBPASS_EXTERNAL)
+            .dst_subpass(0)
+            .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
+
+        let tonemap_render_pass = unsafe {
+            device.create_render_pass(
+                &vk::RenderPassCreateInfo::builder()
+                    .attachments(&tonemap_attachments)
+                    .subpasses(&tonemap_subpasses)
+                    .dependencies(&tonemap_subpass_dependencies),
+                None,
+            )
+        }?;
+
         Ok(Self {
             draw: draw_render_pass,
+            tonemap: tonemap_render_pass,
         })
     }
 }
@@ -1301,6 +1589,26 @@ fn create_depthbuffer(
     )
 }
 
+fn create_hdr_framebuffer(
+    width: u32,
+    height: u32,
+    init_resources: &mut ash_abstractions::InitResources,
+) -> anyhow::Result<ash_abstractions::Image> {
+    ash_abstractions::Image::new(
+        &ash_abstractions::ImageDescriptor {
+            width,
+            height,
+            name: "hdr framebuffer",
+            mip_levels: 1,
+            format: vk::Format::R32G32B32A32_SFLOAT,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+            next_layout: vk_sync::ImageLayout::Optimal,
+        },
+        init_resources,
+    )
+}
+
 struct IndexBufferSlice {
     offset: u32,
     count: u32,
@@ -1314,23 +1622,25 @@ fn load_gltf(
     materials: &mut Vec<shared_structs::MaterialInfo>,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
-) -> anyhow::Result<(IndexBufferSlice, IndexBufferSlice)> {
+) -> anyhow::Result<(IndexBufferSlice, IndexBufferSlice, IndexBufferSlice)> {
     let (gltf, buffers, images) = gltf::import(path)?;
 
     let mut opaque_indices = Vec::new();
     let mut alpha_clip_indices = Vec::new();
+    let mut transparent_indices = Vec::new();
 
     for mesh in gltf.meshes() {
         for primitive in mesh.primitives() {
             let material = primitive.material();
 
-            let indices = match material.alpha_mode() {
-                gltf::material::AlphaMode::Opaque => &mut opaque_indices,
-                gltf::material::AlphaMode::Mask => &mut alpha_clip_indices,
-                mode => {
+            let indices = match (material.alpha_mode(), material.transmission().is_some()) {
+                (gltf::material::AlphaMode::Opaque, false) => &mut opaque_indices,
+                (gltf::material::AlphaMode::Mask, false) => &mut alpha_clip_indices,
+                (mode, false) => {
                     dbg!(mode);
                     &mut opaque_indices
                 }
+                (_, true) => &mut transparent_indices,
             };
 
             let material_id = material.index().unwrap_or(0) + materials.len();
@@ -1372,22 +1682,47 @@ fn load_gltf(
 
     indices.extend_from_slice(&alpha_clip_indices);
 
+    let transmission_slice = IndexBufferSlice {
+        offset: indices.len() as u32,
+        count: transparent_indices.len() as u32,
+    };
+
+    indices.extend_from_slice(&transparent_indices);
+
+    let mut image_index_to_id = std::collections::HashMap::new();
+
     for (i, material) in gltf.materials().enumerate() {
         let mut load_optional_texture =
             |optional_texture_info: Option<gltf::texture::Texture>, name: &str, srgb| {
                 match optional_texture_info {
                     Some(info) => {
-                        let image = &images[info.index()];
+                        let image_index = info.source().index();
 
-                        let texture = load_texture_from_gltf(
-                            image,
-                            srgb,
-                            &format!("{} {} {}", path, name, i),
-                            init_resources,
-                            buffers_to_cleanup,
-                        )?;
+                        let id = match image_index_to_id.entry((image_index, srgb)) {
+                            std::collections::hash_map::Entry::Occupied(occupied) => {
+                                println!("reusing image {} (srgb: {})", image_index, srgb);
+                                *occupied.get()
+                            }
+                            std::collections::hash_map::Entry::Vacant(vacancy) => {
+                                let image = &images[image_index];
 
-                        Ok::<_, anyhow::Error>(image_manager.push_image(texture) as i32)
+                                let texture = load_texture_from_gltf(
+                                    image,
+                                    srgb,
+                                    &format!("{} {} {}", path, name, i),
+                                    init_resources,
+                                    buffers_to_cleanup,
+                                )?;
+
+                                let id = image_manager.push_image(texture);
+
+                                vacancy.insert(id);
+
+                                id
+                            }
+                        };
+
+                        Ok::<_, anyhow::Error>(id as i32)
                     }
                     None => Ok(-1),
                 }
@@ -1395,29 +1730,42 @@ fn load_gltf(
 
         let pbr = material.pbr_metallic_roughness();
 
-        let diffuse_texture = load_optional_texture(
-            pbr.base_color_texture().map(|info| info.texture()),
-            "diffuse",
-            true,
-        )?;
-
         materials.push(shared_structs::MaterialInfo {
-            diffuse_texture,
-            metallic_roughness_texture: load_optional_texture(
-                pbr.metallic_roughness_texture().map(|info| info.texture()),
-                "metallic roughness",
-                false,
-            )?,
-            normal_map_texture: load_optional_texture(
-                material.normal_texture().map(|info| info.texture()),
-                "normal map",
-                false,
-            )?,
-            emissive_texture: load_optional_texture(
-                material.emissive_texture().map(|info| info.texture()),
-                "emissive",
-                true,
-            )?,
+            textures: shared_structs::Textures {
+                diffuse: load_optional_texture(
+                    pbr.base_color_texture().map(|info| info.texture()),
+                    "diffuse",
+                    true,
+                )?,
+                metallic_roughness: load_optional_texture(
+                    pbr.metallic_roughness_texture().map(|info| info.texture()),
+                    "metallic roughness",
+                    false,
+                )?,
+                normal_map: load_optional_texture(
+                    material.normal_texture().map(|info| info.texture()),
+                    "normal map",
+                    false,
+                )?,
+                emissive: load_optional_texture(
+                    material.emissive_texture().map(|info| info.texture()),
+                    "emissive",
+                    true,
+                )?,
+                occlusion: load_optional_texture(
+                    material.occlusion_texture().map(|info| info.texture()),
+                    "occlusion",
+                    true,
+                )?,
+                transmission: load_optional_texture(
+                    material
+                        .transmission()
+                        .and_then(|transmission| transmission.transmission_texture())
+                        .map(|info| info.texture()),
+                    "transmission",
+                    false,
+                )?,
+            },
             metallic_factor: pbr.metallic_factor(),
             roughness_factor: pbr.roughness_factor(),
             alpha_clipping_cutoff: material.alpha_cutoff().unwrap_or(0.5),
@@ -1427,10 +1775,19 @@ fn load_gltf(
                 .normal_texture()
                 .map(|normal_texture| normal_texture.scale())
                 .unwrap_or_default(),
+            occlusion_strength: material
+                .occlusion_texture()
+                .map(|occlusion| occlusion.strength())
+                .unwrap_or(1.0),
+            index_of_refraction: material.ior().unwrap_or(1.5),
+            transmission_factor: material
+                .transmission()
+                .map(|transmission| transmission.transmission_factor())
+                .unwrap_or(0.0),
         });
     }
 
-    Ok((opaque_slice, alpha_clip_slice))
+    Ok((opaque_slice, alpha_clip_slice, transmission_slice))
 }
 
 fn load_texture_from_gltf(
