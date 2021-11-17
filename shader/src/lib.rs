@@ -140,6 +140,7 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
     output: &mut Vec4,
+    output2: &mut Vec4,
 ) {
     let material = &materials[material_id as usize];
 
@@ -173,7 +174,10 @@ pub fn fragment(
         sun_uniform,
     );
 
-    *output = (result.diffuse + result.specular + result.emission).extend(1.0);
+    let x = (result.diffuse + result.specular + result.emission).extend(1.0);
+
+    *output = x;
+    *output2 = x;
 }
 
 struct TextureSampler<'a> {

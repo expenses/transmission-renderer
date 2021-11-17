@@ -78,8 +78,13 @@ impl QueryPool {
             initial_timestamp[0], limits.timestamp_period, 0, tracy_client::GpuContextType::Vulkan, None
         );
 
+        let mut buffer = TimestampBuffer::default();
+
+        // As it contains the initial timestamp.
+        buffer.len = 1;
+
         Ok(ProfilingContext {
-            buffer: TimestampBuffer::default(),
+            buffer,
             pool: self.pool
         })
     }
@@ -96,6 +101,17 @@ impl ProfilingContext {
         unsafe {
             device.cmd_reset_query_pool(command_buffer, self.pool, 0, self.buffer.len as u32);
         }
+
+        vk_sync::cmd::pipeline_barrier(
+            &device,
+            command_buffer,
+            Some(vk_sync::GlobalBarrier {
+                previous_accesses: &[vk_sync::AccessType::HostWrite],
+                next_accesses: &[vk_sync::AccessType::HostWrite]
+            }),
+            &[],
+            &[],
+        );
 
         self.buffer.len = 0;
     }

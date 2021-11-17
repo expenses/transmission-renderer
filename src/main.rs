@@ -313,7 +313,7 @@ fn main() -> anyhow::Result<()> {
         extent.width,
         extent.height,
         "hdr framebuffer",
-        vk::ImageUsageFlags::TRANSFER_SRC,
+        vk::ImageUsageFlags::empty(),
         vk_sync::AccessType::ColorAttachmentWrite,
         &mut init_resources,
     )?;
@@ -321,8 +321,8 @@ fn main() -> anyhow::Result<()> {
         extent.width,
         extent.height,
         "final hdr framebuffer",
-        vk::ImageUsageFlags::TRANSFER_DST,
-        vk_sync::AccessType::TransferWrite,
+        vk::ImageUsageFlags::empty(),
+        vk_sync::AccessType::ColorAttachmentWrite,
         &mut init_resources,
     )?;
 
@@ -442,13 +442,14 @@ fn main() -> anyhow::Result<()> {
         extent,
         render_passes.draw,
         &hdr_framebuffer,
+        &final_hdr_framebuffer,
         &depthbuffer,
     )?;
-    let mut transmission_framebuffer = create_draw_framebuffer(
+    let mut transmission_framebuffer = create_draw_framebuffer2(
         &device,
         extent,
         render_passes.transmission,
-        &final_hdr_framebuffer,
+        &hdr_framebuffer,
         &depthbuffer
     )?;
 
@@ -790,14 +791,14 @@ fn main() -> anyhow::Result<()> {
                             extent,
                             render_passes.draw,
                             &hdr_framebuffer,
+                            &final_hdr_framebuffer,
                             &depthbuffer,
                         )?;
-
-                        transmission_framebuffer = create_draw_framebuffer(
+                        transmission_framebuffer = create_draw_framebuffer2(
                             &device,
                             extent,
                             render_passes.transmission,
-                            &final_hdr_framebuffer,
+                            &hdr_framebuffer,
                             &depthbuffer
                         )?;
                     }
@@ -862,6 +863,11 @@ fn main() -> anyhow::Result<()> {
                             depth_stencil: vk::ClearDepthStencilValue {
                                 depth: 1.0,
                                 stencil: 0,
+                            },
+                        },
+                        vk::ClearValue {
+                            color: vk::ClearColorValue {
+                                float32: [0.0, 0.0, 0.0, 1.0],
                             },
                         },
                         vk::ClearValue {
@@ -1020,67 +1026,27 @@ fn main() -> anyhow::Result<()> {
                             );
                         }
 
-                        device.cmd_end_render_pass(command_buffer);
+                        device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+
+                        device.cmd_bind_pipeline(
+                            command_buffer,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pipelines.depth_pre_pass_transmissive,
+                        );
 
                         {
-                            let _profiling_zone = profiling_zone!("hdr framebuffer blitting", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+                            let _profiling_zone = profiling_zone!("depth pre pass transmissive", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            let blit = vk::ImageBlit {
-                                src_subresource: vk::ImageSubresourceLayers {
-                                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                                    mip_level: 0,
-                                    base_array_layer: 0,
-                                    layer_count: 1,
-                                },
-                                src_offsets: [
-                                    vk::Offset3D::default(),
-                                    vk::Offset3D {
-                                        x: extent.width as i32,
-                                        y: extent.height as i32,
-                                        z: 1,
-                                    },
-                                ],
-                                dst_subresource: vk::ImageSubresourceLayers {
-                                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                                    mip_level: 0,
-                                    base_array_layer: 0,
-                                    layer_count: 1,
-                                },
-                                dst_offsets: [
-                                    vk::Offset3D::default(),
-                                    vk::Offset3D {
-                                        x: extent.width as i32,
-                                        y: extent.height as i32,
-                                        z: 1,
-                                    },
-                                ],
-                            };
-
-                            device.cmd_blit_image(
+                            device.cmd_draw_indexed_indirect(
                                 command_buffer,
-                                hdr_framebuffer.image,
-                                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                                final_hdr_framebuffer.image,
-                                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                                &[blit],
-                                vk::Filter::NEAREST,
-                            );
-
-                            vk_sync::cmd::pipeline_barrier(
-                                &device,
-                                command_buffer,
-                                None,
-                                &[],
-                                &[vk_sync::ImageBarrier {
-                                    previous_accesses: &[vk_sync::AccessType::TransferRead],
-                                    next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
-                                    next_layout: vk_sync::ImageLayout::Optimal,
-                                    image: hdr_framebuffer.image,
-                                    range: basic_subresource_range,
-                                    ..Default::default()
-                                }],
+                                draw_indirect_buffer.buffer,
+                                DRAW_COMMAND_SIZE as u64 * 4,
+                                2,
+                                DRAW_COMMAND_SIZE as u32,
                             );
                         }
+
+                        device.cmd_end_render_pass(command_buffer);
 
                         device.cmd_begin_render_pass(
                             command_buffer,
@@ -1093,7 +1059,7 @@ fn main() -> anyhow::Result<()> {
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.transmission_pipeline_layout,
                             0,
-                            &[main_ds, hdr_framebuffer_ds],
+                            &[main_ds, final_hdr_framebuffer_ds],
                             &[],
                         );
 
@@ -1128,7 +1094,7 @@ fn main() -> anyhow::Result<()> {
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.tonemap_pipeline_layout,
                             0,
-                            &[final_hdr_framebuffer_ds],
+                            &[hdr_framebuffer_ds],
                             &[],
                         );
 
@@ -1153,21 +1119,6 @@ fn main() -> anyhow::Result<()> {
                         }
 
                         device.cmd_end_render_pass(command_buffer);
-
-                        vk_sync::cmd::pipeline_barrier(
-                            &device,
-                            command_buffer,
-                            None,
-                            &[],
-                            &[vk_sync::ImageBarrier {
-                                previous_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
-                                next_accesses: &[vk_sync::AccessType::TransferWrite],
-                                next_layout: vk_sync::ImageLayout::Optimal,
-                                image: final_hdr_framebuffer.image,
-                                range: basic_subresource_range,
-                                ..Default::default()
-                            }],
-                        );
 
                         drop(all_commands_profiling_zone);
 
@@ -1291,7 +1242,7 @@ impl DescriptorSetLayouts {
     }
 }
 
-fn create_draw_framebuffer(
+fn create_draw_framebuffer2(
     device: &ash::Device,
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
@@ -1303,6 +1254,27 @@ fn create_draw_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
                 .attachments(&[depthbuffer.view, hdr_framebuffer.view])
+                .width(extent.width)
+                .height(extent.height)
+                .layers(1),
+            None,
+        )
+    }?)
+}
+
+fn create_draw_framebuffer(
+    device: &ash::Device,
+    extent: vk::Extent2D,
+    render_pass: vk::RenderPass,
+    hdr_framebuffer: &ash_abstractions::Image,
+    final_hdr_framebuffer: &ash_abstractions::Image,
+    depthbuffer: &ash_abstractions::Image,
+) -> anyhow::Result<vk::Framebuffer> {
+    Ok(unsafe {
+        device.create_framebuffer(
+            &vk::FramebufferCreateInfo::builder()
+                .render_pass(render_pass)
+                .attachments(&[depthbuffer.view, hdr_framebuffer.view, final_hdr_framebuffer.view])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -1349,6 +1321,7 @@ struct Pipelines {
     normal: vk::Pipeline,
     depth_pre_pass: vk::Pipeline,
     depth_pre_pass_alpha_clip: vk::Pipeline,
+    depth_pre_pass_transmissive: vk::Pipeline,
     transmission: vk::Pipeline,
     tonemap: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
@@ -1493,6 +1466,8 @@ impl Pipelines {
             ],
             colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
                 .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false), *vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
                 .blend_enable(false)],
         };
 
@@ -1505,7 +1480,7 @@ impl Pipelines {
             depth_stencil_state: Some(ash_abstractions::DepthStencilState {
                 depth_test_enable: true,
                 depth_write_enable: true,
-                depth_compare_op: vk::CompareOp::LESS,
+                depth_compare_op: vk::CompareOp::EQUAL,
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
                 full_vertex_attributes,
@@ -1644,6 +1619,13 @@ impl Pipelines {
             0,
         );
 
+        let depth_pre_pass_transmissive_desc = depth_pre_pass_baked.as_pipeline_create_info(
+            depth_pre_pass_stage,
+            pipeline_layout,
+            render_passes.draw,
+            2,
+        );
+
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
@@ -1651,6 +1633,7 @@ impl Pipelines {
                     *normal_pipeline_desc,
                     *depth_pre_pass_desc,
                     *depth_pre_pass_alpha_clip_desc,
+                    *depth_pre_pass_transmissive_desc,
                     *transmission_pipeline_desc,
                     *tonemap_pipeline_desc,
                 ],
@@ -1663,8 +1646,9 @@ impl Pipelines {
             normal: pipelines[0],
             depth_pre_pass: pipelines[1],
             depth_pre_pass_alpha_clip: pipelines[2],
-            transmission: pipelines[3],
-            tonemap: pipelines[4],
+            depth_pre_pass_transmissive: pipelines[3],
+            transmission: pipelines[4],
+            tonemap: pipelines[5],
             pipeline_layout,
             tonemap_pipeline_layout,
             transmission_pipeline_layout,
@@ -1701,21 +1685,30 @@ impl RenderPasses {
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
-            // HDR framebuffer
+            // HDR framebuffers
             *vk::AttachmentDescription::builder()
                 .format(vk::Format::R32G32B32A32_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .final_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
+                .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+            *vk::AttachmentDescription::builder()
+                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         ];
 
         let depth_attachment_ref = *vk::AttachmentReference::builder()
             .attachment(0)
             .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-        let hdr_framebuffer_ref = [*vk::AttachmentReference::builder()
+        let hdr_framebuffer_refs = [*vk::AttachmentReference::builder()
             .attachment(1)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+            *vk::AttachmentReference::builder()
+            .attachment(2)
             .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
         let draw_subpasses = [
@@ -1726,7 +1719,11 @@ impl RenderPasses {
             // Colour pass
             *vk::SubpassDescription::builder()
                 .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&hdr_framebuffer_ref)
+                .color_attachments(&hdr_framebuffer_refs)
+                .depth_stencil_attachment(&depth_attachment_ref),
+            // Second depth pre-pass for transmissive objects.
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
                 .depth_stencil_attachment(&depth_attachment_ref),
         ];
 
@@ -1744,8 +1741,15 @@ impl RenderPasses {
                 .dst_subpass(1)
                 .src_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
                 .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
-                .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
+                .dst_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
+                .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
+            *vk::SubpassDependency::builder()
+                .src_subpass(1)
+                .dst_subpass(2)
+                .src_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
+                .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
+                .dst_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
+                .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
         ];
 
         let draw_render_pass = unsafe {
@@ -1813,7 +1817,7 @@ impl RenderPasses {
                 .load_op(vk::AttachmentLoadOp::LOAD)
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .initial_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL),
+                .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
         ];
 
         let depth_attachment_ref = *vk::AttachmentReference::builder()
