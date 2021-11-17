@@ -1,7 +1,7 @@
 #![no_std]
 
 use core::f32::consts::FRAC_1_PI;
-use glam::{Vec2, Vec3, Mat4};
+use glam::{Mat4, Vec2, Vec3};
 use num_traits::Float;
 
 // Workarounds: can't use f32.lerp, f32.clamp or f32.powi.
@@ -204,20 +204,27 @@ pub struct IblVolumeRefractionParams {
     pub position: Vec3,
 }
 
-pub fn ibl_volume_refraction<FSamp: Fn(Vec2, f32) -> Vec3, GSamp: Fn(f32, PerceptualRoughness) -> Vec2>(
+pub fn ibl_volume_refraction<
+    FSamp: Fn(Vec2, f32) -> Vec3,
+    GSamp: Fn(f32, PerceptualRoughness) -> Vec2,
+>(
     params: IblVolumeRefractionParams,
     framebuffer_sampler: FSamp,
     ggx_lut_sampler: GSamp,
 ) -> Vec3 {
     let IblVolumeRefractionParams {
-        framebuffer_size_x, proj_view_matrix, position,
-        normal, view,
-        material_params: MaterialParams {
-            diffuse_colour: base_colour,
-            metallic,
-            perceptual_roughness,
-            index_of_refraction
-        },
+        framebuffer_size_x,
+        proj_view_matrix,
+        position,
+        normal,
+        view,
+        material_params:
+            MaterialParams {
+                diffuse_colour: base_colour,
+                metallic,
+                perceptual_roughness,
+                index_of_refraction,
+            },
     } = params;
 
     // todo: volume
@@ -227,7 +234,8 @@ pub fn ibl_volume_refraction<FSamp: Fn(Vec2, f32) -> Vec3, GSamp: Fn(f32, Percep
     let screen_coords = Vec2::new(device_coords.x, device_coords.y) / device_coords.w;
     let texture_coords = (screen_coords + 1.0) / 2.0;
 
-    let framebuffer_lod = (framebuffer_size_x as f32).log2() * perceptual_roughness.apply_ior(index_of_refraction).0;
+    let framebuffer_lod =
+        (framebuffer_size_x as f32).log2() * perceptual_roughness.apply_ior(index_of_refraction).0;
 
     let transmitted_light = framebuffer_sampler(texture_coords, framebuffer_lod);
     // todo: volume
@@ -292,13 +300,15 @@ pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
     let fresnel = fresnel_schlick(view_dot_halfway, f0, Vec3::splat(1.0));
 
     let diffuse = light_intensity * normal_dot_light.value * diffuse_brdf(c_diff, fresnel);
-    let specular = light_intensity * normal_dot_light.value * specular_brdf(
-        normal_dot_view,
-        normal_dot_light,
-        normal_dot_halfway,
-        actual_roughness,
-        fresnel,
-    );
+    let specular = light_intensity
+        * normal_dot_light.value
+        * specular_brdf(
+            normal_dot_view,
+            normal_dot_light,
+            normal_dot_halfway,
+            actual_roughness,
+            fresnel,
+        );
 
     BrdfResult {
         diffuse,

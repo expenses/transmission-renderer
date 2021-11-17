@@ -105,9 +105,8 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-    let physical_device_properties = unsafe {
-        instance.get_physical_device_properties(physical_device)
-    };
+    let physical_device_properties =
+        unsafe { instance.get_physical_device_properties(physical_device) };
 
     let surface_caps = unsafe {
         surface_loader.get_physical_device_surface_capabilities(physical_device, surface)
@@ -312,19 +311,66 @@ fn main() -> anyhow::Result<()> {
     let mut hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
         extent.height,
+        1,
         "hdr framebuffer",
-        vk::ImageUsageFlags::empty(),
-        vk_sync::AccessType::ColorAttachmentWrite,
+        vk::ImageUsageFlags::TRANSFER_SRC,
         &mut init_resources,
     )?;
-    let mut final_hdr_framebuffer = create_hdr_framebuffer(
+
+    let mut opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
+
+    let mut opaque_sampled_hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
         extent.height,
-        "final hdr framebuffer",
-        vk::ImageUsageFlags::empty(),
-        vk_sync::AccessType::ColorAttachmentWrite,
+        opaque_mip_levels,
+        "opaque sampled hdr framebuffer",
+        vk::ImageUsageFlags::TRANSFER_DST,
         &mut init_resources,
     )?;
+
+    let basic_subresource_range = *vk::ImageSubresourceRange::builder()
+        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .level_count(1)
+        .layer_count(1);
+
+    let mut opaque_sampled_hdr_framebuffer_top_mip_view = unsafe {
+        device.create_image_view(
+            &vk::ImageViewCreateInfo::builder()
+                .image(opaque_sampled_hdr_framebuffer.image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .subresource_range(basic_subresource_range),
+            None,
+        )
+    }?;
+
+    // We need to transition the mips of the image because they copy the mip 0 layout.
+    // todo: do this in a nicer way.
+    {
+        let subresource_range = *vk::ImageSubresourceRange::builder()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .base_mip_level(1)
+            .level_count(opaque_mip_levels - 1)
+            .layer_count(1);
+
+        vk_sync::cmd::pipeline_barrier(
+            init_resources.device,
+            init_resources.command_buffer,
+            None,
+            &[],
+            &[vk_sync::ImageBarrier {
+                previous_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+                next_accesses: &[
+                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                ],
+                next_layout: vk_sync::ImageLayout::Optimal,
+                image: opaque_sampled_hdr_framebuffer.image,
+                range: subresource_range,
+                discard_contents: true,
+                ..Default::default()
+            }],
+        );
+    }
 
     let lights_buffer = ash_abstractions::Buffer::new(
         unsafe {
@@ -442,15 +488,16 @@ fn main() -> anyhow::Result<()> {
         extent,
         render_passes.draw,
         &hdr_framebuffer,
-        &final_hdr_framebuffer,
+        opaque_sampled_hdr_framebuffer_top_mip_view,
         &depthbuffer,
     )?;
-    let mut transmission_framebuffer = create_draw_framebuffer2(
+
+    let mut transmission_framebuffer = create_transmission_framebuffer(
         &device,
         extent,
         render_passes.transmission,
         &hdr_framebuffer,
-        &depthbuffer
+        &depthbuffer,
     )?;
 
     let mut keyboard_state = KeyboardState::default();
@@ -520,7 +567,7 @@ fn main() -> anyhow::Result<()> {
 
     let main_ds = descriptor_sets[0];
     let hdr_framebuffer_ds = descriptor_sets[1];
-    let final_hdr_framebuffer_ds = descriptor_sets[2];
+    let opaque_sampled_hdr_framebuffer_ds = descriptor_sets[2];
 
     let sampler = unsafe {
         device.create_sampler(
@@ -572,22 +619,17 @@ fn main() -> anyhow::Result<()> {
                         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                         .sampler(sampler)]),
                 *vk::WriteDescriptorSet::builder()
-                    .dst_set(final_hdr_framebuffer_ds)
+                    .dst_set(opaque_sampled_hdr_framebuffer_ds)
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder()
-                        .image_view(final_hdr_framebuffer.view)
+                        .image_view(opaque_sampled_hdr_framebuffer.view)
                         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                         .sampler(sampler)]),
             ],
             &[],
         )
     }
-
-    let basic_subresource_range = *vk::ImageSubresourceRange::builder()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
-        .level_count(1)
-        .layer_count(1);
 
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
@@ -601,7 +643,8 @@ fn main() -> anyhow::Result<()> {
     let mut screen_center =
         winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
 
-    let mut profiling_ctx = query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
+    let mut profiling_ctx =
+        query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
 
     event_loop.run(move |event, _, control_flow| {
         let loop_closure = || -> anyhow::Result<()> {
@@ -713,7 +756,7 @@ fn main() -> anyhow::Result<()> {
 
                         depthbuffer.cleanup(&device, &mut allocator)?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
-                        final_hdr_framebuffer.cleanup(&device, &mut allocator)?;
+                        opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
                             command_buffer,
@@ -724,22 +767,63 @@ fn main() -> anyhow::Result<()> {
 
                         depthbuffer =
                             create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+
                         hdr_framebuffer = create_hdr_framebuffer(
                             extent.width,
                             extent.height,
+                            1,
                             "hdr framebuffer",
                             vk::ImageUsageFlags::TRANSFER_SRC,
-                            vk_sync::AccessType::ColorAttachmentWrite,
                             &mut init_resources,
                         )?;
-                        final_hdr_framebuffer = create_hdr_framebuffer(
+
+                        opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
+
+                        opaque_sampled_hdr_framebuffer = create_hdr_framebuffer(
                             extent.width,
                             extent.height,
-                            "final hdr framebuffer",
+                            opaque_mip_levels,
+                            "opaque sampled hdr framebuffer",
                             vk::ImageUsageFlags::TRANSFER_DST,
-                            vk_sync::AccessType::TransferWrite,
                             &mut init_resources,
                         )?;
+
+                        opaque_sampled_hdr_framebuffer_top_mip_view = unsafe {
+                            device.create_image_view(
+                                &vk::ImageViewCreateInfo::builder()
+                                    .image(opaque_sampled_hdr_framebuffer.image)
+                                    .view_type(vk::ImageViewType::TYPE_2D)
+                                    .format(vk::Format::R32G32B32A32_SFLOAT)
+                                    .subresource_range(basic_subresource_range),
+                                None,
+                            )
+                        }?;
+
+                        // We need to transition the mips of the image because they copy the mip 0 layout.
+                        // todo: do this in a nicer way.
+                        {
+                            let subresource_range = *vk::ImageSubresourceRange::builder()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .base_mip_level(1)
+                                .level_count(opaque_mip_levels - 1)
+                                .layer_count(1);
+
+                            vk_sync::cmd::pipeline_barrier(
+                                init_resources.device,
+                                init_resources.command_buffer,
+                                None,
+                                &[],
+                                &[vk_sync::ImageBarrier {
+                                    previous_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+                                    next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+                                    next_layout: vk_sync::ImageLayout::Optimal,
+                                    image: opaque_sampled_hdr_framebuffer.image,
+                                    range: subresource_range,
+                                    discard_contents: true,
+                                    ..Default::default()
+                                }],
+                            );
+                        }
 
                         drop(init_resources);
 
@@ -767,11 +851,11 @@ fn main() -> anyhow::Result<()> {
                                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                                             .sampler(sampler)]),
                                     *vk::WriteDescriptorSet::builder()
-                                        .dst_set(final_hdr_framebuffer_ds)
+                                        .dst_set(opaque_sampled_hdr_framebuffer_ds)
                                         .dst_binding(0)
                                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                                         .image_info(&[*vk::DescriptorImageInfo::builder()
-                                            .image_view(final_hdr_framebuffer.view)
+                                            .image_view(opaque_sampled_hdr_framebuffer.view)
                                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                                             .sampler(sampler)]),
                                 ],
@@ -791,10 +875,10 @@ fn main() -> anyhow::Result<()> {
                             extent,
                             render_passes.draw,
                             &hdr_framebuffer,
-                            &final_hdr_framebuffer,
+                            opaque_sampled_hdr_framebuffer_top_mip_view,
                             &depthbuffer,
                         )?;
-                        transmission_framebuffer = create_draw_framebuffer2(
+                        transmission_framebuffer = create_transmission_framebuffer(
                             &device,
                             extent,
                             render_passes.transmission,
@@ -1059,7 +1143,7 @@ fn main() -> anyhow::Result<()> {
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.transmission_pipeline_layout,
                             0,
-                            &[main_ds, final_hdr_framebuffer_ds],
+                            &[main_ds, opaque_sampled_hdr_framebuffer_ds],
                             &[],
                         );
 
@@ -1171,7 +1255,7 @@ fn main() -> anyhow::Result<()> {
                         indices.cleanup(&device, &mut allocator)?;
                         draw_indirect_buffer.cleanup(&device, &mut allocator)?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
-                        final_hdr_framebuffer.cleanup(&device, &mut allocator)?;
+                        opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -1242,7 +1326,7 @@ impl DescriptorSetLayouts {
     }
 }
 
-fn create_draw_framebuffer2(
+fn create_transmission_framebuffer(
     device: &ash::Device,
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
@@ -1267,14 +1351,18 @@ fn create_draw_framebuffer(
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
     hdr_framebuffer: &ash_abstractions::Image,
-    final_hdr_framebuffer: &ash_abstractions::Image,
+    opaque_sampled_hdr_framebuffer_top_mip_view: vk::ImageView,
     depthbuffer: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
-                .attachments(&[depthbuffer.view, hdr_framebuffer.view, final_hdr_framebuffer.view])
+                .attachments(&[
+                    depthbuffer.view,
+                    hdr_framebuffer.view,
+                    opaque_sampled_hdr_framebuffer_top_mip_view,
+                ])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -1403,7 +1491,10 @@ impl Pipelines {
         let transmission_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.main, descriptor_set_layouts.hdr_framebuffer])
+                    .set_layouts(&[
+                        descriptor_set_layouts.main,
+                        descriptor_set_layouts.hdr_framebuffer,
+                    ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
@@ -1464,11 +1555,14 @@ impl Pipelines {
                     .stride(std::mem::size_of::<Instance>() as u32)
                     .input_rate(vk::VertexInputRate::INSTANCE),
             ],
-            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
-                .blend_enable(false), *vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
-                .blend_enable(false)],
+            colour_attachments: &[
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+            ],
         };
 
         let transmission_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -1704,12 +1798,14 @@ impl RenderPasses {
             .attachment(0)
             .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-        let hdr_framebuffer_refs = [*vk::AttachmentReference::builder()
-            .attachment(1)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+        let hdr_framebuffer_refs = [
             *vk::AttachmentReference::builder()
-            .attachment(2)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
+                .attachment(1)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+            *vk::AttachmentReference::builder()
+                .attachment(2)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+        ];
 
         let draw_subpasses = [
             // Depth pre-pass
@@ -1828,12 +1924,10 @@ impl RenderPasses {
             .attachment(1)
             .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
-        let transmission_subpass = [
-            *vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&hdr_framebuffer_ref)
-                .depth_stencil_attachment(&depth_attachment_ref),
-        ];
+        let transmission_subpass = [*vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&hdr_framebuffer_ref)
+            .depth_stencil_attachment(&depth_attachment_ref)];
 
         let transmission_subpass_dependency = [*vk::SubpassDependency::builder()
             .src_subpass(vk::SUBPASS_EXTERNAL)
@@ -1884,9 +1978,9 @@ fn create_depthbuffer(
 fn create_hdr_framebuffer(
     width: u32,
     height: u32,
+    mip_levels: u32,
     name: &str,
     extra_usage: vk::ImageUsageFlags,
-    next_access: vk_sync::AccessType,
     init_resources: &mut ash_abstractions::InitResources,
 ) -> anyhow::Result<ash_abstractions::Image> {
     ash_abstractions::Image::new(
@@ -1894,12 +1988,12 @@ fn create_hdr_framebuffer(
             width,
             height,
             name,
-            mip_levels: 1,
+            mip_levels,
             format: vk::Format::R32G32B32A32_SFLOAT,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
                 | vk::ImageUsageFlags::SAMPLED
                 | extra_usage,
-            next_accesses: &[next_access],
+            next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
@@ -1924,7 +2018,14 @@ fn load_gltf(
 
     for image in &mut images {
         if image.format == gltf::image::Format::R8G8B8 {
-            let dynamic_image = image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(image.width, image.height, std::mem::take(&mut image.pixels)).unwrap());
+            let dynamic_image = image::DynamicImage::ImageRgb8(
+                image::RgbImage::from_raw(
+                    image.width,
+                    image.height,
+                    std::mem::take(&mut image.pixels),
+                )
+                .unwrap(),
+            );
 
             let rgba8 = dynamic_image.to_rgba8();
 
@@ -1939,7 +2040,10 @@ fn load_gltf(
     let mut alpha_clip_indices = Vec::new();
     let mut transparent_indices = Vec::new();
 
-    for (node, mesh) in gltf.nodes().filter_map(|node| node.mesh().map(|mesh| (node, mesh))) {
+    for (node, mesh) in gltf
+        .nodes()
+        .filter_map(|node| node.mesh().map(|mesh| (node, mesh)))
+    {
         let transform = node_tree.transform_of(node.index());
         let normal_transform = normal_matrix(transform);
 
@@ -2108,6 +2212,10 @@ fn normal_matrix(transform: Mat4) -> Mat3 {
     Mat3::from_mat4(inverse_transpose)
 }
 
+fn mip_levels_for_size(width: u32, height: u32) -> u32 {
+    (width.min(height) as f32).log2() as u32 + 1
+}
+
 fn load_texture_from_gltf(
     image: &gltf::image::Data,
     srgb: bool,
@@ -2121,7 +2229,7 @@ fn load_texture_from_gltf(
         format => panic!("unsupported format: {:?}", format),
     };
 
-    let mip_levels = (image.width.min(image.height) as f32).log2() as u32;
+    let mip_levels = mip_levels_for_size(image.width, image.height);
 
     let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
         &ash_abstractions::LoadImageDescriptor {

@@ -10,8 +10,8 @@
 extern crate spirv_std;
 
 use glam_pbr::{
-    basic_brdf, BasicBrdfParams, IndexOfRefraction, Light, MaterialParams, Normal,
-    PerceptualRoughness, View, BrdfResult, ibl_volume_refraction, IblVolumeRefractionParams,
+    basic_brdf, ibl_volume_refraction, BasicBrdfParams, BrdfResult, IblVolumeRefractionParams,
+    IndexOfRefraction, Light, MaterialParams, Normal, PerceptualRoughness, View,
 };
 use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
 use spirv_std::{
@@ -54,7 +54,9 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
-    #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &SampledImage<Image!(2D, type=f32, sampled)>,
+    #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &SampledImage<
+        Image!(2D, type=f32, sampled),
+    >,
     output: &mut Vec4,
 ) {
     let material = &materials[material_id as usize];
@@ -74,15 +76,15 @@ pub fn fragment_transmission(
     let mut transmission_factor = material.transmission_factor;
 
     if material.textures.transmission != -1 {
-        transmission_factor *= texture_sampler.sample(material.textures.transmission as u32).x;
+        transmission_factor *= texture_sampler
+            .sample(material.textures.transmission as u32)
+            .x;
     }
 
     let view_vector = Vec3::from(push_constants.view_position) - position;
     let view = View(view_vector.normalize());
 
-    let normal = calculate_normal(
-        normal, &texture_sampler, material, view_vector, uv
-    );
+    let normal = calculate_normal(normal, &texture_sampler, material, view_vector, uv);
 
     let material_params = get_material_params(diffuse, material, &texture_sampler);
 
@@ -110,16 +112,23 @@ pub fn fragment_transmission(
     };
 
     let framebuffer_sampler = |uv, lod| {
-        let sample: Vec4 = unsafe {
-            framebuffer.sample_by_lod(uv, lod)
-        };
+        let sample: Vec4 = unsafe { framebuffer.sample_by_lod(uv, lod) };
         sample.truncate()
     };
 
-    let transmission = transmission_factor * ibl_volume_refraction(IblVolumeRefractionParams {
-        proj_view_matrix: push_constants.proj_view, position, material_params,
-        framebuffer_size_x: push_constants.framebuffer_size.x, normal, view,
-    }, framebuffer_sampler, ggx_lut_sampler);
+    let transmission = transmission_factor
+        * ibl_volume_refraction(
+            IblVolumeRefractionParams {
+                proj_view_matrix: push_constants.proj_view,
+                position,
+                material_params,
+                framebuffer_size_x: push_constants.framebuffer_size.x,
+                normal,
+                view,
+            },
+            framebuffer_sampler,
+            ggx_lut_sampler,
+        );
 
     let diffuse = result.diffuse.lerp(transmission, transmission_factor);
 
@@ -139,8 +148,8 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
-    output: &mut Vec4,
-    output2: &mut Vec4,
+    hdr_framebuffer: &mut Vec4,
+    opaque_sampled_framebuffer: &mut Vec4,
 ) {
     let material = &materials[material_id as usize];
 
@@ -158,9 +167,7 @@ pub fn fragment(
 
     let view_vector = Vec3::from(push_constants.view_position) - position;
 
-    let normal = calculate_normal(
-        normal, &texture_sampler, material, view_vector, uv
-    );
+    let normal = calculate_normal(normal, &texture_sampler, material, view_vector, uv);
 
     let result = fragment_inner(
         diffuse,
@@ -174,10 +181,10 @@ pub fn fragment(
         sun_uniform,
     );
 
-    let x = (result.diffuse + result.specular + result.emission).extend(1.0);
+    let output = (result.diffuse + result.specular + result.emission).extend(1.0);
 
-    *output = x;
-    *output2 = x;
+    *hdr_framebuffer = output;
+    *opaque_sampled_framebuffer = output;
 }
 
 struct TextureSampler<'a> {
@@ -194,7 +201,9 @@ impl<'a> TextureSampler<'a> {
 }
 
 fn calculate_normal(
-    interpolated_normal: Vec3, texture_sampler: &TextureSampler, material: &MaterialInfo,
+    interpolated_normal: Vec3,
+    texture_sampler: &TextureSampler,
+    material: &MaterialInfo,
     view_vector: Vec3,
     uv: Vec2,
 ) -> Normal {
@@ -216,7 +225,6 @@ fn get_material_params(
     diffuse: Vec4,
     material: &MaterialInfo,
     texture_sampler: &TextureSampler,
-
 ) -> MaterialParams {
     let mut metallic = material.metallic_factor;
     let mut roughness = material.roughness_factor;
