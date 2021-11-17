@@ -10,6 +10,8 @@ use winit::window::Fullscreen;
 use glam::{Mat3, Mat4, UVec2, Vec2, Vec3, Vec4};
 use shared_structs::PointLight;
 
+mod profiling;
+
 fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) -> Mat4 {
     let t = (vertical_fov / 2.0).tan();
     let sy = 1.0 / t;
@@ -102,6 +104,10 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
         };
+
+    let physical_device_properties = unsafe {
+        instance.get_physical_device_properties(physical_device)
+    };
 
     let surface_caps = unsafe {
         surface_loader.get_physical_device_surface_capabilities(physical_device, surface)
@@ -376,6 +382,8 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
+    let query_pool = profiling::QueryPool::new(&mut init_resources)?;
+
     drop(init_resources);
 
     unsafe {
@@ -591,6 +599,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut screen_center =
         winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
+
+    let mut profiling_ctx = query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
 
     event_loop.run(move |event, _, control_flow| {
         let loop_closure = || -> anyhow::Result<()> {
@@ -821,6 +831,8 @@ fn main() -> anyhow::Result<()> {
                     window.request_redraw();
                 }
                 Event::RedrawRequested(_) => unsafe {
+                    let _redraw_span = tracy_client::span!("RedrawRequested");
+
                     device.wait_for_fences(&[render_fence], true, u64::MAX)?;
 
                     device.reset_fences(&[render_fence])?;
@@ -896,11 +908,17 @@ fn main() -> anyhow::Result<()> {
                         .max_depth(1.0);
 
                     {
+                        let _redraw_span = tracy_client::span!("Command buffer recording");
+
                         device.begin_command_buffer(
                             command_buffer,
                             &vk::CommandBufferBeginInfo::builder()
                                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                         )?;
+
+                        profiling_ctx.reset(&device, command_buffer);
+
+                        let all_commands_profiling_zone = profiling_zone!("all commands", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
                         device.cmd_begin_render_pass(
                             command_buffer,
@@ -948,27 +966,39 @@ fn main() -> anyhow::Result<()> {
                             vk::IndexType::UINT32,
                         );
 
-                        device.cmd_draw_indexed_indirect(
-                            command_buffer,
-                            draw_indirect_buffer.buffer,
-                            0,
-                            2,
-                            DRAW_COMMAND_SIZE as u32,
-                        );
+                        {
+                            let _depth_profiling_zone = profiling_zone!("depth pre pass", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                        device.cmd_bind_pipeline(
-                            command_buffer,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            pipelines.depth_pre_pass_alpha_clip,
-                        );
+                            {
+                                let _profiling_zone = profiling_zone!("depth pre pass opaque", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                        device.cmd_draw_indexed_indirect(
-                            command_buffer,
-                            draw_indirect_buffer.buffer,
-                            DRAW_COMMAND_SIZE as u64 * 2,
-                            2,
-                            DRAW_COMMAND_SIZE as u32,
-                        );
+                                device.cmd_draw_indexed_indirect(
+                                    command_buffer,
+                                    draw_indirect_buffer.buffer,
+                                    0,
+                                    2,
+                                    DRAW_COMMAND_SIZE as u32,
+                                );
+                            }
+
+                            device.cmd_bind_pipeline(
+                                command_buffer,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                pipelines.depth_pre_pass_alpha_clip,
+                            );
+
+                            {
+                                let _profiling_zone = profiling_zone!("depth pre pass alpha clipped", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                                device.cmd_draw_indexed_indirect(
+                                    command_buffer,
+                                    draw_indirect_buffer.buffer,
+                                    DRAW_COMMAND_SIZE as u64 * 2,
+                                    2,
+                                    DRAW_COMMAND_SIZE as u32,
+                                );
+                            }
+                        }
 
                         device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
 
@@ -978,17 +1008,23 @@ fn main() -> anyhow::Result<()> {
                             pipelines.normal,
                         );
 
-                        device.cmd_draw_indexed_indirect(
-                            command_buffer,
-                            draw_indirect_buffer.buffer,
-                            0,
-                            4,
-                            DRAW_COMMAND_SIZE as u32,
-                        );
+                        {
+                            let _profiling_zone = profiling_zone!("main opaque + alpha clipped", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                            device.cmd_draw_indexed_indirect(
+                                command_buffer,
+                                draw_indirect_buffer.buffer,
+                                0,
+                                4,
+                                DRAW_COMMAND_SIZE as u32,
+                            );
+                        }
 
                         device.cmd_end_render_pass(command_buffer);
 
                         {
+                            let _profiling_zone = profiling_zone!("hdr framebuffer blitting", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
                             let blit = vk::ImageBlit {
                                 src_subresource: vk::ImageSubresourceLayers {
                                     aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -1067,13 +1103,17 @@ fn main() -> anyhow::Result<()> {
                             pipelines.transmission,
                         );
 
-                        device.cmd_draw_indexed_indirect(
-                            command_buffer,
-                            draw_indirect_buffer.buffer,
-                            DRAW_COMMAND_SIZE as u64 * 4,
-                            2,
-                            DRAW_COMMAND_SIZE as u32,
-                        );
+                        {
+                            let _profiling_zone = profiling_zone!("transmissive objects", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                            device.cmd_draw_indexed_indirect(
+                                command_buffer,
+                                draw_indirect_buffer.buffer,
+                                DRAW_COMMAND_SIZE as u64 * 4,
+                                2,
+                                DRAW_COMMAND_SIZE as u32,
+                            );
+                        }
 
                         device.cmd_end_render_pass(command_buffer);
 
@@ -1106,7 +1146,11 @@ fn main() -> anyhow::Result<()> {
                             pipelines.tonemap,
                         );
 
-                        device.cmd_draw(command_buffer, 3, 1, 0, 0);
+                        {
+                            let _profiling_zone = profiling_zone!("tonemapping", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                            device.cmd_draw(command_buffer, 3, 1, 0, 0);
+                        }
 
                         device.cmd_end_render_pass(command_buffer);
 
@@ -1125,7 +1169,13 @@ fn main() -> anyhow::Result<()> {
                             }],
                         );
 
+                        drop(all_commands_profiling_zone);
+
                         device.end_command_buffer(command_buffer)?;
+                    }
+
+                    {
+                        let _submission_span = tracy_client::span!("Command buffer submission");
 
                         device.queue_submit(
                             queue,
@@ -1136,6 +1186,10 @@ fn main() -> anyhow::Result<()> {
                                 .signal_semaphores(&[render_semaphore])],
                             render_fence,
                         )?;
+                    }
+
+                    {
+                        let _presentation_span = tracy_client::span!("Queue presentation");
 
                         swapchain_loader.queue_present(
                             queue,
@@ -1145,6 +1199,10 @@ fn main() -> anyhow::Result<()> {
                                 .image_indices(&[swapchain_image_index]),
                         )?;
                     }
+
+                    profiling_ctx.collect(&device)?;
+
+                    tracy_client::finish_continuous_frame!();
                 },
                 Event::LoopDestroyed => {
                     unsafe {
