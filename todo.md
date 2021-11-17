@@ -1,0 +1,10 @@
+- Froxel light clustering
+- Implement cool new extensions
+- Test on egpu
+- GGX LUT texture
+- Proper profiling
+- depth pre pass for transmissive objects
+- render both textures at same time
+- mip mapping for sampled hdr framebuffer
+- fix gltf texture coords
+- remove emission from brdf result

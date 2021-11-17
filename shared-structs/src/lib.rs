@@ -7,8 +7,9 @@ pub struct PushConstants {
     pub view_position: Vec3A,
     pub tile_size_in_pixels: Vec2,
     pub num_tiles: UVec2,
+    pub framebuffer_size: UVec2,
     pub debug_froxels: u32,
-    //pub depth_range: f32,
+    pub ggx_lut_texture_index: u32,
 }
 
 pub struct SunUniform {

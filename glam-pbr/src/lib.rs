@@ -1,10 +1,14 @@
 #![no_std]
 
 use core::f32::consts::FRAC_1_PI;
-use glam::Vec3;
+use glam::{Vec2, Vec3, Mat4};
 use num_traits::Float;
 
 // Workarounds: can't use f32.lerp, f32.clamp or f32.powi.
+
+fn clamp(value: f32, min: f32, max: f32) -> f32 {
+    value.max(min).min(max)
+}
 
 #[derive(Copy, Clone)]
 pub struct View(pub Vec3);
@@ -113,18 +117,16 @@ pub fn fresnel_schlick(view_dot_halfway: Dot<View, Halfway>, f0: Vec3, f90: Vec3
 #[derive(Copy, Clone)]
 pub struct ActualRoughness(f32);
 
-impl ActualRoughness {
-    fn apply_ior(self, ior: IndexOfRefraction) -> ActualRoughness {
-        ActualRoughness(self.0 * clamp(ior.0 * 2.0 - 2.0, 0.0, 1.0))
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct PerceptualRoughness(pub f32);
 
 impl PerceptualRoughness {
     pub fn as_actual_roughness(&self) -> ActualRoughness {
         ActualRoughness(self.0 * self.0)
+    }
+
+    fn apply_ior(self, ior: IndexOfRefraction) -> PerceptualRoughness {
+        PerceptualRoughness(self.0 * clamp(ior.0 * 2.0 - 2.0, 0.0, 1.0))
     }
 }
 
@@ -193,6 +195,55 @@ fn specular_btdf(
 }
 */
 
+pub struct IblVolumeRefractionParams {
+    pub material_params: MaterialParams,
+    pub framebuffer_size_x: u32,
+    pub normal: Normal,
+    pub view: View,
+    pub proj_view_matrix: Mat4,
+    pub position: Vec3,
+}
+
+pub fn ibl_volume_refraction<FSamp: Fn(Vec2, f32) -> Vec3, GSamp: Fn(f32, PerceptualRoughness) -> Vec2>(
+    params: IblVolumeRefractionParams,
+    framebuffer_sampler: FSamp,
+    ggx_lut_sampler: GSamp,
+) -> Vec3 {
+    let IblVolumeRefractionParams {
+        framebuffer_size_x, proj_view_matrix, position,
+        normal, view,
+        material_params: MaterialParams {
+            diffuse_colour: base_colour,
+            metallic,
+            perceptual_roughness,
+            index_of_refraction
+        },
+    } = params;
+
+    // todo: volume
+    let refracted_ray_exit = position;
+
+    let device_coords = proj_view_matrix * refracted_ray_exit.extend(1.0);
+    let screen_coords = Vec2::new(device_coords.x, device_coords.y) / device_coords.w;
+    let texture_coords = (screen_coords + 1.0) / 2.0;
+
+    let framebuffer_lod = (framebuffer_size_x as f32).log2() * perceptual_roughness.apply_ior(index_of_refraction).0;
+
+    let transmitted_light = framebuffer_sampler(texture_coords, framebuffer_lod);
+    // todo: volume
+    let attenuated_colour = transmitted_light;
+
+    let normal_dot_view = Dot::new(&normal, &view);
+    let brdf = ggx_lut_sampler(normal_dot_view.value, perceptual_roughness);
+
+    let f0 = { Vec3::splat(index_of_refraction.to_dielectric_f0()).lerp(base_colour, metallic) };
+    let f90 = Vec3::ONE;
+
+    let specular_colour = f0 * brdf.x + f90 * brdf.y;
+
+    (1.0 - specular_colour) * attenuated_colour * base_colour
+}
+
 fn diffuse_brdf(base: Vec3, fresnel: Vec3) -> Vec3 {
     (1.0 - fresnel) * FRAC_1_PI * base
 }
@@ -212,7 +263,7 @@ fn specular_brdf(
     (distribution_function * geometric_shadowing) * fresnel
 }
 
-pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
+pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
     let BasicBrdfParams {
         normal,
         light,
@@ -236,15 +287,31 @@ pub fn basic_brdf(params: BasicBrdfParams) -> Vec3 {
     let view_dot_halfway = Dot::new(&view, &halfway);
 
     let c_diff = diffuse_colour.lerp(Vec3::ZERO, metallic);
-    let f0 = {
-        Vec3::splat(index_of_refraction.to_dielectric_f0()).lerp(diffuse_colour, metallic)
-    };
+    let f0 = { Vec3::splat(index_of_refraction.to_dielectric_f0()).lerp(diffuse_colour, metallic) };
 
     let fresnel = fresnel_schlick(view_dot_halfway, f0, Vec3::splat(1.0));
 
-    let material = diffuse_brdf(c_diff, fresnel) + specular_brdf(normal_dot_view, normal_dot_light, normal_dot_halfway, actual_roughness, fresnel);
+    let diffuse = light_intensity * normal_dot_light.value * diffuse_brdf(c_diff, fresnel);
+    let specular = light_intensity * normal_dot_light.value * specular_brdf(
+        normal_dot_view,
+        normal_dot_light,
+        normal_dot_halfway,
+        actual_roughness,
+        fresnel,
+    );
 
-    light_intensity * normal_dot_light.value * material
+    BrdfResult {
+        diffuse,
+        specular,
+        emission: Vec3::ZERO,
+    }
+}
+
+#[derive(Default)]
+pub struct BrdfResult {
+    pub diffuse: Vec3,
+    pub specular: Vec3,
+    pub emission: Vec3,
 }
 
 pub fn compute_f0(
@@ -271,8 +338,8 @@ fn test_i_havent_broken_anything() {
             diffuse_colour: Vec3::ONE,
             metallic: 0.25,
             perceptual_roughness: PerceptualRoughness(0.25),
-            index_of_refraction: Default::default()
-        }
+            index_of_refraction: Default::default(),
+        },
     };
 
     assert_eq!(basic_brdf(params), Vec3::splat(0.22577369));

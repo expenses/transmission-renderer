@@ -10,13 +10,15 @@
 extern crate spirv_std;
 
 use glam_pbr::{
-    basic_brdf, BasicBrdfParams, Light, MaterialParams, Normal, PerceptualRoughness, View, IndexOfRefraction
+    basic_brdf, BasicBrdfParams, IndexOfRefraction, Light, MaterialParams, Normal,
+    PerceptualRoughness, View, BrdfResult, ibl_volume_refraction, IblVolumeRefractionParams,
 };
 use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
 use spirv_std::{
     glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
+    image::SampledImage,
     num_traits::Float,
-    Image, RuntimeArray, Sampler, image::SampledImage,
+    Image, RuntimeArray, Sampler,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -52,6 +54,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &SampledImage<Image!(2D, type=f32, sampled)>,
     output: &mut Vec4,
 ) {
     let material = &materials[material_id as usize];
@@ -68,29 +71,60 @@ pub fn fragment_transmission(
         diffuse *= texture_sampler.sample(material.textures.diffuse as u32);
     }
 
-    let mut transmission = material.transmission_factor;
+    let mut transmission_factor = material.transmission_factor;
 
     if material.textures.transmission != -1 {
-        transmission *= texture_sampler.sample(material.textures.transmission as u32).x;
+        transmission_factor *= texture_sampler.sample(material.textures.transmission as u32).x;
     }
 
-    fragment_inner(
+    let view_vector = Vec3::from(push_constants.view_position) - position;
+    let view = View(view_vector.normalize());
+
+    let normal = calculate_normal(
+        normal, &texture_sampler, material, view_vector, uv
+    );
+
+    let material_params = get_material_params(diffuse, material, &texture_sampler);
+
+    let result = fragment_inner(
         diffuse,
         material,
         position,
         normal,
-        uv,
         push_constants,
         frag_coord,
         point_lights,
         texture_sampler,
         sun_uniform,
-        output,
     );
 
-    output.w = 1.0 - transmission;
-}
+    let sampler = *sampler;
 
+    let ggx_lut_sampler = |normal_dot_view, perceptual_roughness: PerceptualRoughness| {
+        let uv = Vec2::new(normal_dot_view, perceptual_roughness.0);
+
+        let texture = unsafe { textures.index(push_constants.ggx_lut_texture_index as usize) };
+        let sample: Vec4 = texture.sample(sampler, uv);
+
+        Vec2::new(sample.x, sample.y)
+    };
+
+    let framebuffer_sampler = |uv, lod| {
+        let sample: Vec4 = unsafe {
+            framebuffer.sample_by_lod(uv, lod)
+        };
+        sample.truncate()
+    };
+
+    let transmission = transmission_factor * ibl_volume_refraction(IblVolumeRefractionParams {
+        proj_view_matrix: push_constants.proj_view, position, material_params,
+        framebuffer_size_x: push_constants.framebuffer_size.x, normal, view,
+    }, framebuffer_sampler, ggx_lut_sampler);
+
+    let diffuse = result.diffuse.lerp(transmission, transmission_factor);
+
+    *output = (diffuse + result.specular + result.emission).extend(1.0);
+}
 
 #[spirv(fragment)]
 pub fn fragment(
@@ -121,19 +155,25 @@ pub fn fragment(
         diffuse *= texture_sampler.sample(material.textures.diffuse as u32)
     }
 
-    fragment_inner(
+    let view_vector = Vec3::from(push_constants.view_position) - position;
+
+    let normal = calculate_normal(
+        normal, &texture_sampler, material, view_vector, uv
+    );
+
+    let result = fragment_inner(
         diffuse,
         material,
         position,
         normal,
-        uv,
         push_constants,
         frag_coord,
         point_lights,
         texture_sampler,
         sun_uniform,
-        output,
     );
+
+    *output = (result.diffuse + result.specular + result.emission).extend(1.0);
 }
 
 struct TextureSampler<'a> {
@@ -149,19 +189,61 @@ impl<'a> TextureSampler<'a> {
     }
 }
 
+fn calculate_normal(
+    interpolated_normal: Vec3, texture_sampler: &TextureSampler, material: &MaterialInfo,
+    view_vector: Vec3,
+    uv: Vec2,
+) -> Normal {
+    let mut normal = interpolated_normal.normalize();
+
+    if material.textures.normal_map != -1 {
+        let map_normal = texture_sampler
+            .sample(material.textures.normal_map as u32)
+            .truncate();
+        let map_normal = map_normal * 255.0 / 127.0 - 128.0 / 127.0;
+
+        normal = (compute_cotangent_frame(normal, -view_vector, uv) * map_normal).normalize();
+    };
+
+    Normal(normal)
+}
+
+fn get_material_params(
+    diffuse: Vec4,
+    material: &MaterialInfo,
+    texture_sampler: &TextureSampler,
+
+) -> MaterialParams {
+    let mut metallic = material.metallic_factor;
+    let mut roughness = material.roughness_factor;
+
+    if material.textures.metallic_roughness != -1 {
+        let sample = texture_sampler.sample(material.textures.metallic_roughness as u32);
+
+        // These two are switched!
+        metallic *= sample.z;
+        roughness *= sample.y;
+    }
+
+    MaterialParams {
+        diffuse_colour: diffuse.truncate(),
+        metallic,
+        perceptual_roughness: PerceptualRoughness(roughness),
+        index_of_refraction: IndexOfRefraction(material.index_of_refraction),
+    }
+}
+
 fn fragment_inner(
     diffuse: Vec4,
     material: &MaterialInfo,
     position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
+    normal: Normal,
     push_constants: &PushConstants,
     frag_coord: Vec4,
     point_lights: &[PointLight],
     texture_sampler: TextureSampler,
     sun_uniform: &SunUniform,
-    output: &mut Vec4,
-) {
+) -> BrdfResult {
     let cluster_id = {
         let cluster_z = ((frag_coord.z * 16000.0) % 16.0) as u32;
 
@@ -183,21 +265,8 @@ fn fragment_inner(
         roughness *= sample.y;
     }
 
-    let mut normal = normal.normalize();
-
     let view_vector = Vec3::from(push_constants.view_position) - position;
-
-    if material.textures.normal_map != -1 {
-        let map_normal = texture_sampler
-            .sample(material.textures.normal_map as u32)
-            .truncate();
-        let map_normal = map_normal * 255.0 / 127.0 - 128.0 / 127.0;
-
-        normal = (compute_cotangent_frame(normal, -view_vector, uv) * map_normal).normalize();
-    };
-
     let view = View(view_vector.normalize());
-    let normal = Normal(normal);
 
     let material_params = MaterialParams {
         diffuse_colour: diffuse.truncate(),
@@ -206,7 +275,7 @@ fn fragment_inner(
         index_of_refraction: IndexOfRefraction(material.index_of_refraction),
     };
 
-    let mut colour = Vec3::ZERO;
+    let mut sum = BrdfResult::default();
 
     let mut emission = Vec3::from(material.emissive_factor);
 
@@ -216,15 +285,18 @@ fn fragment_inner(
             .truncate();
     }
 
-    colour += emission;
+    sum.emission = emission;
 
-    colour += basic_brdf(BasicBrdfParams {
+    let result = basic_brdf(BasicBrdfParams {
         light: Light(sun_uniform.dir.into()),
         light_intensity: sun_uniform.intensity,
         normal,
         view,
         material_params,
     });
+
+    sum.diffuse += result.diffuse;
+    sum.specular += result.specular;
 
     let num_lights = point_lights.len();
     let mut i = 0;
@@ -241,13 +313,16 @@ fn fragment_inner(
         let light_colour = light.colour_and_intensity.truncate();
         let intensity = light.colour_and_intensity.w;
 
-        colour += basic_brdf(BasicBrdfParams {
+        let result = basic_brdf(BasicBrdfParams {
             light: Light(direction),
             light_intensity: light_colour * intensity * attenuation,
             normal,
             view,
             material_params,
         });
+
+        sum.diffuse += result.diffuse;
+        sum.specular += result.specular;
 
         i += 1;
     }
@@ -261,13 +336,15 @@ fn fragment_inner(
     }
     */
 
+    /*
     if push_constants.debug_froxels != 0 {
         let debug_colour = debug_colour_for_id(cluster_id);
 
         colour = colour * debug_colour + debug_colour * 0.01;
     }
+    */
 
-    *output = colour.extend(diffuse.w);
+    sum
 }
 
 #[spirv(fragment)]
@@ -409,9 +486,7 @@ pub fn fragment_tonemap(
     #[spirv(push_constant)] params: &BakedLottesTonemapperParams,
     output: &mut Vec4,
 ) {
-    let sample: Vec4 = unsafe {
-        texture.sample(uv)
-    };
+    let sample: Vec4 = unsafe { texture.sample(uv) };
 
     *output = LottesTonemapper
         .tonemap(sample.truncate(), *params)
