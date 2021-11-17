@@ -196,6 +196,41 @@ fn main() -> anyhow::Result<()> {
     let mut image_manager = ImageManager::default();
     let mut buffers_to_cleanup = Vec::new();
 
+    let ggx_lut_id = {
+        use image::GenericImageView;
+
+        let decoded_image = image::load_from_memory_with_format(
+            include_bytes!("../ggx_lut.png"),
+            image::ImageFormat::Png,
+        )?;
+
+        let rgba_image = decoded_image.to_rgba8();
+
+        let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
+            &ash_abstractions::LoadImageDescriptor {
+                bytes: &*rgba_image,
+                extent: vk::Extent3D {
+                    width: decoded_image.width(),
+                    height: decoded_image.height(),
+                    depth: 1,
+                },
+                view_ty: vk::ImageViewType::TYPE_2D,
+                format: vk::Format::R8G8B8A8_UNORM,
+                name: "ggx lut",
+                next_accesses: &[
+                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                ],
+                next_layout: vk_sync::ImageLayout::Optimal,
+                mip_levels: 1,
+            },
+            &mut init_resources,
+        )?;
+
+        buffers_to_cleanup.push(staging_buffer);
+
+        image_manager.push_image(image)
+    };
+
     let window_size = window.inner_size();
 
     let mut extent = vk::Extent2D {
@@ -209,7 +244,7 @@ fn main() -> anyhow::Result<()> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
-    let (model_opaque_slice, model_alpha_clip_slice, model_transmission_slice) = load_gltf(
+    let model = load_gltf(
         &filename,
         &mut init_resources,
         &mut image_manager,
@@ -221,7 +256,7 @@ fn main() -> anyhow::Result<()> {
 
     let filename2 = std::env::args().nth(2).unwrap();
 
-    let (model2_opaque_slice, model2_alpha_clip_slice, model2_transmission_slice) = load_gltf(
+    let model2 = load_gltf(
         &filename2,
         &mut init_resources,
         &mut image_manager,
@@ -256,50 +291,20 @@ fn main() -> anyhow::Result<()> {
         unsafe {
             cast_slice(&[
                 // Opaque draws
-                vk::DrawIndexedIndirectCommand {
-                    index_count: model_opaque_slice.count,
-                    instance_count: 1,
-                    first_index: model_opaque_slice.offset,
-                    vertex_offset: 0,
-                    first_instance: 0,
-                },
-                vk::DrawIndexedIndirectCommand {
-                    index_count: model2_opaque_slice.count,
-                    instance_count: 1,
-                    first_index: model2_opaque_slice.offset,
-                    vertex_offset: 0,
-                    first_instance: 1,
-                },
+                model.opaque.as_draw_indexed_indirect_command(0),
+                model2.opaque.as_draw_indexed_indirect_command(1),
                 // Alpha clip draws.
-                vk::DrawIndexedIndirectCommand {
-                    index_count: model_alpha_clip_slice.count,
-                    instance_count: 1,
-                    first_index: model_alpha_clip_slice.offset,
-                    vertex_offset: 0,
-                    first_instance: 0,
-                },
-                vk::DrawIndexedIndirectCommand {
-                    index_count: model2_alpha_clip_slice.count,
-                    instance_count: 1,
-                    first_index: model2_alpha_clip_slice.offset,
-                    vertex_offset: 0,
-                    first_instance: 1,
-                },
+                model.alpha_clip.as_draw_indexed_indirect_command(0),
+                model2.alpha_clip.as_draw_indexed_indirect_command(1),
                 // Transmission draws
-                vk::DrawIndexedIndirectCommand {
-                    index_count: model_transmission_slice.count,
-                    instance_count: 1,
-                    first_index: model_transmission_slice.offset,
-                    vertex_offset: 0,
-                    first_instance: 0,
-                },
-                vk::DrawIndexedIndirectCommand {
-                    index_count: model2_transmission_slice.count,
-                    instance_count: 1,
-                    first_index: model2_transmission_slice.offset,
-                    vertex_offset: 0,
-                    first_instance: 1,
-                },
+                model.transmission.as_draw_indexed_indirect_command(0),
+                model2.transmission.as_draw_indexed_indirect_command(1),
+                model
+                    .transmission_alpha_clip
+                    .as_draw_indexed_indirect_command(0),
+                model2
+                    .transmission_alpha_clip
+                    .as_draw_indexed_indirect_command(1),
             ])
         },
         "draw indirect",
@@ -503,8 +508,10 @@ fn main() -> anyhow::Result<()> {
     let mut keyboard_state = KeyboardState::default();
 
     let mut camera = dolly::rig::CameraRig::builder()
-        .with(dolly::drivers::Position::new(Vec3::new(2.0, 1000.0, 1.0)))
-        .with(dolly::drivers::YawPitch::new().pitch_degrees(-74.0))
+        .with(dolly::drivers::Position::new(Vec3::new(
+            -18.0, 300.0, 100.0,
+        )))
+        .with(dolly::drivers::YawPitch::new().pitch_degrees(-15.0))
         .with(dolly::drivers::Smooth::new_position_rotation(0.5, 0.25))
         .build();
 
@@ -525,7 +532,7 @@ fn main() -> anyhow::Result<()> {
             / num_tiles.as_vec2(),
         debug_froxels: 0,
         framebuffer_size: UVec2::new(extent.width, extent.height),
-        ggx_lut_texture_index: 0,
+        ggx_lut_texture_index: ggx_lut_id,
     };
 
     let descriptor_pool = unsafe {
@@ -543,7 +550,7 @@ fn main() -> anyhow::Result<()> {
                         .descriptor_count(MAX_IMAGES),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::SAMPLER)
-                        .descriptor_count(1),
+                        .descriptor_count(2),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                         .descriptor_count(2),
@@ -580,6 +587,19 @@ fn main() -> anyhow::Result<()> {
         )
     }?;
 
+    let clamp_sampler = unsafe {
+        device.create_sampler(
+            &vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                .max_lod(vk::LOD_CLAMP_NONE),
+            None,
+        )
+    }?;
+
     unsafe {
         device.update_descriptor_sets(
             &[
@@ -610,6 +630,11 @@ fn main() -> anyhow::Result<()> {
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(sun_uniform_buffer.buffer)
                         .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(main_ds)
+                    .dst_binding(5)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
+                    .image_info(&[*vk::DescriptorImageInfo::builder().sampler(clamp_sampler)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(hdr_framebuffer_ds)
                     .dst_binding(0)
@@ -1128,6 +1153,20 @@ fn main() -> anyhow::Result<()> {
                                 2,
                                 DRAW_COMMAND_SIZE as u32,
                             );
+
+                            device.cmd_bind_pipeline(
+                                command_buffer,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                pipelines.depth_pre_pass_transmissive_alpha_clip,
+                            );
+
+                            device.cmd_draw_indexed_indirect(
+                                command_buffer,
+                                draw_indirect_buffer.buffer,
+                                DRAW_COMMAND_SIZE as u64 * 6,
+                                2,
+                                DRAW_COMMAND_SIZE as u32,
+                            );
                         }
 
                         device.cmd_end_render_pass(command_buffer);
@@ -1160,7 +1199,7 @@ fn main() -> anyhow::Result<()> {
                                 command_buffer,
                                 draw_indirect_buffer.buffer,
                                 DRAW_COMMAND_SIZE as u64 * 4,
-                                2,
+                                4,
                                 DRAW_COMMAND_SIZE as u32,
                             );
                         }
@@ -1306,6 +1345,11 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(5)
+                            .descriptor_type(vk::DescriptorType::SAMPLER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                     ]),
                     None,
                 )?
@@ -1410,6 +1454,7 @@ struct Pipelines {
     depth_pre_pass: vk::Pipeline,
     depth_pre_pass_alpha_clip: vk::Pipeline,
     depth_pre_pass_transmissive: vk::Pipeline,
+    depth_pre_pass_transmissive_alpha_clip: vk::Pipeline,
     transmission: vk::Pipeline,
     tonemap: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
@@ -1720,6 +1765,14 @@ impl Pipelines {
             2,
         );
 
+        let depth_pre_pass_transmissive_alpha_clip_desc = depth_pre_pass_alpha_clip_baked
+            .as_pipeline_create_info(
+                depth_pre_pass_alpha_clip_stages,
+                pipeline_layout,
+                render_passes.draw,
+                2,
+            );
+
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
@@ -1728,6 +1781,7 @@ impl Pipelines {
                     *depth_pre_pass_desc,
                     *depth_pre_pass_alpha_clip_desc,
                     *depth_pre_pass_transmissive_desc,
+                    *depth_pre_pass_transmissive_alpha_clip_desc,
                     *transmission_pipeline_desc,
                     *tonemap_pipeline_desc,
                 ],
@@ -1741,8 +1795,9 @@ impl Pipelines {
             depth_pre_pass: pipelines[1],
             depth_pre_pass_alpha_clip: pipelines[2],
             depth_pre_pass_transmissive: pipelines[3],
-            transmission: pipelines[4],
-            tonemap: pipelines[5],
+            depth_pre_pass_transmissive_alpha_clip: pipelines[4],
+            transmission: pipelines[5],
+            tonemap: pipelines[6],
             pipeline_layout,
             tonemap_pipeline_layout,
             transmission_pipeline_layout,
@@ -1844,7 +1899,7 @@ impl RenderPasses {
                 .dst_subpass(2)
                 .src_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
                 .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
-                .dst_stage_mask(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
+                .dst_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
                 .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
         ];
 
@@ -2005,6 +2060,28 @@ struct IndexBufferSlice {
     count: u32,
 }
 
+impl IndexBufferSlice {
+    fn as_draw_indexed_indirect_command(
+        &self,
+        first_instance: u32,
+    ) -> vk::DrawIndexedIndirectCommand {
+        vk::DrawIndexedIndirectCommand {
+            index_count: self.count,
+            instance_count: 1,
+            first_index: self.offset,
+            vertex_offset: 0,
+            first_instance,
+        }
+    }
+}
+
+struct Model {
+    opaque: IndexBufferSlice,
+    alpha_clip: IndexBufferSlice,
+    transmission: IndexBufferSlice,
+    transmission_alpha_clip: IndexBufferSlice,
+}
+
 fn load_gltf(
     path: &str,
     init_resources: &mut ash_abstractions::InitResources,
@@ -2013,7 +2090,7 @@ fn load_gltf(
     materials: &mut Vec<shared_structs::MaterialInfo>,
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u32>,
-) -> anyhow::Result<(IndexBufferSlice, IndexBufferSlice, IndexBufferSlice)> {
+) -> anyhow::Result<Model> {
     let (gltf, buffers, mut images) = gltf::import(path)?;
 
     for image in &mut images {
@@ -2038,7 +2115,8 @@ fn load_gltf(
 
     let mut opaque_indices = Vec::new();
     let mut alpha_clip_indices = Vec::new();
-    let mut transparent_indices = Vec::new();
+    let mut tranmission_indices = Vec::new();
+    let mut transmission_alpha_clip_indices = Vec::new();
 
     for (node, mesh) in gltf
         .nodes()
@@ -2053,12 +2131,22 @@ fn load_gltf(
             let indices = match (material.alpha_mode(), material.transmission().is_some()) {
                 (gltf::material::AlphaMode::Opaque, false) => &mut opaque_indices,
                 (gltf::material::AlphaMode::Mask, false) => &mut alpha_clip_indices,
-                (mode, false) => {
+                (gltf::material::AlphaMode::Opaque, true) => &mut tranmission_indices,
+                (gltf::material::AlphaMode::Mask, true) => &mut transmission_alpha_clip_indices,
+                (mode, _) => {
                     dbg!(mode);
                     &mut opaque_indices
                 }
-                (_, true) => &mut transparent_indices,
             };
+
+            // We handle texture transforms, but only scaling and only on the base colour texture.
+            // This is the bare minimum to render the SheenCloth correctly.
+            let uv_scaling = material
+                .pbr_metallic_roughness()
+                .base_color_texture()
+                .and_then(|info| info.texture_transform())
+                .map(|transform| Vec2::from(transform.scale()))
+                .unwrap_or(Vec2::ONE);
 
             let material_id = material.index().unwrap_or(0) + materials.len();
 
@@ -2077,7 +2165,7 @@ fn load_gltf(
             for ((position, normal), uv) in positions.zip(normals).zip(uvs) {
                 vertices.push(Vertex {
                     position: (transform * Vec3::from(position).extend(1.0)).truncate(),
-                    uv: uv.into(),
+                    uv: uv_scaling * Vec2::from(uv),
                     normal: normal_transform * Vec3::from(normal),
                     material: material_id as u32,
                 });
@@ -2101,10 +2189,17 @@ fn load_gltf(
 
     let transmission_slice = IndexBufferSlice {
         offset: indices.len() as u32,
-        count: transparent_indices.len() as u32,
+        count: tranmission_indices.len() as u32,
     };
 
-    indices.extend_from_slice(&transparent_indices);
+    indices.extend_from_slice(&tranmission_indices);
+
+    let transmission_alpha_clip_slice = IndexBufferSlice {
+        offset: indices.len() as u32,
+        count: transmission_alpha_clip_indices.len() as u32,
+    };
+
+    indices.extend_from_slice(&transmission_alpha_clip_indices);
 
     let mut image_index_to_id = std::collections::HashMap::new();
 
@@ -2204,7 +2299,12 @@ fn load_gltf(
         });
     }
 
-    Ok((opaque_slice, alpha_clip_slice, transmission_slice))
+    Ok(Model {
+        opaque: opaque_slice,
+        alpha_clip: alpha_clip_slice,
+        transmission: transmission_slice,
+        transmission_alpha_clip: transmission_alpha_clip_slice,
+    })
 }
 
 fn normal_matrix(transform: Mat4) -> Mat3 {

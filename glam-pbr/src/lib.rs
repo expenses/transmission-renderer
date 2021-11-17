@@ -1,6 +1,6 @@
 #![no_std]
 
-use core::f32::consts::FRAC_1_PI;
+use core::f32::consts::{FRAC_1_PI, PI};
 use glam::{Mat4, Vec2, Vec3};
 use num_traits::Float;
 
@@ -85,10 +85,11 @@ impl<A: ShadingVector, B: ShadingVector> Dot<A, B> {
 pub fn d_ggx(normal_dot_halfway: Dot<Normal, Halfway>, roughness: ActualRoughness) -> f32 {
     let noh = normal_dot_halfway.value;
 
-    let a = noh * roughness.0;
-    let k = roughness.0 / (1.0 - noh * noh + a * a);
+    let alpha_roughness_sq = roughness.0 * roughness.0;
 
-    k * k * FRAC_1_PI
+    let f = (noh * noh) * (alpha_roughness_sq - 1.0) + 1.0;
+
+    alpha_roughness_sq / (PI * f * f)
 }
 
 // https://google.github.io/filament/Filament.md.html#materialsystem/specularbrdf/geometricshadowing(specularg)
@@ -105,7 +106,14 @@ pub fn v_smith_ggx_correlated(
     let a2 = roughness.0 * roughness.0;
     let ggx_v = nol * (nov * nov * (1.0 - a2) + a2).sqrt();
     let ggx_l = nov * (nol * nol * (1.0 - a2) + a2).sqrt();
-    0.5 / (ggx_v + ggx_l)
+
+    let ggx = ggx_v + ggx_l;
+
+    if ggx > 0.0 {
+        0.5 / ggx
+    } else {
+        0.0
+    }
 }
 
 // Fresnel
@@ -116,6 +124,12 @@ pub fn fresnel_schlick(view_dot_halfway: Dot<View, Halfway>, f0: Vec3, f90: Vec3
 
 #[derive(Copy, Clone)]
 pub struct ActualRoughness(f32);
+
+impl ActualRoughness {
+    fn apply_ior(self, ior: IndexOfRefraction) -> ActualRoughness {
+        ActualRoughness(self.0 * clamp(ior.0 * 2.0 - 2.0, 0.0, 1.0))
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct PerceptualRoughness(pub f32);
@@ -163,20 +177,18 @@ impl IndexOfRefraction {
     }
 }
 
-/*
-fn specular_btdf(
-    actual_roughness: ActualRoughness,
-    index_of_refraction: IndexOfRefraction,
+pub fn transmission_btdf(
+    material_params: MaterialParams,
     normal: Normal,
     view: View,
     light: Light,
-    base: Vec3,
-    f0: Vec3,
-    f90: Vec3,
 ) -> Vec3 {
+    let actual_roughness = material_params.perceptual_roughness.as_actual_roughness();
+    let index_of_refraction = material_params.index_of_refraction;
+
     let transmission_roughness = actual_roughness.apply_ior(index_of_refraction);
 
-    let light_mirrored = Light((light.0 * 2.0 * normal.0 * (-light.0).dot(normal.0)).normalize());
+    let light_mirrored = Light((light.0 + 2.0 * normal.0 * (-light.0).dot(normal.0)).normalize());
 
     let halfway = Halfway::new(&view, &light_mirrored);
     let normal_dot_halfway = Dot::new(&normal, &halfway);
@@ -186,14 +198,19 @@ fn specular_btdf(
 
     let distribution = d_ggx(normal_dot_halfway, transmission_roughness);
 
-    let geometric_shadowing =
-        v_smith_ggx_correlated(normal_dot_view, normal_dot_light_mirrored, transmission_roughness);
+    let geometric_shadowing = v_smith_ggx_correlated(
+        normal_dot_view,
+        normal_dot_light_mirrored,
+        transmission_roughness,
+    );
+
+    let f0 = Vec3::splat(material_params.index_of_refraction.to_dielectric_f0());
+    let f90 = Vec3::ONE;
 
     let fresnel = fresnel_schlick(view_dot_halfway, f0, f90);
 
-    (1.0 - fresnel) * base * distribution * geometric_shadowing
+    (1.0 - fresnel) * geometric_shadowing * material_params.diffuse_colour * distribution
 }
-*/
 
 pub struct IblVolumeRefractionParams {
     pub material_params: MaterialParams,
@@ -241,10 +258,10 @@ pub fn ibl_volume_refraction<
     // todo: volume
     let attenuated_colour = transmitted_light;
 
-    let normal_dot_view = Dot::new(&normal, &view);
-    let brdf = ggx_lut_sampler(normal_dot_view.value, perceptual_roughness);
+    let normal_dot_view = normal.0.dot(view.0);
+    let brdf = ggx_lut_sampler(normal_dot_view, perceptual_roughness);
 
-    let f0 = { Vec3::splat(index_of_refraction.to_dielectric_f0()).lerp(base_colour, metallic) };
+    let f0 = index_of_refraction.to_dielectric_f0();
     let f90 = Vec3::ONE;
 
     let specular_colour = f0 * brdf.x + f90 * brdf.y;

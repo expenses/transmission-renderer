@@ -57,6 +57,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &SampledImage<
         Image!(2D, type=f32, sampled),
     >,
+    #[spirv(descriptor_set = 0, binding = 5)] clamp_sampler: &Sampler,
     output: &mut Vec4,
 ) {
     let material = &materials[material_id as usize];
@@ -100,23 +101,21 @@ pub fn fragment_transmission(
         sun_uniform,
     );
 
-    let sampler = *sampler;
-
-    let ggx_lut_sampler = |normal_dot_view, perceptual_roughness: PerceptualRoughness| {
+    let ggx_lut_sampler = |normal_dot_view: f32, perceptual_roughness: PerceptualRoughness| {
         let uv = Vec2::new(normal_dot_view, perceptual_roughness.0);
 
         let texture = unsafe { textures.index(push_constants.ggx_lut_texture_index as usize) };
-        let sample: Vec4 = texture.sample(sampler, uv);
+        let sample: Vec4 = texture.sample(*clamp_sampler, uv);
 
         Vec2::new(sample.x, sample.y)
     };
 
     let framebuffer_sampler = |uv, lod| {
-        let sample: Vec4 = unsafe { framebuffer.sample_by_lod(uv, lod) };
+        let sample: Vec4 = unsafe { framebuffer.sample_by_lod(uv, 0.0) };
         sample.truncate()
     };
 
-    let transmission = transmission_factor
+    let mut transmission = transmission_factor
         * ibl_volume_refraction(
             IblVolumeRefractionParams {
                 proj_view_matrix: push_constants.proj_view,
@@ -129,6 +128,48 @@ pub fn fragment_transmission(
             framebuffer_sampler,
             ggx_lut_sampler,
         );
+
+    {
+        let transmitted_light = sun_uniform.intensity
+            * glam_pbr::transmission_btdf(
+                material_params,
+                normal,
+                view,
+                Light(sun_uniform.dir.into()),
+            );
+
+        transmission += transmission_factor * transmitted_light;
+    }
+
+    let num_lights = point_lights.len();
+    let mut i = 0;
+
+    while i < num_lights {
+        let light = &point_lights[i];
+
+        let vector = Vec3::from(light.position) - position;
+        let distance_sq = vector.length_squared();
+        let direction = vector / distance_sq.sqrt();
+
+        let attenuation = 1.0 / distance_sq;
+
+        let light_colour = light.colour_and_intensity.truncate();
+        let intensity = light.colour_and_intensity.w;
+
+        let transmitted_light = light_colour
+            * intensity
+            * attenuation
+            * glam_pbr::transmission_btdf(
+                material_params,
+                normal,
+                view,
+                Light(sun_uniform.dir.into()),
+            );
+
+        transmission += transmission_factor * transmitted_light;
+
+        i += 1;
+    }
 
     let diffuse = result.diffuse.lerp(transmission, transmission_factor);
 
