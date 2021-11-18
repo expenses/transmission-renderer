@@ -182,7 +182,7 @@ macro_rules! profiling_zone {
 }
 
 pub struct ProfilingZone {
-    gpu_zone: tracy_client::GpuZone,
+    _gpu_zone: tracy_client::GpuZone,
     pool: vk::QueryPool,
     device: ash::Device,
     command_buffer: vk::CommandBuffer,
@@ -215,7 +215,7 @@ impl ProfilingZone {
         }
 
         Self {
-            gpu_zone: tracy_client::GpuZone::new(
+            _gpu_zone: tracy_client::GpuZone::new(
                 name,
                 function,
                 file,

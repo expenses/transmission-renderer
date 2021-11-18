@@ -1,7 +1,4 @@
 - Froxel light clustering
 - Implement cool new extensions
 - Test on egpu
-- GGX LUT texture
-- mip mapping for sampled hdr framebuffer
-- fix gltf texture coords
 - remove emission from brdf result

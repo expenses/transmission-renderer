@@ -29,6 +29,8 @@ pub const DRAW_COMMAND_SIZE: usize = std::mem::size_of::<vk::DrawIndexedIndirect
 pub const MAX_IMAGES: u32 = 195;
 
 fn main() -> anyhow::Result<()> {
+    let entire_setup_span = tracy_client::span!("Entire Setup");
+
     {
         use simplelog::*;
 
@@ -174,7 +176,10 @@ fn main() -> anyhow::Result<()> {
             instance: instance.clone(),
             device: device.clone(),
             physical_device,
-            debug_settings: gpu_allocator::AllocatorDebugSettings::default(),
+            debug_settings: gpu_allocator::AllocatorDebugSettings {
+                log_leaks_on_shutdown: true,
+                ..Default::default()
+            },
             buffer_device_address: false,
         })?;
 
@@ -197,6 +202,8 @@ fn main() -> anyhow::Result<()> {
     let mut buffers_to_cleanup = Vec::new();
 
     let ggx_lut_id = {
+        let _span = tracy_client::span!("Loading ggx_lut.png");
+
         use image::GenericImageView;
 
         let decoded_image = image::load_from_memory_with_format(
@@ -240,9 +247,8 @@ fn main() -> anyhow::Result<()> {
 
     let filename = std::env::args().nth(1).unwrap();
 
+    let mut vertex_staging_buffers = VertexStagingBuffers::default();
     let mut materials = Vec::new();
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
 
     let model = load_gltf(
         &filename,
@@ -250,8 +256,7 @@ fn main() -> anyhow::Result<()> {
         &mut image_manager,
         &mut buffers_to_cleanup,
         &mut materials,
-        &mut vertices,
-        &mut indices,
+        &mut vertex_staging_buffers,
     )?;
 
     let filename2 = std::env::args().nth(2).unwrap();
@@ -262,8 +267,7 @@ fn main() -> anyhow::Result<()> {
         &mut image_manager,
         &mut buffers_to_cleanup,
         &mut materials,
-        &mut vertices,
-        &mut indices,
+        &mut vertex_staging_buffers,
     )?;
 
     let model_materials = ash_abstractions::Buffer::new(
@@ -273,19 +277,7 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
-    let vertices = ash_abstractions::Buffer::new(
-        unsafe { cast_slice(&vertices) },
-        "vertices",
-        vk::BufferUsageFlags::VERTEX_BUFFER,
-        &mut init_resources,
-    )?;
-
-    let indices = ash_abstractions::Buffer::new(
-        unsafe { cast_slice(&indices) },
-        "indices",
-        vk::BufferUsageFlags::INDEX_BUFFER,
-        &mut init_resources,
-    )?;
+    let vertex_buffers = vertex_staging_buffers.upload(&mut init_resources)?;
 
     let draw_indirect_buffer = ash_abstractions::Buffer::new(
         unsafe {
@@ -397,14 +389,14 @@ fn main() -> anyhow::Result<()> {
         unsafe {
             cast_slice(&[
                 Instance {
-                    translation: Vec3::ZERO,
-                    rotation: Mat3::IDENTITY,
-                    scale: 1.0 / 0.00800000037997961,
+                    _translation: Vec3::ZERO,
+                    _rotation: Mat3::IDENTITY,
+                    _scale: 1.0 / 0.00800000037997961,
                 },
                 Instance {
-                    translation: Vec3::new(0.0, 250.0, 0.0),
-                    rotation: Mat3::IDENTITY,
-                    scale: 100.0,
+                    _translation: Vec3::new(0.0, 250.0, 0.0),
+                    _rotation: Mat3::IDENTITY,
+                    _scale: 100.0,
                 },
             ])
         },
@@ -436,6 +428,8 @@ fn main() -> anyhow::Result<()> {
     drop(init_resources);
 
     unsafe {
+        let _span = tracy_client::span!("Waiting on the init command buffer");
+
         device.end_command_buffer(command_buffer)?;
         let fence = device.create_fence(&vk::FenceCreateInfo::builder(), None)?;
 
@@ -668,6 +662,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut profiling_ctx =
         query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
+
+    drop(entire_setup_span);
 
     event_loop.run(move |event, _, control_flow| {
         let loop_closure = || -> anyhow::Result<()> {
@@ -1068,13 +1064,19 @@ fn main() -> anyhow::Result<()> {
                         device.cmd_bind_vertex_buffers(
                             command_buffer,
                             0,
-                            &[vertices.buffer, instance_buffer.buffer],
-                            &[0, 0],
+                            &[
+                                vertex_buffers.position.buffer,
+                                vertex_buffers.normal.buffer,
+                                vertex_buffers.uv.buffer,
+                                vertex_buffers.material.buffer,
+                                instance_buffer.buffer
+                            ],
+                            &[0, 0, 0, 0, 0],
                         );
 
                         device.cmd_bind_index_buffer(
                             command_buffer,
-                            indices.buffer,
+                            vertex_buffers.index.buffer,
                             0,
                             vk::IndexType::UINT32,
                         );
@@ -1318,11 +1320,15 @@ fn main() -> anyhow::Result<()> {
                         model_materials.cleanup(&device, &mut allocator)?;
                         instance_buffer.cleanup(&device, &mut allocator)?;
                         sun_uniform_buffer.cleanup(&device, &mut allocator)?;
-                        vertices.cleanup(&device, &mut allocator)?;
-                        indices.cleanup(&device, &mut allocator)?;
                         draw_indirect_buffer.cleanup(&device, &mut allocator)?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
+
+                        vertex_buffers.position.cleanup(&device, &mut allocator)?;
+                        vertex_buffers.normal.cleanup(&device, &mut allocator)?;
+                        vertex_buffers.uv.cleanup(&device, &mut allocator)?;
+                        vertex_buffers.material.cleanup(&device, &mut allocator)?;
+                        vertex_buffers.index.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -1497,6 +1503,8 @@ impl Pipelines {
         descriptor_set_layouts: &DescriptorSetLayouts,
         pipeline_cache: vk::PipelineCache,
     ) -> anyhow::Result<Self> {
+        let _span = tracy_client::span!("Pipelines::new");
+
         let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
         let fragment_entry_point = CString::new("fragment")?;
         let vertex_depth_pre_pass_entry_point = CString::new("depth_pre_pass_instanced")?;
@@ -1589,19 +1597,39 @@ impl Pipelines {
             )
         }?;
 
-        let full_vertex_attributes = &[
-            ash_abstractions::VertexAttribute::Vec3,
-            ash_abstractions::VertexAttribute::Vec3,
-            ash_abstractions::VertexAttribute::Vec2,
-            ash_abstractions::VertexAttribute::Uint,
-        ];
-
         let instance_attributes = &[
             ash_abstractions::VertexAttribute::Vec3,
             ash_abstractions::VertexAttribute::Vec3,
             ash_abstractions::VertexAttribute::Vec3,
             ash_abstractions::VertexAttribute::Vec3,
             ash_abstractions::VertexAttribute::Float,
+        ];
+
+        let full_vertex_attributes = ash_abstractions::create_vertex_attribute_descriptions(&[
+            &[ash_abstractions::VertexAttribute::Vec3],
+            &[ash_abstractions::VertexAttribute::Vec3],
+            &[ash_abstractions::VertexAttribute::Vec2],
+            &[ash_abstractions::VertexAttribute::Uint],
+            instance_attributes,
+        ]);
+
+        let full_vertex_bindings = [
+            *vk::VertexInputBindingDescription::builder()
+                .binding(0)
+                .stride(std::mem::size_of::<Vec3>() as u32),
+            *vk::VertexInputBindingDescription::builder()
+                .binding(1)
+                .stride(std::mem::size_of::<Vec3>() as u32),
+            *vk::VertexInputBindingDescription::builder()
+                .binding(2)
+                .stride(std::mem::size_of::<Vec2>() as u32),
+            *vk::VertexInputBindingDescription::builder()
+                .binding(3)
+                .stride(std::mem::size_of::<u32>() as u32),
+            *vk::VertexInputBindingDescription::builder()
+                .binding(4)
+                .stride(std::mem::size_of::<Instance>() as u32)
+                .input_rate(vk::VertexInputRate::INSTANCE),
         ];
 
         let normal_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -1615,19 +1643,8 @@ impl Pipelines {
                 depth_write_enable: false,
                 depth_compare_op: vk::CompareOp::EQUAL,
             }),
-            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
-                full_vertex_attributes,
-                instance_attributes,
-            ]),
-            vertex_bindings: &[
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(0)
-                    .stride(std::mem::size_of::<Vertex>() as u32),
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(1)
-                    .stride(std::mem::size_of::<Instance>() as u32)
-                    .input_rate(vk::VertexInputRate::INSTANCE),
-            ],
+            vertex_attributes: &full_vertex_attributes,
+            vertex_bindings: &full_vertex_bindings,
             colour_attachments: &[
                 *vk::PipelineColorBlendAttachmentState::builder()
                     .color_write_mask(vk::ColorComponentFlags::all())
@@ -1649,19 +1666,8 @@ impl Pipelines {
                 depth_write_enable: true,
                 depth_compare_op: vk::CompareOp::EQUAL,
             }),
-            vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
-                full_vertex_attributes,
-                instance_attributes,
-            ]),
-            vertex_bindings: &[
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(0)
-                    .stride(std::mem::size_of::<Vertex>() as u32),
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(1)
-                    .stride(std::mem::size_of::<Instance>() as u32)
-                    .input_rate(vk::VertexInputRate::INSTANCE),
-            ],
+            vertex_attributes: &full_vertex_attributes,
+            vertex_bindings: &full_vertex_bindings,
             colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
                 .color_write_mask(vk::ColorComponentFlags::all())
                 .blend_enable(false)],
@@ -1680,14 +1686,17 @@ impl Pipelines {
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
                 &[ash_abstractions::VertexAttribute::Vec3],
+                &[],
+                &[],
+                &[],
                 instance_attributes,
             ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
                     .binding(0)
-                    .stride(std::mem::size_of::<Vertex>() as u32),
+                    .stride(std::mem::size_of::<Vec3>() as u32),
                 *vk::VertexInputBindingDescription::builder()
-                    .binding(1)
+                    .binding(4)
                     .stride(std::mem::size_of::<Instance>() as u32)
                     .input_rate(vk::VertexInputRate::INSTANCE),
             ],
@@ -1706,15 +1715,24 @@ impl Pipelines {
                 depth_compare_op: vk::CompareOp::LESS,
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
-                full_vertex_attributes,
+                &[ash_abstractions::VertexAttribute::Vec3],
+                &[],
+                &[ash_abstractions::VertexAttribute::Vec2],
+                &[ash_abstractions::VertexAttribute::Uint],
                 instance_attributes,
             ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
                     .binding(0)
-                    .stride(std::mem::size_of::<Vertex>() as u32),
+                    .stride(std::mem::size_of::<Vec3>() as u32),
                 *vk::VertexInputBindingDescription::builder()
-                    .binding(1)
+                    .binding(2)
+                    .stride(std::mem::size_of::<Vec2>() as u32),
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(3)
+                    .stride(std::mem::size_of::<u32>() as u32),
+                *vk::VertexInputBindingDescription::builder()
+                    .binding(4)
                     .stride(std::mem::size_of::<Instance>() as u32)
                     .input_rate(vk::VertexInputRate::INSTANCE),
             ],
@@ -1833,17 +1851,10 @@ impl Pipelines {
     }
 }
 
-struct Vertex {
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    material: u32,
-}
-
 struct Instance {
-    translation: Vec3,
-    rotation: Mat3,
-    scale: f32,
+    _translation: Vec3,
+    _rotation: Mat3,
+    _scale: f32,
 }
 
 struct RenderPasses {
@@ -2103,6 +2114,63 @@ impl IndexBufferSlice {
     }
 }
 
+#[derive(Default)]
+struct VertexStagingBuffers {
+    position: Vec<Vec3>,
+    normal: Vec<Vec3>,
+    uv: Vec<Vec2>,
+    material: Vec<u32>,
+    index: Vec<u32>,
+}
+
+impl VertexStagingBuffers {
+    fn upload(
+        self,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<VertexBuffers> {
+        Ok(VertexBuffers {
+            position: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.position) },
+                "position buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            normal: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.normal) },
+                "normal buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            uv: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.uv) },
+                "uv buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            material: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.material) },
+                "material buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            index: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.index) },
+                "index buffer",
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                init_resources,
+            )?,
+        })
+    }
+}
+
+struct VertexBuffers {
+    position: ash_abstractions::Buffer,
+    normal: ash_abstractions::Buffer,
+    uv: ash_abstractions::Buffer,
+    material: ash_abstractions::Buffer,
+    index: ash_abstractions::Buffer,
+}
+
 struct Model {
     opaque: IndexBufferSlice,
     alpha_clip: IndexBufferSlice,
@@ -2116,26 +2184,35 @@ fn load_gltf(
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     materials: &mut Vec<shared_structs::MaterialInfo>,
-    vertices: &mut Vec<Vertex>,
-    indices: &mut Vec<u32>,
+    vertex_buffers: &mut VertexStagingBuffers,
 ) -> anyhow::Result<Model> {
+    let _span = tracy_client::span!(path);
+
+    let importing_gltf_span = tracy_client::span!("Importing gltf");
+
     let (gltf, buffers, mut images) = gltf::import(path)?;
 
-    for image in &mut images {
-        if image.format == gltf::image::Format::R8G8B8 {
-            let dynamic_image = image::DynamicImage::ImageRgb8(
-                image::RgbImage::from_raw(
-                    image.width,
-                    image.height,
-                    std::mem::take(&mut image.pixels),
-                )
-                .unwrap(),
-            );
+    drop(importing_gltf_span);
 
-            let rgba8 = dynamic_image.to_rgba8();
+    {
+        let _span = tracy_client::span!("Converting images");
 
-            image.format = gltf::image::Format::R8G8B8A8;
-            image.pixels = rgba8.into_raw();
+        for image in &mut images {
+            if image.format == gltf::image::Format::R8G8B8 {
+                let dynamic_image = image::DynamicImage::ImageRgb8(
+                    image::RgbImage::from_raw(
+                        image.width,
+                        image.height,
+                        std::mem::take(&mut image.pixels),
+                    )
+                    .unwrap(),
+                );
+
+                let rgba8 = dynamic_image.to_rgba8();
+
+                image.format = gltf::image::Format::R8G8B8A8;
+                image.pixels = rgba8.into_raw();
+            }
         }
     }
 
@@ -2145,6 +2222,8 @@ fn load_gltf(
     let mut alpha_clip_indices = Vec::new();
     let mut tranmission_indices = Vec::new();
     let mut transmission_alpha_clip_indices = Vec::new();
+
+    let loading_meshes_span = tracy_client::span!("Loading meshes");
 
     for (node, mesh) in gltf
         .nodes()
@@ -2182,7 +2261,7 @@ fn load_gltf(
 
             let read_indices = reader.read_indices().unwrap().into_u32();
 
-            let num_vertices = vertices.len() as u32;
+            let num_vertices = vertex_buffers.position.len() as u32;
 
             indices.extend(read_indices.map(|index| index + num_vertices));
 
@@ -2191,45 +2270,53 @@ fn load_gltf(
             let uvs = reader.read_tex_coords(0).unwrap().into_f32();
 
             for ((position, normal), uv) in positions.zip(normals).zip(uvs) {
-                vertices.push(Vertex {
-                    position: (transform * Vec3::from(position).extend(1.0)).truncate(),
-                    uv: uv_scaling * Vec2::from(uv),
-                    normal: normal_transform * Vec3::from(normal),
-                    material: material_id as u32,
-                });
+                vertex_buffers
+                    .position
+                    .push((transform * Vec3::from(position).extend(1.0)).truncate());
+                vertex_buffers.uv.push(uv_scaling * Vec2::from(uv));
+                vertex_buffers
+                    .normal
+                    .push(normal_transform * Vec3::from(normal));
+                vertex_buffers.material.push(material_id as u32);
             }
         }
     }
 
+    drop(loading_meshes_span);
+
     let opaque_slice = IndexBufferSlice {
-        offset: indices.len() as u32,
+        offset: vertex_buffers.index.len() as u32,
         count: opaque_indices.len() as u32,
     };
 
-    indices.extend_from_slice(&opaque_indices);
+    vertex_buffers.index.extend_from_slice(&opaque_indices);
 
     let alpha_clip_slice = IndexBufferSlice {
-        offset: indices.len() as u32,
+        offset: vertex_buffers.index.len() as u32,
         count: alpha_clip_indices.len() as u32,
     };
 
-    indices.extend_from_slice(&alpha_clip_indices);
+    vertex_buffers.index.extend_from_slice(&alpha_clip_indices);
 
     let transmission_slice = IndexBufferSlice {
-        offset: indices.len() as u32,
+        offset: vertex_buffers.index.len() as u32,
         count: tranmission_indices.len() as u32,
     };
 
-    indices.extend_from_slice(&tranmission_indices);
+    vertex_buffers.index.extend_from_slice(&tranmission_indices);
 
     let transmission_alpha_clip_slice = IndexBufferSlice {
-        offset: indices.len() as u32,
+        offset: vertex_buffers.index.len() as u32,
         count: transmission_alpha_clip_indices.len() as u32,
     };
 
-    indices.extend_from_slice(&transmission_alpha_clip_indices);
+    vertex_buffers
+        .index
+        .extend_from_slice(&transmission_alpha_clip_indices);
 
     let mut image_index_to_id = std::collections::HashMap::new();
+
+    let loading_materials_span = tracy_client::span!("Loading materials");
 
     for (i, material) in gltf.materials().enumerate() {
         let mut load_optional_texture =
@@ -2326,6 +2413,8 @@ fn load_gltf(
                 .unwrap_or(0.0),
         });
     }
+
+    drop(loading_materials_span);
 
     Ok(Model {
         opaque: opaque_slice,

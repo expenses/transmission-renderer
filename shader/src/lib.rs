@@ -425,7 +425,6 @@ pub fn depth_pre_pass_alpha_clip(
 #[spirv(vertex)]
 pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
-    _normal: Vec3,
     uv: Vec2,
     material: u32,
     translation: Vec3,
