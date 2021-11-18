@@ -16,7 +16,6 @@ use glam_pbr::{
 use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
 use spirv_std::{
     glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
-    image::SampledImage,
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
@@ -47,6 +46,7 @@ pub fn fragment_transmission(
     normal: Vec3,
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
+    #[spirv(flat)] model_scale: f32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
@@ -54,9 +54,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
-    #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &SampledImage<
-        Image!(2D, type=f32, sampled),
-    >,
+    #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     #[spirv(descriptor_set = 0, binding = 5)] clamp_sampler: &Sampler,
     output: &mut Vec4,
 ) {
@@ -97,9 +95,15 @@ pub fn fragment_transmission(
         push_constants,
         frag_coord,
         point_lights,
-        texture_sampler,
+        &texture_sampler,
         sun_uniform,
     );
+
+    let mut thickness = material.thickness_factor;
+
+    if material.textures.thickness != -1 {
+        thickness *= texture_sampler.sample(material.textures.thickness as u32).y;
+    }
 
     let ggx_lut_sampler = |normal_dot_view: f32, perceptual_roughness: PerceptualRoughness| {
         let uv = Vec2::new(normal_dot_view, perceptual_roughness.0);
@@ -111,7 +115,7 @@ pub fn fragment_transmission(
     };
 
     let framebuffer_sampler = |uv, lod| {
-        let sample: Vec4 = unsafe { framebuffer.sample_by_lod(uv, lod) };
+        let sample: Vec4 = framebuffer.sample_by_lod(*clamp_sampler, uv, lod);
         sample.truncate()
     };
 
@@ -124,6 +128,8 @@ pub fn fragment_transmission(
                 framebuffer_size_x: push_constants.framebuffer_size.x,
                 normal,
                 view,
+                thickness,
+                model_scale,
             },
             framebuffer_sampler,
             ggx_lut_sampler,
@@ -167,6 +173,8 @@ pub fn fragment_transmission(
     }
 
     let diffuse = result.diffuse.lerp(transmission, transmission_factor);
+
+    //*output = (normal.0).extend(1.0);
 
     *output = (diffuse + result.specular + result.emission).extend(1.0);
 }
@@ -213,7 +221,7 @@ pub fn fragment(
         push_constants,
         frag_coord,
         point_lights,
-        texture_sampler,
+        &texture_sampler,
         sun_uniform,
     );
 
@@ -289,7 +297,7 @@ fn fragment_inner(
     push_constants: &PushConstants,
     frag_coord: Vec4,
     point_lights: &[PointLight],
-    texture_sampler: TextureSampler,
+    texture_sampler: &TextureSampler,
     sun_uniform: &SunUniform,
 ) -> BrdfResult {
     let cluster_id = {
@@ -494,6 +502,38 @@ pub fn vertex_instanced(
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
+#[spirv(vertex)]
+pub fn vertex_instanced_with_scale(
+    position: Vec3,
+    normal: Vec3,
+    uv: Vec2,
+    material: u32,
+    translation: Vec3,
+    rotation_col_0: Vec3,
+    rotation_col_1: Vec3,
+    rotation_col_2: Vec3,
+    scale: f32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    out_position: &mut Vec3,
+    out_normal: &mut Vec3,
+    out_uv: &mut Vec2,
+    out_material: &mut u32,
+    out_scale: &mut f32,
+    #[spirv(position)] builtin_pos: &mut Vec4,
+) {
+    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+
+    let position = (rotation * position) * scale + translation;
+
+    *out_position = position;
+    *out_normal = rotation * normal;
+    *out_uv = uv;
+    *out_material = material;
+    *out_scale = scale;
+
+    *builtin_pos = push_constants.proj_view * position.extend(1.0);
+}
+
 const DEBUG_COLOURS: [Vec3; 13] = [
     const_vec3!([0.0, 0.0, 0.6647]),      // dark blue
     const_vec3!([0.0, 0.0, 0.9647]),      // blue
@@ -529,11 +569,12 @@ pub fn fullscreen_tri(
 #[spirv(fragment)]
 pub fn fragment_tonemap(
     uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 0)] texture: &SampledImage<Image!(2D, type=f32, sampled)>,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 0)] texture: &Image!(2D, type=f32, sampled),
     #[spirv(push_constant)] params: &BakedLottesTonemapperParams,
     output: &mut Vec4,
 ) {
-    let sample: Vec4 = unsafe { texture.sample(uv) };
+    let sample: Vec4 = texture.sample(*sampler, uv);
 
     *output = LottesTonemapper
         .tonemap(sample.truncate(), *params)

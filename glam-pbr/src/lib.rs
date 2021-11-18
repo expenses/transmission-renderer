@@ -222,6 +222,31 @@ pub struct IblVolumeRefractionParams {
     pub view: View,
     pub proj_view_matrix: Mat4,
     pub position: Vec3,
+    pub thickness: f32,
+    pub model_scale: f32,
+}
+
+fn refract(incident: Vec3, normal: Vec3, index_of_refraction: IndexOfRefraction) -> Vec3 {
+    let eta = 1.0 / index_of_refraction.0;
+
+    let n_dot_i = normal.dot(incident);
+
+    let k = 1.0 - eta * eta * (1.0 - n_dot_i * n_dot_i);
+
+    eta * incident - (eta * n_dot_i + k.sqrt()) * normal
+}
+
+fn get_volume_transmission_ray(
+    normal: Normal,
+    view: View,
+    thickness: f32,
+    index_of_refraction: IndexOfRefraction,
+    scale: f32,
+) -> Vec3 {
+    let refraction = refract(-view.0, normal.0, index_of_refraction);
+    // todo: work out a better instancing scheme so we don't have to hardcode this.
+    let gltf_primitive_scale = 0.25;
+    refraction.normalize() * thickness * scale * gltf_primitive_scale
 }
 
 pub fn ibl_volume_refraction<
@@ -238,17 +263,22 @@ pub fn ibl_volume_refraction<
         position,
         normal,
         view,
+        thickness,
+        model_scale,
         material_params:
             MaterialParams {
                 diffuse_colour: base_colour,
-                metallic,
+                metallic: _,
                 perceptual_roughness,
                 index_of_refraction,
             },
     } = params;
 
-    // todo: volume
-    let refracted_ray_exit = position;
+    //let thickness = 1.0;
+    //let perceptual_roughness = PerceptualRoughness(0.25);
+
+    let refracted_ray_exit = position
+        + get_volume_transmission_ray(normal, view, thickness, index_of_refraction, model_scale);
 
     let device_coords = proj_view_matrix * refracted_ray_exit.extend(1.0);
     let screen_coords = Vec2::new(device_coords.x, device_coords.y) / device_coords.w;

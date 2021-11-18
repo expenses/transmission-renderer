@@ -3,6 +3,7 @@ use ash::extensions::khr::{Surface as SurfaceLoader, Swapchain as SwapchainLoade
 use ash::vk;
 use ash_abstractions::CStrList;
 use std::ffi::{CStr, CString};
+use std::path::{Path, PathBuf};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
@@ -245,13 +246,11 @@ fn main() -> anyhow::Result<()> {
         height: window_size.height,
     };
 
-    let filename = std::env::args().nth(1).unwrap();
-
     let mut vertex_staging_buffers = VertexStagingBuffers::default();
     let mut materials = Vec::new();
 
     let model = load_gltf(
-        &filename,
+        &path_for_gltf_model(&std::env::args().nth(1).unwrap()),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -259,10 +258,8 @@ fn main() -> anyhow::Result<()> {
         &mut vertex_staging_buffers,
     )?;
 
-    let filename2 = std::env::args().nth(2).unwrap();
-
     let model2 = load_gltf(
-        &filename2,
+        &path_for_gltf_model(&std::env::args().nth(2).unwrap()),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -371,8 +368,8 @@ fn main() -> anyhow::Result<()> {
         unsafe {
             cast_slice(&[
                 PointLight {
-                    position: Vec3::new(0.0, 10.0, 0.0).into(),
-                    colour_and_intensity: Vec4::new(1.0, 0.0, 0.0, 10000.0),
+                    position: Vec3::new(0.0, 1.0, 0.0).into(),
+                    colour_and_intensity: Vec4::new(1.0, 0.0, 0.0, 25000.0),
                 },
                 PointLight {
                     position: Vec3::new(1000.0, 10.0, 0.0).into(),
@@ -542,10 +539,7 @@ fn main() -> anyhow::Result<()> {
                         .descriptor_count(MAX_IMAGES),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::SAMPLER)
-                        .descriptor_count(2),
-                    *vk::DescriptorPoolSize::builder()
-                        .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .descriptor_count(2),
+                        .descriptor_count(3),
                 ])
                 .max_sets(3),
             None,
@@ -630,19 +624,17 @@ fn main() -> anyhow::Result<()> {
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(hdr_framebuffer_ds)
                     .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                     .image_info(&[*vk::DescriptorImageInfo::builder()
                         .image_view(hdr_framebuffer.view)
-                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                        .sampler(sampler)]),
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(opaque_sampled_hdr_framebuffer_ds)
                     .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                     .image_info(&[*vk::DescriptorImageInfo::builder()
                         .image_view(opaque_sampled_hdr_framebuffer.view)
-                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                        .sampler(sampler)]),
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
             ],
             &[],
         )
@@ -864,19 +856,17 @@ fn main() -> anyhow::Result<()> {
                                     *vk::WriteDescriptorSet::builder()
                                         .dst_set(hdr_framebuffer_ds)
                                         .dst_binding(0)
-                                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                                         .image_info(&[*vk::DescriptorImageInfo::builder()
                                             .image_view(hdr_framebuffer.view)
-                                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                                            .sampler(sampler)]),
+                                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                                     *vk::WriteDescriptorSet::builder()
                                         .dst_set(opaque_sampled_hdr_framebuffer_ds)
                                         .dst_binding(0)
-                                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                                         .image_info(&[*vk::DescriptorImageInfo::builder()
                                             .image_view(opaque_sampled_hdr_framebuffer.view)
-                                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                                            .sampler(sampler)]),
+                                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                                 ],
                                 &[],
                             )
@@ -1223,7 +1213,7 @@ fn main() -> anyhow::Result<()> {
                             vk::PipelineBindPoint::GRAPHICS,
                             pipelines.tonemap_pipeline_layout,
                             0,
-                            &[hdr_framebuffer_ds],
+                            &[main_ds, hdr_framebuffer_ds],
                             &[],
                         );
 
@@ -1393,7 +1383,7 @@ impl DescriptorSetLayouts {
                     &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
                         *vk::DescriptorSetLayoutBinding::builder()
                             .binding(0)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                     ]),
@@ -1506,6 +1496,7 @@ impl Pipelines {
         let _span = tracy_client::span!("Pipelines::new");
 
         let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
+        let vertex_instanced_with_scale_entry_point = CString::new("vertex_instanced_with_scale")?;
         let fragment_entry_point = CString::new("fragment")?;
         let vertex_depth_pre_pass_entry_point = CString::new("depth_pre_pass_instanced")?;
         let vertex_depth_pre_pass_alpha_clip_entry_point =
@@ -1532,6 +1523,11 @@ impl Pipelines {
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
             .name(&vertex_instanced_entry_point);
+
+        let vertex_instanced_with_scale_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .name(&vertex_instanced_with_scale_entry_point);
 
         let vertex_depth_pre_pass_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
@@ -1586,7 +1582,10 @@ impl Pipelines {
         let tonemap_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.hdr_framebuffer])
+                    .set_layouts(&[
+                        descriptor_set_layouts.main,
+                        descriptor_set_layouts.hdr_framebuffer,
+                    ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                         .size(
@@ -1786,7 +1785,10 @@ impl Pipelines {
                 0,
             );
 
-        let transmission_stages = &[*vertex_instanced_stage, *fragment_transmission_stage];
+        let transmission_stages = &[
+            *vertex_instanced_with_scale_stage,
+            *fragment_transmission_stage,
+        ];
 
         let transmission_pipeline_desc = transmission_baked.as_pipeline_create_info(
             transmission_stages,
@@ -2179,14 +2181,15 @@ struct Model {
 }
 
 fn load_gltf(
-    path: &str,
+    path: &Path,
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     materials: &mut Vec<shared_structs::MaterialInfo>,
     vertex_buffers: &mut VertexStagingBuffers,
 ) -> anyhow::Result<Model> {
-    let _span = tracy_client::span!(path);
+    let path_str = format!("{}", path.display());
+    let _span = tracy_client::span!(&path_str);
 
     let importing_gltf_span = tracy_client::span!("Importing gltf");
 
@@ -2276,7 +2279,7 @@ fn load_gltf(
                 vertex_buffers.uv.push(uv_scaling * Vec2::from(uv));
                 vertex_buffers
                     .normal
-                    .push(normal_transform * Vec3::from(normal));
+                    .push((normal_transform * Vec3::from(normal)).normalize());
                 vertex_buffers.material.push(material_id as u32);
             }
         }
@@ -2336,7 +2339,7 @@ fn load_gltf(
                                 let texture = load_texture_from_gltf(
                                     image,
                                     srgb,
-                                    &format!("{} {} {}", path, name, i),
+                                    &format!("{} {} {}", path.display(), name, i),
                                     init_resources,
                                     buffers_to_cleanup,
                                 )?;
@@ -2392,6 +2395,14 @@ fn load_gltf(
                     "transmission",
                     false,
                 )?,
+                thickness: load_optional_texture(
+                    material
+                        .volume()
+                        .and_then(|volume| volume.thickness_texture())
+                        .map(|info| info.texture()),
+                    "volume",
+                    false,
+                )?,
             },
             metallic_factor: pbr.metallic_factor(),
             roughness_factor: pbr.roughness_factor(),
@@ -2411,6 +2422,19 @@ fn load_gltf(
                 .transmission()
                 .map(|transmission| transmission.transmission_factor())
                 .unwrap_or(0.0),
+            thickness_factor: material
+                .volume()
+                .map(|volume| volume.thickness_factor())
+                .unwrap_or(0.0),
+            attenuation_distance: material
+                .volume()
+                .map(|volume| volume.attenuation_distance())
+                .unwrap_or(f32::INFINITY),
+            attenuation_colour: material
+                .volume()
+                .map(|volume| volume.attenuation_colour())
+                .unwrap_or([1.0; 3])
+                .into(),
         });
     }
 
@@ -2471,6 +2495,17 @@ fn load_texture_from_gltf(
     buffers_to_cleanup.push(staging_buffer);
 
     Ok(image)
+}
+
+fn path_for_gltf_model(model: &str) -> PathBuf {
+    let mut path = PathBuf::new();
+    path.push("glTF-Sample-Models");
+    path.push("2.0");
+    path.push(model);
+    path.push("glTF");
+    path.push(model);
+    path.set_extension("gltf");
+    path
 }
 
 unsafe fn cast_slice<T>(slice: &[T]) -> &[u8] {

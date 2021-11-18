@@ -30,6 +30,7 @@ pub struct Textures {
     pub emissive: i32,
     pub occlusion: i32,
     pub transmission: i32,
+    pub thickness: i32,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -44,4 +45,7 @@ pub struct MaterialInfo {
     pub occlusion_strength: f32,
     pub index_of_refraction: f32,
     pub transmission_factor: f32,
+    pub thickness_factor: f32,
+    pub attenuation_distance: f32,
+    pub attenuation_colour: Vec3A,
 }
