@@ -154,6 +154,8 @@ impl ProfilingContext {
         // to sometimes return NOT_READY occasionally. In this case we just ignore it.
         if res.is_ok() {
             self.buffer.emit();
+        } else {
+            println!("vkGetQueryResults just returned NOT_READY and broke tracy 😭😭");
         }
 
         Ok(())
