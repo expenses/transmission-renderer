@@ -140,17 +140,21 @@ impl ProfilingContext {
 
     // Must be called once per frame outside of a command buffer. Ideally as the last thing per frame.
     pub fn collect(&mut self, device: &ash::Device) -> anyhow::Result<()> {
-        unsafe {
+        let res = unsafe {
             device.get_query_pool_results(
                 self.pool,
                 0,
                 self.buffer.len as u32,
                 &mut self.buffer.timestamps[..self.buffer.len],
                 vk::QueryResultFlags::WAIT | vk::QueryResultFlags::TYPE_64,
-            )?;
-        }
+            )
+        };
 
-        self.buffer.emit();
+        // Even though we're setting the WAIT flag, get_query_pool_results still seems
+        // to sometimes return NOT_READY occasionally. In this case we just ignore it.
+        if res.is_ok() {
+            self.buffer.emit();
+        }
 
         Ok(())
     }
