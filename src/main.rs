@@ -343,7 +343,7 @@ fn main() -> anyhow::Result<()> {
             &vk::ImageViewCreateInfo::builder()
                 .image(opaque_sampled_hdr_framebuffer.image)
                 .view_type(vk::ImageViewType::TYPE_2D)
-                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .format(vk::Format::R16G16B16A16_SFLOAT)
                 .subresource_range(basic_subresource_range),
             None,
         )
@@ -365,9 +365,7 @@ fn main() -> anyhow::Result<()> {
             &[],
             &[vk_sync::ImageBarrier {
                 previous_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
-                next_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-                ],
+                next_accesses: &[vk_sync::AccessType::TransferWrite],
                 next_layout: vk_sync::ImageLayout::Optimal,
                 image: opaque_sampled_hdr_framebuffer.image,
                 range: subresource_range,
@@ -818,7 +816,7 @@ fn main() -> anyhow::Result<()> {
                                 &vk::ImageViewCreateInfo::builder()
                                     .image(opaque_sampled_hdr_framebuffer.image)
                                     .view_type(vk::ImageViewType::TYPE_2D)
-                                    .format(vk::Format::R32G32B32A32_SFLOAT)
+                                    .format(vk::Format::R16G16B16A16_SFLOAT)
                                     .subresource_range(basic_subresource_range),
                                 None,
                             )
@@ -840,7 +838,7 @@ fn main() -> anyhow::Result<()> {
                                 &[],
                                 &[vk_sync::ImageBarrier {
                                     previous_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
-                                    next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+                                    next_accesses: &[vk_sync::AccessType::TransferWrite],
                                     next_layout: vk_sync::ImageLayout::Optimal,
                                     image: opaque_sampled_hdr_framebuffer.image,
                                     range: subresource_range,
@@ -1171,6 +1169,117 @@ fn main() -> anyhow::Result<()> {
 
                         device.cmd_end_render_pass(command_buffer);
 
+                        {
+                            let _profiling_zone = profiling_zone!("opaque framebuffer mipchain", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                            let mut mip_width = extent.width as i32;
+                            let mut mip_height = extent.height as i32;
+
+                            for i in 0 .. opaque_mip_levels - 1 {
+                                //let _profiling_zone = profiling_zone!(&format!("mip {}", i), vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                                let blit = vk::ImageBlit {
+                                    src_subresource: vk::ImageSubresourceLayers {
+                                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                                        mip_level: i,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                    src_offsets: [
+                                        vk::Offset3D::default(),
+                                        vk::Offset3D {
+                                            x: mip_width,
+                                            y: mip_height,
+                                            z: 1,
+                                        },
+                                    ],
+                                    dst_subresource: vk::ImageSubresourceLayers {
+                                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                                        mip_level: i + 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                    dst_offsets: [
+                                        vk::Offset3D::default(),
+                                        vk::Offset3D {
+                                            x: (mip_width / 2).max(1),
+                                            y: (mip_height / 2).max(1),
+                                            z: 1,
+                                        },
+                                    ],
+                                };
+
+                                device.cmd_blit_image(
+                                    command_buffer,
+                                    opaque_sampled_hdr_framebuffer.image,
+                                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                                    opaque_sampled_hdr_framebuffer.image,
+                                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                                    &[blit],
+                                    vk::Filter::LINEAR,
+                                );
+
+                                let mip_i = *vk::ImageSubresourceRange::builder()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .level_count(1)
+                                    .base_mip_level(i)
+                                    .layer_count(1);
+
+                                let mip_i_plus_one = *vk::ImageSubresourceRange::builder()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .level_count(1)
+                                    .base_mip_level(i + 1)
+                                    .layer_count(1);
+
+                                vk_sync::cmd::pipeline_barrier(
+                                    &device,
+                                    command_buffer,
+                                    None,
+                                    &[],
+                                    &[vk_sync::ImageBarrier {
+                                        previous_accesses: &[vk_sync::AccessType::TransferRead],
+                                        next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+                                        next_layout: vk_sync::ImageLayout::Optimal,
+                                        image: opaque_sampled_hdr_framebuffer.image,
+                                        range: mip_i,
+                                        ..Default::default()
+                                    },
+                                    vk_sync::ImageBarrier {
+                                        previous_accesses: &[vk_sync::AccessType::TransferWrite],
+                                        next_accesses: &[vk_sync::AccessType::TransferRead],
+                                        next_layout: vk_sync::ImageLayout::Optimal,
+                                        image: opaque_sampled_hdr_framebuffer.image,
+                                        range: mip_i_plus_one,
+                                        ..Default::default()
+                                    }],
+                                );
+
+                                mip_width = (mip_width / 2).max(1);
+                                mip_height = (mip_height / 2).max(1);
+                            }
+
+                            let mip_last = *vk::ImageSubresourceRange::builder()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .level_count(1)
+                                .base_mip_level(opaque_mip_levels - 1)
+                                .layer_count(1);
+
+                            vk_sync::cmd::pipeline_barrier(
+                                &device,
+                                command_buffer,
+                                None,
+                                &[],
+                                &[vk_sync::ImageBarrier {
+                                    previous_accesses: &[vk_sync::AccessType::TransferRead],
+                                    next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+                                    next_layout: vk_sync::ImageLayout::Optimal,
+                                    image: opaque_sampled_hdr_framebuffer.image,
+                                    range: mip_last,
+                                    ..Default::default()
+                                }],
+                            );
+                        }
+
                         device.cmd_begin_render_pass(
                             command_buffer,
                             &transmission_render_pass_info,
@@ -1242,6 +1351,30 @@ fn main() -> anyhow::Result<()> {
                         }
 
                         device.cmd_end_render_pass(command_buffer);
+
+                        {
+                            let subresource_range = *vk::ImageSubresourceRange::builder()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .base_mip_level(1)
+                                .level_count(opaque_mip_levels - 1)
+                                .layer_count(1);
+
+                            vk_sync::cmd::pipeline_barrier(
+                                &device,
+                                command_buffer,
+                                None,
+                                &[],
+                                &[vk_sync::ImageBarrier {
+                                    previous_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+                                    next_accesses: &[vk_sync::AccessType::TransferWrite],
+                                    next_layout: vk_sync::ImageLayout::Optimal,
+                                    image: opaque_sampled_hdr_framebuffer.image,
+                                    range: subresource_range,
+                                    discard_contents: true,
+                                    ..Default::default()
+                                }],
+                            );
+                        }
 
                         drop(all_commands_profiling_zone);
 
@@ -1836,17 +1969,17 @@ impl RenderPasses {
                 .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // HDR framebuffers
             *vk::AttachmentDescription::builder()
-                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .format(vk::Format::R16G16B16A16_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
             *vk::AttachmentDescription::builder()
-                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .format(vk::Format::R16G16B16A16_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+                .final_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
         ];
 
         let depth_attachment_ref = *vk::AttachmentReference::builder()
@@ -1963,7 +2096,7 @@ impl RenderPasses {
                 .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // HDR framebuffer
             *vk::AttachmentDescription::builder()
-                .format(vk::Format::R32G32B32A32_SFLOAT)
+                .format(vk::Format::R16G16B16A16_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::LOAD)
                 .store_op(vk::AttachmentStoreOp::STORE)
@@ -2044,7 +2177,7 @@ fn create_hdr_framebuffer(
             height,
             name,
             mip_levels,
-            format: vk::Format::R32G32B32A32_SFLOAT,
+            format: vk::Format::R16G16B16A16_SFLOAT,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
                 | vk::ImageUsageFlags::SAMPLED
                 | extra_usage,

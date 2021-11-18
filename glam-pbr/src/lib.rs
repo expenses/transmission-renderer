@@ -204,12 +204,15 @@ pub fn transmission_btdf(
         transmission_roughness,
     );
 
-    let f0 = Vec3::splat(material_params.index_of_refraction.to_dielectric_f0());
+    let f0 = {
+        Vec3::splat(index_of_refraction.to_dielectric_f0())
+            .lerp(material_params.diffuse_colour, material_params.metallic)
+    };
     let f90 = Vec3::ONE;
 
     let fresnel = fresnel_schlick(view_dot_halfway, f0, f90);
 
-    (1.0 - fresnel) * geometric_shadowing * material_params.diffuse_colour * distribution
+    (1.0 - fresnel) * distribution * geometric_shadowing * material_params.diffuse_colour
 }
 
 pub struct IblVolumeRefractionParams {

@@ -111,7 +111,7 @@ pub fn fragment_transmission(
     };
 
     let framebuffer_sampler = |uv, lod| {
-        let sample: Vec4 = unsafe { framebuffer.sample_by_lod(uv, 0.0) };
+        let sample: Vec4 = unsafe { framebuffer.sample_by_lod(uv, lod) };
         sample.truncate()
     };
 
@@ -159,12 +159,7 @@ pub fn fragment_transmission(
         let transmitted_light = light_colour
             * intensity
             * attenuation
-            * glam_pbr::transmission_btdf(
-                material_params,
-                normal,
-                view,
-                Light(sun_uniform.dir.into()),
-            );
+            * glam_pbr::transmission_btdf(material_params, normal, view, Light(direction));
 
         transmission += transmission_factor * transmitted_light;
 
