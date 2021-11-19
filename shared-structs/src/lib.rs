@@ -1,6 +1,7 @@
 #![no_std]
 
-use glam::{Mat4, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use core::ops::Mul;
+use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
 
 pub struct PushConstants {
     pub proj_view: Mat4,
@@ -48,4 +49,64 @@ pub struct MaterialInfo {
     pub thickness_factor: f32,
     pub attenuation_distance: f32,
     pub attenuation_colour: Vec3A,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct PackedSimilarity {
+    pub translation_and_scale: Vec4,
+    pub rotation: Quat,
+}
+
+impl PackedSimilarity {
+    pub fn unpack(self) -> Similarity {
+        Similarity {
+            translation: self.translation_and_scale.truncate(),
+            scale: self.translation_and_scale.w,
+            rotation: self.rotation,
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct Similarity {
+    pub translation: Vec3,
+    pub scale: f32,
+    pub rotation: Quat,
+}
+
+impl Similarity {
+    pub const IDENTITY: Self = Self {
+        translation: Vec3::ZERO,
+        scale: 1.0,
+        rotation: Quat::IDENTITY,
+    };
+
+    pub fn pack(self) -> PackedSimilarity {
+        PackedSimilarity {
+            translation_and_scale: self.translation.extend(self.scale),
+            rotation: self.rotation,
+        }
+    }
+}
+
+impl Mul<Similarity> for Similarity {
+    type Output = Self;
+
+    fn mul(self, child: Self) -> Self {
+        Self {
+            translation: self * child.translation,
+            rotation: self.rotation * child.rotation,
+            scale: self.scale * child.scale,
+        }
+    }
+}
+
+impl Mul<Vec3> for Similarity {
+    type Output = Vec3;
+
+    fn mul(self, vector: Vec3) -> Vec3 {
+        self.translation + (self.scale * (self.rotation * vector))
+    }
 }

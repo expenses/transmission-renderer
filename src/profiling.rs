@@ -108,6 +108,7 @@ impl QueryPool {
         Ok(ProfilingContext {
             buffer,
             pool: self.pool,
+            can_reset: true,
         })
     }
 }
@@ -115,11 +116,16 @@ impl QueryPool {
 pub struct ProfilingContext {
     buffer: TimestampBuffer<4096>,
     pool: vk::QueryPool,
+    can_reset: bool,
 }
 
 impl ProfilingContext {
     /// Must be called before using for the first time and between collecting and recording zones. Ideally you call this immediately after starting a command buffer each frame.
     pub fn reset(&mut self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
+        if !self.can_reset {
+            return;
+        }
+
         unsafe {
             device.cmd_reset_query_pool(command_buffer, self.pool, 0, self.buffer.len as u32);
         }
@@ -152,11 +158,13 @@ impl ProfilingContext {
 
         // Even though we're setting the WAIT flag, get_query_pool_results still seems
         // to sometimes return NOT_READY occasionally. In this case we just ignore it.
-        if res.is_ok() {
+        self.can_reset = if res.is_ok() {
             self.buffer.emit();
+            true
         } else {
-            println!("vkGetQueryResults just returned NOT_READY and broke tracy 😭😭");
-        }
+            println!("vkGetQueryResults just returned NOT_READY illegally");
+            false
+        };
 
         Ok(())
     }

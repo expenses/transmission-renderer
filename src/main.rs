@@ -3,13 +3,13 @@ use ash::extensions::khr::{Surface as SurfaceLoader, Swapchain as SwapchainLoade
 use ash::vk;
 use ash_abstractions::CStrList;
 use std::ffi::{CStr, CString};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
-use glam::{Mat3, Mat4, UVec2, Vec2, Vec3, Vec4};
-use shared_structs::PointLight;
+use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
+use shared_structs::{PointLight, Similarity};
 
 mod profiling;
 
@@ -250,7 +250,7 @@ fn main() -> anyhow::Result<()> {
     let mut materials = Vec::new();
 
     let model = load_gltf(
-        &path_for_gltf_model(&std::env::args().nth(1).unwrap()),
+        &std::env::args().nth(1).unwrap(),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -259,7 +259,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let model2 = load_gltf(
-        &path_for_gltf_model(&std::env::args().nth(2).unwrap()),
+        &std::env::args().nth(2).unwrap(),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -385,20 +385,22 @@ fn main() -> anyhow::Result<()> {
     let instance_buffer = ash_abstractions::Buffer::new(
         unsafe {
             cast_slice(&[
-                Instance {
-                    _translation: Vec3::ZERO,
-                    _rotation: Mat3::IDENTITY,
-                    _scale: 1.0 / 0.00800000037997961,
-                },
-                Instance {
-                    _translation: Vec3::new(0.0, 250.0, 0.0),
-                    _rotation: Mat3::IDENTITY,
-                    _scale: 100.0,
-                },
+                Similarity {
+                    translation: Vec3::ZERO,
+                    rotation: Quat::IDENTITY,
+                    scale: 1.0 / 0.00800000037997961,
+                }
+                .pack(),
+                Similarity {
+                    translation: Vec3::new(0.0, 250.0, 0.0),
+                    rotation: Quat::IDENTITY,
+                    scale: 100.0,
+                }
+                .pack(),
             ])
         },
         "instance",
-        vk::BufferUsageFlags::VERTEX_BUFFER,
+        vk::BufferUsageFlags::STORAGE_BUFFER,
         &mut init_resources,
     )?;
 
@@ -530,7 +532,7 @@ fn main() -> anyhow::Result<()> {
                 .pool_sizes(&[
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::STORAGE_BUFFER)
-                        .descriptor_count(2),
+                        .descriptor_count(3),
                     *vk::DescriptorPoolSize::builder()
                         .ty(vk::DescriptorType::UNIFORM_BUFFER)
                         .descriptor_count(2),
@@ -621,6 +623,13 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(5)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(clamp_sampler)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(main_ds)
+                    .dst_binding(6)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(instance_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(hdr_framebuffer_ds)
                     .dst_binding(0)
@@ -1059,9 +1068,8 @@ fn main() -> anyhow::Result<()> {
                                 vertex_buffers.normal.buffer,
                                 vertex_buffers.uv.buffer,
                                 vertex_buffers.material.buffer,
-                                instance_buffer.buffer
                             ],
-                            &[0, 0, 0, 0, 0],
+                            &[0, 0, 0, 0],
                         );
 
                         device.cmd_bind_index_buffer(
@@ -1374,6 +1382,11 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::SAMPLER)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(6)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::VERTEX),
                     ]),
                     None,
                 )?
@@ -1596,20 +1609,11 @@ impl Pipelines {
             )
         }?;
 
-        let instance_attributes = &[
-            ash_abstractions::VertexAttribute::Vec3,
-            ash_abstractions::VertexAttribute::Vec3,
-            ash_abstractions::VertexAttribute::Vec3,
-            ash_abstractions::VertexAttribute::Vec3,
-            ash_abstractions::VertexAttribute::Float,
-        ];
-
         let full_vertex_attributes = ash_abstractions::create_vertex_attribute_descriptions(&[
             &[ash_abstractions::VertexAttribute::Vec3],
             &[ash_abstractions::VertexAttribute::Vec3],
             &[ash_abstractions::VertexAttribute::Vec2],
             &[ash_abstractions::VertexAttribute::Uint],
-            instance_attributes,
         ]);
 
         let full_vertex_bindings = [
@@ -1625,10 +1629,6 @@ impl Pipelines {
             *vk::VertexInputBindingDescription::builder()
                 .binding(3)
                 .stride(std::mem::size_of::<u32>() as u32),
-            *vk::VertexInputBindingDescription::builder()
-                .binding(4)
-                .stride(std::mem::size_of::<Instance>() as u32)
-                .input_rate(vk::VertexInputRate::INSTANCE),
         ];
 
         let normal_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -1688,17 +1688,10 @@ impl Pipelines {
                 &[],
                 &[],
                 &[],
-                instance_attributes,
             ]),
-            vertex_bindings: &[
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(0)
-                    .stride(std::mem::size_of::<Vec3>() as u32),
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(4)
-                    .stride(std::mem::size_of::<Instance>() as u32)
-                    .input_rate(vk::VertexInputRate::INSTANCE),
-            ],
+            vertex_bindings: &[*vk::VertexInputBindingDescription::builder()
+                .binding(0)
+                .stride(std::mem::size_of::<Vec3>() as u32)],
             colour_attachments: &[],
         };
 
@@ -1718,7 +1711,6 @@ impl Pipelines {
                 &[],
                 &[ash_abstractions::VertexAttribute::Vec2],
                 &[ash_abstractions::VertexAttribute::Uint],
-                instance_attributes,
             ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
@@ -1730,10 +1722,6 @@ impl Pipelines {
                 *vk::VertexInputBindingDescription::builder()
                     .binding(3)
                     .stride(std::mem::size_of::<u32>() as u32),
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(4)
-                    .stride(std::mem::size_of::<Instance>() as u32)
-                    .input_rate(vk::VertexInputRate::INSTANCE),
             ],
             colour_attachments: &[],
         };
@@ -1851,12 +1839,6 @@ impl Pipelines {
             transmission_pipeline_layout,
         })
     }
-}
-
-struct Instance {
-    _translation: Vec3,
-    _rotation: Mat3,
-    _scale: f32,
 }
 
 struct RenderPasses {
@@ -2181,19 +2163,18 @@ struct Model {
 }
 
 fn load_gltf(
-    path: &Path,
+    name: &str,
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     materials: &mut Vec<shared_structs::MaterialInfo>,
     vertex_buffers: &mut VertexStagingBuffers,
 ) -> anyhow::Result<Model> {
-    let path_str = format!("{}", path.display());
-    let _span = tracy_client::span!(&path_str);
+    let _span = tracy_client::span!(name);
 
     let importing_gltf_span = tracy_client::span!("Importing gltf");
 
-    let (gltf, buffers, mut images) = gltf::import(path)?;
+    let (gltf, buffers, mut images) = gltf::import(path_for_gltf_model(name))?;
 
     drop(importing_gltf_span);
 
@@ -2233,7 +2214,6 @@ fn load_gltf(
         .filter_map(|node| node.mesh().map(|mesh| (node, mesh)))
     {
         let transform = node_tree.transform_of(node.index());
-        let normal_transform = normal_matrix(transform);
 
         for primitive in mesh.primitives() {
             let material = primitive.material();
@@ -2275,11 +2255,11 @@ fn load_gltf(
             for ((position, normal), uv) in positions.zip(normals).zip(uvs) {
                 vertex_buffers
                     .position
-                    .push((transform * Vec3::from(position).extend(1.0)).truncate());
+                    .push(transform * Vec3::from(position));
                 vertex_buffers.uv.push(uv_scaling * Vec2::from(uv));
                 vertex_buffers
                     .normal
-                    .push((normal_transform * Vec3::from(normal)).normalize());
+                    .push((transform.rotation * Vec3::from(normal)).normalize());
                 vertex_buffers.material.push(material_id as u32);
             }
         }
@@ -2339,7 +2319,7 @@ fn load_gltf(
                                 let texture = load_texture_from_gltf(
                                     image,
                                     srgb,
-                                    &format!("{} {} {}", path.display(), name, i),
+                                    &format!("{} {} {}", name, name, i),
                                     init_resources,
                                     buffers_to_cleanup,
                                 )?;
@@ -2446,11 +2426,6 @@ fn load_gltf(
         transmission: transmission_slice,
         transmission_alpha_clip: transmission_alpha_clip_slice,
     })
-}
-
-fn normal_matrix(transform: Mat4) -> Mat3 {
-    let inverse_transpose = transform.inverse().transpose();
-    Mat3::from_mat4(inverse_transpose)
 }
 
 fn mip_levels_for_size(width: u32, height: u32) -> u32 {
@@ -2572,15 +2547,24 @@ impl ImageManager {
 }
 
 pub struct NodeTree {
-    inner: Vec<(Mat4, usize)>,
+    inner: Vec<(Similarity, usize)>,
 }
 
 impl NodeTree {
     fn new(nodes: gltf::iter::Nodes) -> Self {
-        let mut inner = vec![(Mat4::IDENTITY, usize::max_value()); nodes.clone().count()];
+        let mut inner = vec![(Similarity::IDENTITY, usize::max_value()); nodes.clone().count()];
 
         for node in nodes {
-            inner[node.index()].0 = Mat4::from_cols_array_2d(&node.transform().matrix());
+            let (translation, rotation, scale) = node.transform().decomposed();
+
+            assert_eq!(scale[0], scale[1]);
+            assert_eq!(scale[0], scale[2]);
+
+            inner[node.index()].0 = Similarity {
+                translation: translation.into(),
+                rotation: Quat::from_array(rotation),
+                scale: scale[0],
+            };
             for child in node.children() {
                 inner[child.index()].1 = node.index();
             }
@@ -2589,8 +2573,8 @@ impl NodeTree {
         Self { inner }
     }
 
-    pub fn transform_of(&self, mut index: usize) -> Mat4 {
-        let mut transform_sum = Mat4::IDENTITY;
+    pub fn transform_of(&self, mut index: usize) -> Similarity {
+        let mut transform_sum = Similarity::IDENTITY;
 
         while index != usize::max_value() {
             let (transform, parent_index) = self.inner[index];

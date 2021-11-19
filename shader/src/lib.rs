@@ -13,9 +13,9 @@ use glam_pbr::{
     basic_brdf, ibl_volume_refraction, BasicBrdfParams, BrdfResult, IblVolumeRefractionParams,
     IndexOfRefraction, Light, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform};
+use shared_structs::{MaterialInfo, PackedSimilarity, PointLight, PushConstants, SunUniform};
 use spirv_std::{
-    glam::{const_vec3, Mat3, Vec2, Vec3, Vec4},
+    glam::{const_vec3, Mat3, Quat, Vec2, Vec3, Vec4},
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
@@ -435,19 +435,16 @@ pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
     uv: Vec2,
     material: u32,
-    translation: Vec3,
-    rotation_col_0: Vec3,
-    rotation_col_1: Vec3,
-    rotation_col_2: Vec3,
-    scale: f32,
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
     out_uv: &mut Vec2,
     out_material: &mut u32,
 ) {
-    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+    let similarity = instances[instance_index as usize].unpack();
 
-    let position = (rotation * position) * scale + translation;
+    let position = similarity * position;
 
     *out_uv = uv;
     *out_material = material;
@@ -457,17 +454,14 @@ pub fn depth_pre_pass_vertex_alpha_clip(
 #[spirv(vertex)]
 pub fn depth_pre_pass_instanced(
     position: Vec3,
-    translation: Vec3,
-    rotation_col_0: Vec3,
-    rotation_col_1: Vec3,
-    rotation_col_2: Vec3,
-    scale: f32,
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+    let similarity = instances[instance_index as usize].unpack();
 
-    let position = (rotation * position) * scale + translation;
+    let position = similarity * position;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
@@ -478,11 +472,8 @@ pub fn vertex_instanced(
     normal: Vec3,
     uv: Vec2,
     material: u32,
-    translation: Vec3,
-    rotation_col_0: Vec3,
-    rotation_col_1: Vec3,
-    rotation_col_2: Vec3,
-    scale: f32,
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
@@ -490,12 +481,12 @@ pub fn vertex_instanced(
     out_material: &mut u32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+    let similarity = instances[instance_index as usize].unpack();
 
-    let position = (rotation * position) * scale + translation;
+    let position = similarity * position;
 
     *out_position = position;
-    *out_normal = rotation * normal;
+    *out_normal = similarity.rotation * normal;
     *out_uv = uv;
     *out_material = material;
 
@@ -508,11 +499,8 @@ pub fn vertex_instanced_with_scale(
     normal: Vec3,
     uv: Vec2,
     material: u32,
-    translation: Vec3,
-    rotation_col_0: Vec3,
-    rotation_col_1: Vec3,
-    rotation_col_2: Vec3,
-    scale: f32,
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
@@ -521,15 +509,15 @@ pub fn vertex_instanced_with_scale(
     out_scale: &mut f32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let rotation = Mat3::from_cols(rotation_col_0, rotation_col_1, rotation_col_2);
+    let similarity = instances[instance_index as usize].unpack();
 
-    let position = (rotation * position) * scale + translation;
+    let position = similarity * position;
 
     *out_position = position;
-    *out_normal = rotation * normal;
+    *out_normal = similarity.rotation * normal;
     *out_uv = uv;
     *out_material = material;
-    *out_scale = scale;
+    *out_scale = similarity.scale;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
