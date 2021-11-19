@@ -1,10 +1,25 @@
 #![no_std]
 
-use core::f32::consts::{FRAC_1_PI, PI};
+use core::{
+    f32::consts::{FRAC_1_PI, PI},
+    ops::Add,
+};
 use glam::{Mat4, Vec2, Vec3};
 use num_traits::Float;
 
 // Workarounds: can't use f32.lerp, f32.clamp or f32.powi.
+
+pub fn light_direction_and_attenuation(
+    fragment_position: Vec3,
+    light_position: Vec3,
+) -> (Vec3, f32) {
+    let vector = light_position - fragment_position;
+    let distance_sq = vector.length_squared();
+    let direction = vector / distance_sq.sqrt();
+    let attenuation = 1.0 / distance_sq;
+
+    (direction, attenuation)
+}
 
 fn clamp(value: f32, min: f32, max: f32) -> f32 {
     value.max(min).min(max)
@@ -360,18 +375,24 @@ pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
             fresnel,
         );
 
-    BrdfResult {
-        diffuse,
-        specular,
-        emission: Vec3::ZERO,
-    }
+    BrdfResult { diffuse, specular }
 }
 
 #[derive(Default)]
 pub struct BrdfResult {
     pub diffuse: Vec3,
     pub specular: Vec3,
-    pub emission: Vec3,
+}
+
+impl Add<BrdfResult> for BrdfResult {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            diffuse: self.diffuse + other.diffuse,
+            specular: self.specular + other.specular,
+        }
+    }
 }
 
 pub fn compute_f0(
