@@ -239,6 +239,8 @@ pub struct IblVolumeRefractionParams {
     pub position: Vec3,
     pub thickness: f32,
     pub model_scale: f32,
+    pub attenuation_distance: f32,
+    pub attenuation_colour: Vec3,
 }
 
 fn refract(incident: Vec3, normal: Vec3, index_of_refraction: IndexOfRefraction) -> Vec3 {
@@ -257,11 +259,34 @@ fn get_volume_transmission_ray(
     thickness: f32,
     index_of_refraction: IndexOfRefraction,
     scale: f32,
-) -> Vec3 {
+) -> (Vec3, f32) {
     let refraction = refract(-view.0, normal.0, index_of_refraction);
     // todo: work out a better instancing scheme so we don't have to hardcode this.
-    let gltf_primitive_scale = 0.25;
-    refraction.normalize() * thickness * scale * gltf_primitive_scale
+    let gltf_primitive_scale = 1.0;
+    let length = thickness * scale * gltf_primitive_scale;
+    (refraction.normalize() * length, length)
+}
+
+// Component-wise natural log (log e) of a vector.
+fn ln(vector: Vec3) -> Vec3 {
+    Vec3::new(vector.x.ln(), vector.y.ln(), vector.z.ln())
+}
+
+fn apply_volume_attenuation(
+    transmitted_light: Vec3,
+    transmission_distance: f32,
+    attenuation_distance: f32,
+    attenuation_colour: Vec3,
+) -> Vec3 {
+    if attenuation_distance == f32::INFINITY {
+        transmitted_light
+    } else {
+        // Compute light attenuation using Beer's law.
+        let attenuation_coefficient = -ln(attenuation_colour) / attenuation_distance;
+        // Beer's law
+        let transmittance = (-attenuation_coefficient * transmission_distance).exp();
+        transmittance * transmitted_light
+    }
 }
 
 pub fn ibl_volume_refraction<
@@ -280,6 +305,8 @@ pub fn ibl_volume_refraction<
         view,
         thickness,
         model_scale,
+        attenuation_colour,
+        attenuation_distance,
         material_params:
             MaterialParams {
                 diffuse_colour: base_colour,
@@ -292,8 +319,9 @@ pub fn ibl_volume_refraction<
     //let thickness = 1.0;
     //let perceptual_roughness = PerceptualRoughness(0.25);
 
-    let refracted_ray_exit = position
-        + get_volume_transmission_ray(normal, view, thickness, index_of_refraction, model_scale);
+    let (ray, ray_length) =
+        get_volume_transmission_ray(normal, view, thickness, index_of_refraction, model_scale);
+    let refracted_ray_exit = position + ray;
 
     let device_coords = proj_view_matrix * refracted_ray_exit.extend(1.0);
     let screen_coords = Vec2::new(device_coords.x, device_coords.y) / device_coords.w;
@@ -303,8 +331,12 @@ pub fn ibl_volume_refraction<
         (framebuffer_size_x as f32).log2() * perceptual_roughness.apply_ior(index_of_refraction).0;
 
     let transmitted_light = framebuffer_sampler(texture_coords, framebuffer_lod);
-    // todo: volume
-    let attenuated_colour = transmitted_light;
+    let attenuated_colour = apply_volume_attenuation(
+        transmitted_light,
+        ray_length,
+        attenuation_distance * model_scale,
+        attenuation_colour,
+    );
 
     let normal_dot_view = normal.0.dot(view.0);
     let brdf = ggx_lut_sampler(normal_dot_view, perceptual_roughness);

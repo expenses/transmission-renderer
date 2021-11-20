@@ -394,7 +394,7 @@ fn main() -> anyhow::Result<()> {
                 Similarity {
                     translation: Vec3::new(0.0, 250.0, 0.0),
                     rotation: Quat::IDENTITY,
-                    scale: 100.0,
+                    scale: 10.0,
                 }
                 .pack(),
             ])
@@ -2249,18 +2249,34 @@ fn load_gltf(
             indices.extend(read_indices.map(|index| index + num_vertices));
 
             let positions = reader.read_positions().unwrap();
-            let normals = reader.read_normals().unwrap();
-            let uvs = reader.read_tex_coords(0).unwrap().into_f32();
 
-            for ((position, normal), uv) in positions.zip(normals).zip(uvs) {
-                vertex_buffers
-                    .position
-                    .push(transform * Vec3::from(position));
-                vertex_buffers.uv.push(uv_scaling * Vec2::from(uv));
-                vertex_buffers
-                    .normal
-                    .push((transform.rotation * Vec3::from(normal)).normalize());
-                vertex_buffers.material.push(material_id as u32);
+            let num_primitive_vertices = positions.clone().count();
+
+            vertex_buffers
+                .position
+                .extend(positions.map(|position| transform * Vec3::from(position)));
+            vertex_buffers
+                .material
+                .extend(std::iter::repeat(material_id as u32).take(num_primitive_vertices));
+            vertex_buffers.normal.extend(
+                reader
+                    .read_normals()
+                    .unwrap()
+                    .map(|normal| (transform.rotation * Vec3::from(normal)).normalize()),
+            );
+
+            // Some test models (AttenuationTest) don't have UVs on some primitives.
+            match reader.read_tex_coords(0) {
+                Some(uvs) => {
+                    vertex_buffers
+                        .uv
+                        .extend(uvs.into_f32().map(|uv| uv_scaling * Vec2::from(uv)));
+                }
+                None => {
+                    vertex_buffers
+                        .uv
+                        .extend(std::iter::repeat(Vec2::ZERO).take(num_primitive_vertices));
+                }
             }
         }
     }
@@ -2412,7 +2428,7 @@ fn load_gltf(
                 .unwrap_or(f32::INFINITY),
             attenuation_colour: material
                 .volume()
-                .map(|volume| volume.attenuation_colour())
+                .map(|volume| volume.attenuation_color())
                 .unwrap_or([1.0; 3])
                 .into(),
         });

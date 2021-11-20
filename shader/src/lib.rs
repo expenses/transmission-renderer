@@ -129,6 +129,8 @@ pub fn fragment_transmission(
             view,
             thickness,
             model_scale,
+            attenuation_distance: material.attenuation_distance,
+            attenuation_colour: material.attenuation_colour.into(),
         },
         framebuffer_sampler,
         ggx_lut_sampler,
