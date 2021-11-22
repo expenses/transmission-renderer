@@ -27,6 +27,7 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
 }
 
 pub const MAX_IMAGES: u32 = 195;
+pub const NEAR_Z: f32 = 0.01;
 
 fn main() -> anyhow::Result<()> {
     let entire_setup_span = tracy_client::span!("Entire Setup");
@@ -468,12 +469,12 @@ fn main() -> anyhow::Result<()> {
         unsafe {
             cast_slice(&[
                 PointLight {
-                    position: Vec3::new(0.0, 1.0, 0.0).into(),
-                    colour_and_intensity: Vec4::new(1.0, 0.0, 0.0, 25000.0),
+                    position: Vec3::new(0.0, 0.8, 0.0).into(),
+                    colour_and_intensity: Vec4::new(1.0, 0.0, 0.0, 5.0),
                 },
                 PointLight {
-                    position: Vec3::new(1000.0, 10.0, 0.0).into(),
-                    colour_and_intensity: Vec4::new(0.0, 0.0, 1.0, 100000.0),
+                    position: Vec3::new(8.0, 0.8, 0.0).into(),
+                    colour_and_intensity: Vec4::new(0.0, 0.0, 1.0, 10.0),
                 },
             ])
         },
@@ -489,16 +490,16 @@ fn main() -> anyhow::Result<()> {
                     transform: Similarity {
                         translation: Vec3::ZERO,
                         rotation: Quat::IDENTITY,
-                        scale: 1.0 / 0.00800000037997961,
+                        scale: 1.0,
                     }
                     .pack(),
                     primitive_id: 0,
                 },
                 Instance {
                     transform: Similarity {
-                        translation: Vec3::new(0.0, 250.0, 0.0),
+                        translation: Vec3::new(0.0, 2.0, 0.0),
                         rotation: Quat::IDENTITY,
-                        scale: 10.0,
+                        scale: 10.0 / 125.0,
                     }
                     .pack(),
                     primitive_id: 0,
@@ -606,7 +607,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut camera = dolly::rig::CameraRig::builder()
         .with(dolly::drivers::Position::new(Vec3::new(
-            -18.0, 300.0, 100.0,
+            0.0, 3.0, 1.0,
         )))
         .with(dolly::drivers::YawPitch::new().pitch_degrees(-15.0))
         .with(dolly::drivers::Smooth::new_position_rotation(0.5, 0.25))
@@ -615,7 +616,7 @@ fn main() -> anyhow::Result<()> {
     let mut perspective_matrix = perspective_infinite_z_vk(
         59.0_f32.to_radians(),
         extent.width as f32 / extent.height as f32,
-        0.1,
+        NEAR_Z,
     );
 
     let num_tiles = UVec2::new(12, 8);
@@ -830,7 +831,7 @@ fn main() -> anyhow::Result<()> {
                         perspective_matrix = perspective_infinite_z_vk(
                             59.0_f32.to_radians(),
                             extent.width as f32 / extent.height as f32,
-                            0.1,
+                            NEAR_Z,
                         );
 
                         screen_center = winit::dpi::LogicalPosition::new(
@@ -1007,7 +1008,7 @@ fn main() -> anyhow::Result<()> {
 
                     camera
                         .driver_mut::<dolly::drivers::Position>()
-                        .translate(move_vec * delta_time * 400.0);
+                        .translate(move_vec * delta_time * 3.0);
 
                     camera.update(delta_time);
 
@@ -1164,7 +1165,7 @@ fn main() -> anyhow::Result<()> {
                                         camera.final_transform.position + camera.final_transform.forward(),
                                         camera.final_transform.up(),
                                     ),
-                                    z_near: 0.1
+                                    z_near: NEAR_Z
                                 }),
                             );
 

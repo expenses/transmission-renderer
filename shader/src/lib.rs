@@ -198,6 +198,8 @@ pub fn fragment(
 
     let output = (result.diffuse + result.specular + emission).extend(1.0);
 
+    //let output = position.extend(1.0);
+
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;
 }
@@ -298,7 +300,7 @@ fn evaluate_lights_transmission(
         let light = index(point_lights, i);
 
         let (direction, attenuation) =
-            light_direction_and_attenuation(light.position.into(), position);
+            light_direction_and_attenuation(position, light.position.into());
 
         let light_colour = light.colour_and_intensity.truncate();
         let intensity = light.colour_and_intensity.w;
@@ -346,7 +348,7 @@ fn evaluate_lights(
         let light = index(point_lights, i);
 
         let (direction, attenuation) =
-            light_direction_and_attenuation(light.position.into(), position);
+            light_direction_and_attenuation(position, light.position.into());
 
         let light_colour = light.colour_and_intensity.truncate();
         let intensity = light.colour_and_intensity.w;
