@@ -143,17 +143,9 @@ pub struct Instance {
 pub struct PrimitiveInfo {
     pub bounding_sphere: PackedBoundingSphere,
     pub draw_buffer_index: u32,
-    pub command: PartialDrawIndexedIndirectCommand,
-}
-
-// Missing vertex offset.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy)]
-pub struct PartialDrawIndexedIndirectCommand {
-    pub instance_count: u32,
     pub index_count: u32,
     pub first_index: u32,
-    pub first_instance: u32
+    pub first_instance: u32,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]

@@ -14,9 +14,12 @@ use glam_pbr::{
     BrdfResult, IblVolumeRefractionParams, IndexOfRefraction, Light, MaterialParams, Normal,
     PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform, Instance, PrimitiveInfo, PackedBoundingSphere, Similarity, CullingPushConstants, DrawCounts};
+use shared_structs::{
+    CullingPushConstants, DrawCounts, Instance, MaterialInfo, PackedBoundingSphere, PointLight,
+    PrimitiveInfo, PushConstants, Similarity, SunUniform,
+};
 use spirv_std::{
-    glam::{Mat3, Vec2, Vec3, Vec4, UVec3},
+    glam::{Mat3, UVec3, Vec2, Vec3, Vec4},
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
@@ -536,15 +539,11 @@ impl<T, const N: usize> GetUnchecked<T> for [T; N] {
 }
 
 fn index<T, S: GetUnchecked<T> + ?Sized>(structure: &S, index: u32) -> &T {
-    unsafe {
-        GetUnchecked::get_unchecked(structure, index as usize)
-    }
+    unsafe { GetUnchecked::get_unchecked(structure, index as usize) }
 }
 
 fn index_mut<T, S: GetUnchecked<T> + ?Sized>(structure: &mut S, index: u32) -> &mut T {
-    unsafe {
-        GetUnchecked::get_unchecked_mut(structure, index as usize)
-    }
+    unsafe { GetUnchecked::get_unchecked_mut(structure, index as usize) }
 }
 
 mod vk {
@@ -560,7 +559,8 @@ mod vk {
 #[spirv(compute(threads(64)))]
 pub fn frustum_culling(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] instances: &[Instance],
-    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &mut [PrimitiveInfo],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &[PrimitiveInfo],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] instance_counts: &mut [u32],
     #[spirv(push_constant)] push_constants: &CullingPushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
@@ -571,43 +571,49 @@ pub fn frustum_culling(
     }
 
     let instance = index(instances, instance_id);
-    let primitive = index_mut(primitives, instance.primitive_id);
+    let primitive = index(primitives, instance.primitive_id);
 
-    if cull(primitive.bounding_sphere, instance.transform.unpack(), *push_constants) {
+    if cull(
+        primitive.bounding_sphere,
+        instance.transform.unpack(),
+        *push_constants,
+    ) {
         return;
     }
 
-    atomic_i_add(&mut primitive.command.instance_count, 1);
+    atomic_i_add(index_mut(instance_counts, instance.primitive_id), 1);
 }
-
 
 #[spirv(compute(threads(64)))]
 pub fn demultiplex_draws(
     #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &[PrimitiveInfo],
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] draw_counts: &mut [u32; DrawCounts::COUNT],
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] opaque_draws: &mut [vk::DrawIndexedIndirectCommand],
-    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
-    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] transmission_draws: &mut [vk::DrawIndexedIndirectCommand],
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] transmission_alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] instance_counts: &[u32],
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] draw_counts: &mut [u32; DrawCounts::COUNT],
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] opaque_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] transmission_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 7, storage_buffer)] transmission_alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
     let draw_id = id.x;
 
-    if draw_id as usize > primitives.len() {
-        return
+    if draw_id as usize > instance_counts.len() {
+        return;
+    }
+
+    let instance_count = *index(instance_counts, draw_id);
+
+    if instance_count == 0 {
+        return;
     }
 
     let primitive = index(primitives, draw_id);
-
-    if primitive.command.instance_count == 0 {
-        return;
-    }
 
     let mut draw_buffers: [_; DrawCounts::COUNT] = [
         opaque_draws,
         alpha_clip_draws,
         transmission_draws,
-        transmission_alpha_clip_draws
+        transmission_alpha_clip_draws,
     ];
 
     let draw_buffer = index_mut(&mut draw_buffers, primitive.draw_buffer_index);
@@ -618,15 +624,19 @@ pub fn demultiplex_draws(
     let draw_command = index_mut(*draw_buffer, non_zero_draw_id);
 
     *draw_command = vk::DrawIndexedIndirectCommand {
-        instance_count: primitive.command.instance_count,
-        index_count: primitive.command.index_count,
-        first_index: primitive.command.first_index,
-        first_instance: primitive.command.first_instance,
+        instance_count,
+        index_count: primitive.index_count,
+        first_index: primitive.first_index,
+        first_instance: primitive.first_instance,
         vertex_offset: 0,
     };
 }
 
-fn cull(bounding_sphere: PackedBoundingSphere, transform: Similarity, push_constants: CullingPushConstants) -> bool {
+fn cull(
+    bounding_sphere: PackedBoundingSphere,
+    transform: Similarity,
+    push_constants: CullingPushConstants,
+) -> bool {
     let mut center = bounding_sphere.center_and_radius.truncate();
     center = transform * center;
     center = (push_constants.view * center.extend(1.0)).truncate();
@@ -642,7 +652,7 @@ fn atomic_i_add(reference: &mut u32, value: u32) -> u32 {
         spirv_std::arch::atomic_i_add::<
             _,
             { spirv_std::memory::Scope::Device as u8 },
-            { spirv_std::memory::Semantics::NONE.bits() as u8 }
+            { spirv_std::memory::Semantics::NONE.bits() as u8 },
         >(reference, value)
     }
 }

@@ -9,7 +9,7 @@ use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
-use shared_structs::{PointLight, Similarity, Instance};
+use shared_structs::{Instance, PointLight, Similarity};
 
 mod profiling;
 
@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
         unsafe { instance.create_device(physical_device, &device_info, None) }?
     };
 
-    let render_passes = RenderPasses::new(&device, surface_format.format)?;
+    let render_passes = RenderPasses::new(&device, &debug_utils_loader, surface_format.format)?;
     let descriptor_set_layouts = DescriptorSetLayouts::new(&device)?;
 
     let pipeline_cache =
@@ -148,6 +148,46 @@ fn main() -> anyhow::Result<()> {
         &descriptor_set_layouts,
         pipeline_cache,
     )?;
+
+    let descriptor_pool = unsafe {
+        device.create_descriptor_pool(
+            &vk::DescriptorPoolCreateInfo::builder()
+                .pool_sizes(&[
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::STORAGE_BUFFER)
+                        .descriptor_count(3 + 8),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                        .descriptor_count(2),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::SAMPLED_IMAGE)
+                        .descriptor_count(MAX_IMAGES),
+                    *vk::DescriptorPoolSize::builder()
+                        .ty(vk::DescriptorType::SAMPLER)
+                        .descriptor_count(3),
+                ])
+                .max_sets(4),
+            None,
+        )
+    }?;
+
+    let descriptor_sets = unsafe {
+        device.allocate_descriptor_sets(
+            &vk::DescriptorSetAllocateInfo::builder()
+                .set_layouts(&[
+                    descriptor_set_layouts.main,
+                    descriptor_set_layouts.hdr_framebuffer,
+                    descriptor_set_layouts.hdr_framebuffer,
+                    descriptor_set_layouts.frustum_culling,
+                ])
+                .descriptor_pool(descriptor_pool),
+        )
+    }?;
+
+    let main_ds = descriptor_sets[0];
+    let hdr_framebuffer_ds = descriptor_sets[1];
+    let opaque_sampled_hdr_framebuffer_ds = descriptor_sets[2];
+    let frustum_culling_ds = descriptor_sets[3];
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
@@ -313,6 +353,19 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
+    let (primitive_info_buffer, instance_count_buffer) = buffers_from_primitives(
+        &[shared_structs::PrimitiveInfo {
+            bounding_sphere: shared_structs::PackedBoundingSphere {
+                center_and_radius: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            },
+            draw_buffer_index: 0,
+            index_count: 10,
+            first_index: 0,
+            first_instance: 0,
+        }; 10_000],
+        &mut init_resources,
+    )?;
+
     let draw_buffers = DrawBuffers {
         draw_counts_buffer: ash_abstractions::Buffer::new(
             unsafe {
@@ -343,6 +396,9 @@ fn main() -> anyhow::Result<()> {
         alpha_clip: alpha_clip_draw_buffer,
         transmission: transmission_draw_buffer,
         transmission_alpha_clip: transmission_alpha_clip_draw_buffer,
+        frustum_culling_ds,
+        primitive_info_buffer,
+        instance_count_buffer,
     };
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
@@ -434,7 +490,8 @@ fn main() -> anyhow::Result<()> {
                         translation: Vec3::ZERO,
                         rotation: Quat::IDENTITY,
                         scale: 1.0 / 0.00800000037997961,
-                    }.pack(),
+                    }
+                    .pack(),
                     primitive_id: 0,
                 },
                 Instance {
@@ -575,44 +632,6 @@ fn main() -> anyhow::Result<()> {
         ggx_lut_texture_index: ggx_lut_id,
     };
 
-    let descriptor_pool = unsafe {
-        device.create_descriptor_pool(
-            &vk::DescriptorPoolCreateInfo::builder()
-                .pool_sizes(&[
-                    *vk::DescriptorPoolSize::builder()
-                        .ty(vk::DescriptorType::STORAGE_BUFFER)
-                        .descriptor_count(3),
-                    *vk::DescriptorPoolSize::builder()
-                        .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                        .descriptor_count(2),
-                    *vk::DescriptorPoolSize::builder()
-                        .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                        .descriptor_count(MAX_IMAGES),
-                    *vk::DescriptorPoolSize::builder()
-                        .ty(vk::DescriptorType::SAMPLER)
-                        .descriptor_count(3),
-                ])
-                .max_sets(3),
-            None,
-        )
-    }?;
-
-    let descriptor_sets = unsafe {
-        device.allocate_descriptor_sets(
-            &vk::DescriptorSetAllocateInfo::builder()
-                .set_layouts(&[
-                    descriptor_set_layouts.main,
-                    descriptor_set_layouts.hdr_framebuffer,
-                    descriptor_set_layouts.hdr_framebuffer,
-                ])
-                .descriptor_pool(descriptor_pool),
-        )
-    }?;
-
-    let main_ds = descriptor_sets[0];
-    let hdr_framebuffer_ds = descriptor_sets[1];
-    let opaque_sampled_hdr_framebuffer_ds = descriptor_sets[2];
-
     let sampler = unsafe {
         device.create_sampler(
             &vk::SamplerCreateInfo::builder()
@@ -693,6 +712,28 @@ fn main() -> anyhow::Result<()> {
                     .image_info(&[*vk::DescriptorImageInfo::builder()
                         .image_view(opaque_sampled_hdr_framebuffer.view)
                         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                // Frustum culling
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(instance_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.primitive_info_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(2)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.instance_count_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
             ],
             &[],
         )
@@ -1077,6 +1118,103 @@ fn main() -> anyhow::Result<()> {
 
                         let all_commands_profiling_zone = profiling_zone!("all commands", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
+                        {
+                            let _profiling_zone = profiling_zone!("frustum culling", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                            {
+                                let _profiling_zone = profiling_zone!("zeroing the instance count buffer", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                                device.cmd_fill_buffer(
+                                    command_buffer,
+                                    draw_buffers.instance_count_buffer.buffer,
+                                    0,
+                                    vk::WHOLE_SIZE,
+                                    0
+                                );
+                            }
+
+                            vk_sync::cmd::pipeline_barrier(
+                                &device,
+                                command_buffer,
+                                Some(vk_sync::GlobalBarrier {
+                                    previous_accesses: &[vk_sync::AccessType::TransferWrite],
+                                    next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                                }),
+                                &[],
+                                &[],
+                            );
+
+                            device.cmd_bind_descriptor_sets(
+                                command_buffer,
+                                vk::PipelineBindPoint::COMPUTE,
+                                pipelines.frustum_culling_pipeline_layout,
+                                0,
+                                &[draw_buffers.frustum_culling_ds],
+                                &[],
+                            );
+
+                            device.cmd_push_constants(
+                                command_buffer,
+                                pipelines.frustum_culling_pipeline_layout,
+                                vk::ShaderStageFlags::COMPUTE,
+                                0,
+                                bytes_of(&shared_structs::CullingPushConstants {
+                                    view: Mat4::look_at_rh(
+                                        camera.final_transform.position,
+                                        camera.final_transform.position + camera.final_transform.forward(),
+                                        camera.final_transform.up(),
+                                    ),
+                                    z_near: 0.1
+                                }),
+                            );
+
+                            device.cmd_bind_pipeline(
+                                command_buffer,
+                                vk::PipelineBindPoint::COMPUTE,
+                                pipelines.frustum_culling,
+                            );
+
+                            {
+                                let _profiling_zone = profiling_zone!("frustum culling compute shader", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                                device.cmd_dispatch(command_buffer, dispatch_count(2, 64), 1, 1);
+                            }
+
+                            vk_sync::cmd::pipeline_barrier(
+                                &device,
+                                command_buffer,
+                                Some(vk_sync::GlobalBarrier {
+                                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                                    next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                                }),
+                                &[],
+                                &[],
+                            );
+
+                            device.cmd_bind_pipeline(
+                                command_buffer,
+                                vk::PipelineBindPoint::COMPUTE,
+                                pipelines.demultiplex_draws,
+                            );
+
+                            {
+                                let _profiling_zone = profiling_zone!("demultiplex draws compute shader", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                                //device.cmd_dispatch(command_buffer, dispatch_count(2, 64), 1, 1);
+                            }
+
+                            vk_sync::cmd::pipeline_barrier(
+                                &device,
+                                command_buffer,
+                                Some(vk_sync::GlobalBarrier {
+                                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                                    next_accesses: &[vk_sync::AccessType::IndirectBuffer],
+                                }),
+                                &[],
+                                &[],
+                            );
+                        }
+
                         device.cmd_begin_render_pass(
                             command_buffer,
                             &draw_render_pass_info,
@@ -1367,6 +1505,7 @@ fn main() -> anyhow::Result<()> {
 struct DescriptorSetLayouts {
     main: vk::DescriptorSetLayout,
     hdr_framebuffer: vk::DescriptorSetLayout,
+    frustum_culling: vk::DescriptorSetLayout,
 }
 
 impl DescriptorSetLayouts {
@@ -1422,6 +1561,53 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                    ]),
+                    None,
+                )?
+            },
+            frustum_culling: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(1)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(2)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(3)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(4)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(5)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(6)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(7)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
                     ]),
                     None,
                 )?
@@ -1517,9 +1703,12 @@ struct Pipelines {
     depth_pre_pass_transmissive_alpha_clip: vk::Pipeline,
     transmission: vk::Pipeline,
     tonemap: vk::Pipeline,
+    frustum_culling: vk::Pipeline,
+    demultiplex_draws: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     tonemap_pipeline_layout: vk::PipelineLayout,
     transmission_pipeline_layout: vk::PipelineLayout,
+    frustum_culling_pipeline_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -1542,6 +1731,9 @@ impl Pipelines {
         let fragment_transmission_entry_point = CString::new("fragment_transmission")?;
         let fullscreen_tri_entry_point = CString::new("fullscreen_tri")?;
         let fragment_tonemap_entry_point = CString::new("fragment_tonemap")?;
+
+        let frustum_culling_entry_point = CString::new("frustum_culling")?;
+        let demultiplex_draws_entry_point = CString::new("demultiplex_draws")?;
 
         let module = ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), device)?;
 
@@ -1590,6 +1782,16 @@ impl Pipelines {
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .name(&fragment_tonemap_entry_point);
 
+        let frustum_culling_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .name(&frustum_culling_entry_point);
+
+        let demultiplex_draws_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .module(module)
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .name(&demultiplex_draws_entry_point);
+
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
@@ -1611,6 +1813,17 @@ impl Pipelines {
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                None,
+            )
+        }?;
+
+        let frustum_culling_pipeline_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[descriptor_set_layouts.frustum_culling])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                        .size(std::mem::size_of::<shared_structs::CullingPushConstants>() as u32)]),
                 None,
             )
         }?;
@@ -1832,6 +2045,14 @@ impl Pipelines {
                 2,
             );
 
+        let frustum_culling_desc = vk::ComputePipelineCreateInfo::builder()
+            .stage(*frustum_culling_stage)
+            .layout(frustum_culling_pipeline_layout);
+
+        let demultiplex_draws_desc = vk::ComputePipelineCreateInfo::builder()
+            .stage(*demultiplex_draws_stage)
+            .layout(frustum_culling_pipeline_layout);
+
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
@@ -1849,6 +2070,15 @@ impl Pipelines {
         }
         .map_err(|(_, err)| err)?;
 
+        let compute_pipelines = unsafe {
+            device.create_compute_pipelines(
+                pipeline_cache,
+                &[*frustum_culling_desc, *demultiplex_draws_desc],
+                None,
+            )
+        }
+        .map_err(|(_, err)| err)?;
+
         Ok(Self {
             normal: pipelines[0],
             depth_pre_pass: pipelines[1],
@@ -1857,9 +2087,12 @@ impl Pipelines {
             depth_pre_pass_transmissive_alpha_clip: pipelines[4],
             transmission: pipelines[5],
             tonemap: pipelines[6],
+            frustum_culling: compute_pipelines[0],
+            demultiplex_draws: compute_pipelines[1],
             pipeline_layout,
             tonemap_pipeline_layout,
             transmission_pipeline_layout,
+            frustum_culling_pipeline_layout,
         })
     }
 }
@@ -1871,7 +2104,12 @@ struct RenderPasses {
 }
 
 impl RenderPasses {
-    fn new(device: &ash::Device, surface_format: vk::Format) -> anyhow::Result<Self> {
+    fn new(
+        device: &ash::Device,
+        debug_utils_loader: &DebugUtilsLoader,
+        surface_format: vk::Format,
+    ) -> anyhow::Result<Self> {
+        // todo: We get some syncronisation validation warnings by not specifying initial layouts here.
         let draw_attachments = [
             // Depth buffer
             *vk::AttachmentDescription::builder()
@@ -1879,6 +2117,7 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
+                //.initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
                 .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // HDR framebuffers
             *vk::AttachmentDescription::builder()
@@ -1886,12 +2125,14 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
+                //.initial_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
             *vk::AttachmentDescription::builder()
                 .format(vk::Format::R16G16B16A16_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
+                //.initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .final_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
         ];
 
@@ -1927,7 +2168,7 @@ impl RenderPasses {
         let draw_subpass_dependencices = [
             *vk::SubpassDependency::builder()
                 .src_subpass(vk::SUBPASS_EXTERNAL)
-                .dst_subpass(1)
+                .dst_subpass(0)
                 .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
                 .src_access_mask(vk::AccessFlags::empty())
                 // We use late and not early fragment tests as we handle alpha clipping in the depth pre pass.
@@ -1947,6 +2188,13 @@ impl RenderPasses {
                 .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
                 .dst_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
                 .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
+            *vk::SubpassDependency::builder()
+                .src_subpass(2)
+                .dst_subpass(vk::SUBPASS_EXTERNAL)
+                .src_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
+                .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
+                .dst_stage_mask(vk::PipelineStageFlags::TRANSFER)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
         ];
 
         let draw_render_pass = unsafe {
@@ -2047,6 +2295,25 @@ impl RenderPasses {
                 None,
             )
         }?;
+
+        ash_abstractions::set_object_name(
+            device,
+            debug_utils_loader,
+            draw_render_pass,
+            "draw render pass",
+        )?;
+        ash_abstractions::set_object_name(
+            device,
+            debug_utils_loader,
+            tonemap_render_pass,
+            "tonemap render pass",
+        )?;
+        ash_abstractions::set_object_name(
+            device,
+            debug_utils_loader,
+            transmission_render_pass,
+            "transmission render pass",
+        )?;
 
         Ok(Self {
             draw: draw_render_pass,
@@ -2202,6 +2469,22 @@ impl DrawBuffer {
         }))
     }
 
+    fn new_from_max_draws(
+        max_draws: u32,
+        name: &str,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            buffer: ash_abstractions::Buffer::new_of_size(
+                max_draws as u64 * std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u64,
+                name,
+                vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
+                init_resources,
+            )?,
+            max_draws,
+        })
+    }
+
     unsafe fn record(
         &self,
         device: &ash::Device,
@@ -2227,6 +2510,9 @@ struct DrawBuffers {
     transmission: Option<DrawBuffer>,
     transmission_alpha_clip: Option<DrawBuffer>,
     draw_counts_buffer: ash_abstractions::Buffer,
+    frustum_culling_ds: vk::DescriptorSet,
+    instance_count_buffer: ash_abstractions::Buffer,
+    primitive_info_buffer: ash_abstractions::Buffer,
 }
 
 impl DrawBuffers {
@@ -2245,8 +2531,30 @@ impl DrawBuffers {
             buffer.buffer.cleanup(device, allocator)?;
         }
         self.draw_counts_buffer.cleanup(device, allocator)?;
+        self.instance_count_buffer.cleanup(device, allocator)?;
+        self.primitive_info_buffer.cleanup(device, allocator)?;
         Ok(())
     }
+}
+
+fn buffers_from_primitives(
+    primitives: &[shared_structs::PrimitiveInfo],
+    init_resources: &mut ash_abstractions::InitResources,
+) -> anyhow::Result<(ash_abstractions::Buffer, ash_abstractions::Buffer)> {
+    Ok((
+        ash_abstractions::Buffer::new(
+            unsafe { cast_slice(primitives) },
+            "primitive info buffer",
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            init_resources,
+        )?,
+        ash_abstractions::Buffer::new_of_size(
+            primitives.len() as u64 * std::mem::size_of::<u32>() as u64,
+            "instance count buffer",
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            init_resources,
+        )?,
+    ))
 }
 
 struct VertexBuffers {
@@ -2630,6 +2938,8 @@ impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::SunUniform {}
 impl Castable for shared_structs::PushConstants {}
 impl Castable for shared_structs::DrawCounts {}
+impl Castable for shared_structs::CullingPushConstants {}
+impl Castable for shared_structs::PrimitiveInfo {}
 impl Castable for colstodian::tonemap::BakedLottesTonemapperParams {}
 
 unsafe fn cast_slice<T: Castable>(slice: &[T]) -> &[u8] {
@@ -2733,4 +3043,8 @@ impl NodeTree {
 
         transform_sum
     }
+}
+
+const fn dispatch_count(num: u32, group_size: u32) -> u32 {
+    ((num - 1) / group_size) + 1
 }
