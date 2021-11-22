@@ -286,6 +286,14 @@ fn main() -> anyhow::Result<()> {
 
     let mut vertex_staging_buffers = VertexStagingBuffers::default();
     let mut materials = Vec::new();
+    let mut instances = Vec::new();
+    let mut primitives = Vec::new();
+
+    let base_transform = Similarity {
+        translation: Vec3::new(0.0, 2.0, 0.0),
+                        rotation: Quat::IDENTITY,
+                        scale: 10.0 / 125.0,
+    };
 
     let model = load_gltf(
         &std::env::args().nth(1).unwrap(),
@@ -294,6 +302,9 @@ fn main() -> anyhow::Result<()> {
         &mut buffers_to_cleanup,
         &mut materials,
         &mut vertex_staging_buffers,
+        &mut instances,
+        &mut primitives,
+        Similarity::IDENTITY,
     )?;
 
     let model2 = load_gltf(
@@ -303,6 +314,9 @@ fn main() -> anyhow::Result<()> {
         &mut buffers_to_cleanup,
         &mut materials,
         &mut vertex_staging_buffers,
+        &mut instances,
+        &mut primitives,
+        base_transform
     )?;
 
     let model_materials = ash_abstractions::Buffer::new(
@@ -314,89 +328,58 @@ fn main() -> anyhow::Result<()> {
 
     let vertex_buffers = vertex_staging_buffers.upload(&mut init_resources)?;
 
-    let opaque_draw_buffer = DrawBuffer::new(
-        &[
-            model.opaque.as_draw_indexed_indirect_command(0),
-            model2.opaque.as_draw_indexed_indirect_command(1),
-        ],
+    let opaque_draw_buffer = DrawBuffer::new_from_max_draws(
+        // todo: reduce this it model.num_opaque + model2.num_opaque
+        primitives.len() as u32,
         "opaque",
         &mut init_resources,
     )?;
 
-    let alpha_clip_draw_buffer = DrawBuffer::new(
-        &[
-            model.alpha_clip.as_draw_indexed_indirect_command(0),
-            model2.alpha_clip.as_draw_indexed_indirect_command(1),
-        ],
+    let alpha_clip_draw_buffer = DrawBuffer::new_from_max_draws(
+        primitives.len() as u32,
         "alpha clip",
         &mut init_resources,
     )?;
 
-    let transmission_draw_buffer = DrawBuffer::new(
-        &[
-            model.transmission.as_draw_indexed_indirect_command(0),
-            model2.transmission.as_draw_indexed_indirect_command(1),
-        ],
+    let transmission_draw_buffer = DrawBuffer::new_from_max_draws(
+        primitives.len() as u32,
         "transmission",
         &mut init_resources,
     )?;
 
-    let transmission_alpha_clip_draw_buffer = DrawBuffer::new(
-        &[
-            model
-                .transmission_alpha_clip
-                .as_draw_indexed_indirect_command(0),
-            model2
-                .transmission_alpha_clip
-                .as_draw_indexed_indirect_command(1),
-        ],
+    let transmission_alpha_clip_draw_buffer = DrawBuffer::new_from_max_draws(
+        primitives.len() as u32,
         "transmission alpha clip",
         &mut init_resources,
     )?;
 
-    let (primitive_info_buffer, instance_count_buffer) = buffers_from_primitives(
-        &[shared_structs::PrimitiveInfo {
-            bounding_sphere: shared_structs::PackedBoundingSphere {
-                center_and_radius: Vec4::new(0.0, 0.0, 0.0, 1.0),
-            },
-            draw_buffer_index: 0,
-            index_count: 10,
-            first_index: 0,
-            first_instance: 0,
-        }; 10_000],
-        &mut init_resources,
+    let instance_count_buffer = ash_abstractions::Buffer::new_of_size(
+        4 * primitives.len() as u64,
+        "instance count buffer",
+        vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+        &mut init_resources
+    )?;
+
+    let primitive_info_buffer = ash_abstractions::Buffer::new(
+        unsafe {
+            cast_slice(&primitives)
+        },
+        "primitive info buffer",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources
     )?;
 
     let draw_buffers = DrawBuffers {
-        draw_counts_buffer: ash_abstractions::Buffer::new(
-            unsafe {
-                bytes_of(&shared_structs::DrawCounts {
-                    opaque: opaque_draw_buffer
-                        .as_ref()
-                        .map(|buffer| buffer.max_draws)
-                        .unwrap_or(0),
-                    alpha_clip: alpha_clip_draw_buffer
-                        .as_ref()
-                        .map(|buffer| buffer.max_draws)
-                        .unwrap_or(0),
-                    transmission: transmission_draw_buffer
-                        .as_ref()
-                        .map(|buffer| buffer.max_draws)
-                        .unwrap_or(0),
-                    transmission_alpha_clip: transmission_alpha_clip_draw_buffer
-                        .as_ref()
-                        .map(|buffer| buffer.max_draws)
-                        .unwrap_or(0),
-                })
-            },
+        draw_counts_buffer: ash_abstractions::Buffer::new_of_size(
+            std::mem::size_of::<shared_structs::DrawCounts>() as u64,
             "draw counts",
-            vk::BufferUsageFlags::INDIRECT_BUFFER,
+            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
             &mut init_resources,
         )?,
-        opaque: opaque_draw_buffer,
-        alpha_clip: alpha_clip_draw_buffer,
-        transmission: transmission_draw_buffer,
-        transmission_alpha_clip: transmission_alpha_clip_draw_buffer,
+        opaque: (opaque_draw_buffer),
+        alpha_clip: (alpha_clip_draw_buffer),
+        transmission: (transmission_draw_buffer),
+        transmission_alpha_clip: (transmission_alpha_clip_draw_buffer),
         frustum_culling_ds,
         primitive_info_buffer,
         instance_count_buffer,
@@ -485,26 +468,7 @@ fn main() -> anyhow::Result<()> {
 
     let instance_buffer = ash_abstractions::Buffer::new(
         unsafe {
-            cast_slice(&[
-                Instance {
-                    transform: Similarity {
-                        translation: Vec3::ZERO,
-                        rotation: Quat::IDENTITY,
-                        scale: 1.0,
-                    }
-                    .pack(),
-                    primitive_id: 0,
-                },
-                Instance {
-                    transform: Similarity {
-                        translation: Vec3::new(0.0, 2.0, 0.0),
-                        rotation: Quat::IDENTITY,
-                        scale: 10.0 / 125.0,
-                    }
-                    .pack(),
-                    primitive_id: 0,
-                },
-            ])
+            cast_slice(&instances)
         },
         "instance",
         vk::BufferUsageFlags::STORAGE_BUFFER,
@@ -735,6 +699,42 @@ fn main() -> anyhow::Result<()> {
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(draw_buffers.instance_count_buffer.buffer)
                         .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(3)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.draw_counts_buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                // frustum buffers
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(4)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.opaque.buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(5)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.alpha_clip.buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                        *vk::WriteDescriptorSet::builder()
+                        .dst_set(frustum_culling_ds)
+                        .dst_binding(6)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                            .buffer(draw_buffers.transmission.buffer.buffer)
+                            .range(vk::WHOLE_SIZE)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(frustum_culling_ds)
+                        .dst_binding(7)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                            .buffer(draw_buffers.transmission_alpha_clip.buffer.buffer)
+                            .range(vk::WHOLE_SIZE)]),
             ],
             &[],
         )
@@ -1123,7 +1123,7 @@ fn main() -> anyhow::Result<()> {
                             let _profiling_zone = profiling_zone!("frustum culling", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
                             {
-                                let _profiling_zone = profiling_zone!("zeroing the instance count buffer", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+                                let profiling_zone = profiling_zone!("zeroing the instance count buffer", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
                                 device.cmd_fill_buffer(
                                     command_buffer,
@@ -1132,6 +1132,20 @@ fn main() -> anyhow::Result<()> {
                                     vk::WHOLE_SIZE,
                                     0
                                 );
+
+                                drop(profiling_zone);
+
+                                let profiling_zone = profiling_zone!("zeroing the draw count buffer", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
+
+                                device.cmd_fill_buffer(
+                                    command_buffer,
+                                    draw_buffers.draw_counts_buffer.buffer,
+                                    0,
+                                    vk::WHOLE_SIZE,
+                                    0
+                                );
+
+                                drop(profiling_zone);
                             }
 
                             vk_sync::cmd::pipeline_barrier(
@@ -1178,7 +1192,7 @@ fn main() -> anyhow::Result<()> {
                             {
                                 let _profiling_zone = profiling_zone!("frustum culling compute shader", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                                device.cmd_dispatch(command_buffer, dispatch_count(2, 64), 1, 1);
+                                device.cmd_dispatch(command_buffer, dispatch_count(instances.len() as u32, 64), 1, 1);
                             }
 
                             vk_sync::cmd::pipeline_barrier(
@@ -1201,7 +1215,7 @@ fn main() -> anyhow::Result<()> {
                             {
                                 let _profiling_zone = profiling_zone!("demultiplex draws compute shader", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                                //device.cmd_dispatch(command_buffer, dispatch_count(2, 64), 1, 1);
+                                device.cmd_dispatch(command_buffer, dispatch_count(primitives.len() as u32, 64), 1, 1);
                             }
 
                             vk_sync::cmd::pipeline_barrier(
@@ -1264,7 +1278,7 @@ fn main() -> anyhow::Result<()> {
                         {
                             let _depth_profiling_zone = profiling_zone!("depth pre pass", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            if let Some(draw_buffer) = draw_buffers.opaque.as_ref() {
+                            {
                                 let _profiling_zone = profiling_zone!("depth pre pass opaque", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
                                 device.cmd_bind_pipeline(
@@ -1273,10 +1287,10 @@ fn main() -> anyhow::Result<()> {
                                     pipelines.depth_pre_pass,
                                 );
 
-                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+                                draw_buffers.opaque.record(&device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
                             }
 
-                            if let Some(draw_buffer) = draw_buffers.alpha_clip.as_ref() {
+                            {
                                 let _profiling_zone = profiling_zone!("depth pre pass alpha clipped", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
                                 device.cmd_bind_pipeline(
@@ -1285,7 +1299,7 @@ fn main() -> anyhow::Result<()> {
                                     pipelines.depth_pre_pass_alpha_clip,
                                 );
 
-                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
+                                draw_buffers.alpha_clip.record(&device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
                             }
                         }
 
@@ -1297,14 +1311,14 @@ fn main() -> anyhow::Result<()> {
                             pipelines.normal,
                         );
 
-                        if let Some(draw_buffer) = draw_buffers.opaque.as_ref() {
+                        {
                             let _profiling_zone = profiling_zone!("main opaque", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
-                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+                            draw_buffers.opaque.record(&device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
                         }
 
-                        if let Some(draw_buffer) = draw_buffers.alpha_clip.as_ref() {
+                        {
                             let _profiling_zone = profiling_zone!("main alpha clipped", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
-                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
+                            draw_buffers.alpha_clip.record(&device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
                         }
 
                         device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
@@ -1312,24 +1326,24 @@ fn main() -> anyhow::Result<()> {
                         {
                             let _profiling_zone = profiling_zone!("depth pre pass transmissive", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            if let Some(draw_buffer) = draw_buffers.transmission.as_ref() {
+                            {
                                 device.cmd_bind_pipeline(
                                     command_buffer,
                                     vk::PipelineBindPoint::GRAPHICS,
                                     pipelines.depth_pre_pass_transmissive,
                                 );
 
-                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 2, command_buffer);
+                                draw_buffers.transmission.record(&device, &draw_buffers.draw_counts_buffer, 2, command_buffer);
                             }
 
-                            if let Some(draw_buffer) = draw_buffers.transmission_alpha_clip.as_ref() {
+                            {
                                 device.cmd_bind_pipeline(
                                     command_buffer,
                                     vk::PipelineBindPoint::GRAPHICS,
                                     pipelines.depth_pre_pass_transmissive_alpha_clip,
                                 );
 
-                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 3, command_buffer);
+                                draw_buffers.transmission_alpha_clip.record(&device, &draw_buffers.draw_counts_buffer, 3, command_buffer);
                             }
                         }
 
@@ -1362,16 +1376,16 @@ fn main() -> anyhow::Result<()> {
                             pipelines.transmission,
                         );
 
-                        if let Some(draw_buffer) = draw_buffers.transmission.as_ref() {
+                        {
                             let _profiling_zone = profiling_zone!("opaque transmissive objects", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 2, command_buffer);
+                            draw_buffers.transmission.record(&device, &draw_buffers.draw_counts_buffer, 2, command_buffer);
                         }
 
-                        if let Some(draw_buffer) = draw_buffers.transmission_alpha_clip.as_ref() {
+                        {
                             let _profiling_zone = profiling_zone!("alpha clip transmissive objects", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 3, command_buffer);
+                            draw_buffers.transmission_alpha_clip.record(&device, &draw_buffers.draw_counts_buffer, 3, command_buffer);
                         }
 
                         device.cmd_end_render_pass(command_buffer);
@@ -2506,10 +2520,10 @@ impl DrawBuffer {
 }
 
 struct DrawBuffers {
-    opaque: Option<DrawBuffer>,
-    alpha_clip: Option<DrawBuffer>,
-    transmission: Option<DrawBuffer>,
-    transmission_alpha_clip: Option<DrawBuffer>,
+    opaque: DrawBuffer,
+    alpha_clip: DrawBuffer,
+    transmission: DrawBuffer,
+    transmission_alpha_clip: DrawBuffer,
     draw_counts_buffer: ash_abstractions::Buffer,
     frustum_culling_ds: vk::DescriptorSet,
     instance_count_buffer: ash_abstractions::Buffer,
@@ -2522,15 +2536,10 @@ impl DrawBuffers {
         device: &ash::Device,
         allocator: &mut gpu_allocator::vulkan::Allocator,
     ) -> anyhow::Result<()> {
-        for buffer in self
-            .opaque
-            .iter()
-            .chain(&self.alpha_clip)
-            .chain(&self.transmission)
-            .chain(&self.transmission_alpha_clip)
-        {
-            buffer.buffer.cleanup(device, allocator)?;
-        }
+        self.opaque.buffer.cleanup(device, allocator)?;
+        self.alpha_clip.buffer.cleanup(device, allocator)?;
+        self.transmission.buffer.cleanup(device, allocator)?;
+        self.transmission_alpha_clip.buffer.cleanup(device, allocator)?;
         self.draw_counts_buffer.cleanup(device, allocator)?;
         self.instance_count_buffer.cleanup(device, allocator)?;
         self.primitive_info_buffer.cleanup(device, allocator)?;
@@ -2595,7 +2604,10 @@ fn load_gltf(
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     materials: &mut Vec<shared_structs::MaterialInfo>,
     vertex_buffers: &mut VertexStagingBuffers,
-) -> anyhow::Result<Model> {
+    instances: &mut Vec<Instance>,
+    primitives: &mut Vec<shared_structs::PrimitiveInfo>,
+    base_transform: Similarity,
+) -> anyhow::Result<()> {
     let _span = tracy_client::span!(name);
 
     let importing_gltf_span = tracy_client::span!("Importing gltf");
@@ -2628,30 +2640,25 @@ fn load_gltf(
 
     let node_tree = NodeTree::new(gltf.nodes());
 
-    let mut opaque_indices = Vec::new();
-    let mut alpha_clip_indices = Vec::new();
-    let mut tranmission_indices = Vec::new();
-    let mut transmission_alpha_clip_indices = Vec::new();
-
     let loading_meshes_span = tracy_client::span!("Loading meshes");
 
     for (node, mesh) in gltf
         .nodes()
         .filter_map(|node| node.mesh().map(|mesh| (node, mesh)))
     {
-        let transform = node_tree.transform_of(node.index());
+        let transform = base_transform * node_tree.transform_of(node.index());
 
         for primitive in mesh.primitives() {
             let material = primitive.material();
 
-            let indices = match (material.alpha_mode(), material.transmission().is_some()) {
-                (gltf::material::AlphaMode::Opaque, false) => &mut opaque_indices,
-                (gltf::material::AlphaMode::Mask, false) => &mut alpha_clip_indices,
-                (gltf::material::AlphaMode::Opaque, true) => &mut tranmission_indices,
-                (gltf::material::AlphaMode::Mask, true) => &mut transmission_alpha_clip_indices,
+            let draw_buffer_index = match (material.alpha_mode(), material.transmission().is_some()) {
+                (gltf::material::AlphaMode::Opaque, false) => 0,
+                (gltf::material::AlphaMode::Mask, false) => 1,
+                (gltf::material::AlphaMode::Opaque, true) => 2,
+                (gltf::material::AlphaMode::Mask, true) => 3,
                 (mode, _) => {
                     dbg!(mode);
-                    &mut opaque_indices
+                    0
                 }
             };
 
@@ -2672,7 +2679,11 @@ fn load_gltf(
 
             let num_vertices = vertex_buffers.position.len() as u32;
 
-            indices.extend(read_indices.map(|index| index + num_vertices));
+            let first_index = vertex_buffers.index.len();
+
+            vertex_buffers.index.extend(read_indices.map(|index| index + num_vertices));
+
+            let first_instance = instances.len();
 
             let positions = reader.read_positions().unwrap();
 
@@ -2680,7 +2691,8 @@ fn load_gltf(
 
             vertex_buffers
                 .position
-                .extend(positions.map(|position| transform * Vec3::from(position)));
+                .extend(positions.map(|position| Vec3::from(position)));
+
             vertex_buffers
                 .material
                 .extend(std::iter::repeat(material_id as u32).take(num_primitive_vertices));
@@ -2688,7 +2700,7 @@ fn load_gltf(
                 reader
                     .read_normals()
                     .unwrap()
-                    .map(|normal| (transform.rotation * Vec3::from(normal)).normalize()),
+                    .map(|normal| (Vec3::from(normal)).normalize()),
             );
 
             // Some test models (AttenuationTest) don't have UVs on some primitives.
@@ -2704,40 +2716,30 @@ fn load_gltf(
                         .extend(std::iter::repeat(Vec2::ZERO).take(num_primitive_vertices));
                 }
             }
+
+            instances.push(Instance {
+                transform: transform.pack(),
+                primitive_id: primitives.len() as u32,
+            });
+
+            primitives.push(shared_structs::PrimitiveInfo {
+                packed_bounding_sphere: {
+                    let bbox = primitive.bounding_box();
+                    let min = Vec3::from(bbox.min);
+                    let max = Vec3::from(bbox.max);
+                    let center = (min + max) / 2.0;
+                    let radius = min.distance(max) / 2.0;
+                    center.extend(radius)
+                },
+                index_count: (vertex_buffers.index.len() - first_index) as u32,
+                first_index: first_index as u32,
+                first_instance: first_instance as u32,
+                draw_buffer_index
+            });
         }
     }
 
     drop(loading_meshes_span);
-
-    let opaque_slice = IndexBufferSlice {
-        offset: vertex_buffers.index.len() as u32,
-        count: opaque_indices.len() as u32,
-    };
-
-    vertex_buffers.index.extend_from_slice(&opaque_indices);
-
-    let alpha_clip_slice = IndexBufferSlice {
-        offset: vertex_buffers.index.len() as u32,
-        count: alpha_clip_indices.len() as u32,
-    };
-
-    vertex_buffers.index.extend_from_slice(&alpha_clip_indices);
-
-    let transmission_slice = IndexBufferSlice {
-        offset: vertex_buffers.index.len() as u32,
-        count: tranmission_indices.len() as u32,
-    };
-
-    vertex_buffers.index.extend_from_slice(&tranmission_indices);
-
-    let transmission_alpha_clip_slice = IndexBufferSlice {
-        offset: vertex_buffers.index.len() as u32,
-        count: transmission_alpha_clip_indices.len() as u32,
-    };
-
-    vertex_buffers
-        .index
-        .extend_from_slice(&transmission_alpha_clip_indices);
 
     let mut image_index_to_id = std::collections::HashMap::new();
 
@@ -2862,12 +2864,7 @@ fn load_gltf(
 
     drop(loading_materials_span);
 
-    Ok(Model {
-        opaque: opaque_slice,
-        alpha_clip: alpha_clip_slice,
-        transmission: transmission_slice,
-        transmission_alpha_clip: transmission_alpha_clip_slice,
-    })
+    Ok(())
 }
 
 fn mip_levels_for_size(width: u32, height: u32) -> u32 {
@@ -3048,4 +3045,42 @@ impl NodeTree {
 
 const fn dispatch_count(num: u32, group_size: u32) -> u32 {
     ((num - 1) / group_size) + 1
+}
+
+// runs on o(n^2) time
+fn compute_min_bounding_sphere(points: &[Vec3]) -> Vec4 {
+    let span = tracy_client::span!("Computing min bounding sphere");
+
+    let mut a = 0;
+    let mut b = 0;
+    let mut max_distance_sq = 0.0;
+
+    for i in 0 .. points.len() {
+        let point_i = points[i];
+
+        for j in i + 1 .. points.len() {
+            let point_j = points[j];
+
+            let distance_sq = point_i.distance_squared(point_j);
+
+            if distance_sq > max_distance_sq {
+                a = i;
+                b = j;
+                max_distance_sq = distance_sq;
+            }
+        }
+    }
+
+    let center = (points[a] + points[b]) / 2.0;
+    let radius = max_distance_sq.sqrt() / 2.0;
+
+    drop(span);
+
+    /*
+    for point in points {
+        debug_assert!(point.distance_squared(center) < (radius * radius));
+    }
+    */
+
+    center.extend(radius)
 }

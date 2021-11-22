@@ -15,7 +15,7 @@ use glam_pbr::{
     PerceptualRoughness, View,
 };
 use shared_structs::{
-    CullingPushConstants, DrawCounts, Instance, MaterialInfo, PackedBoundingSphere, PointLight,
+    CullingPushConstants, DrawCounts, Instance, MaterialInfo, PointLight,
     PrimitiveInfo, PushConstants, Similarity, SunUniform,
 };
 use spirv_std::{
@@ -576,14 +576,16 @@ pub fn frustum_culling(
     let primitive = index(primitives, instance.primitive_id);
 
     if cull(
-        primitive.bounding_sphere,
+        primitive.packed_bounding_sphere,
         instance.transform.unpack(),
         *push_constants,
     ) {
         return;
     }
 
-    atomic_i_add(index_mut(instance_counts, instance.primitive_id), 1);
+    let instance_count = index_mut(instance_counts, instance.primitive_id);
+
+    atomic_i_add(instance_count, 1);
 }
 
 #[spirv(compute(threads(64)))]
@@ -611,42 +613,41 @@ pub fn demultiplex_draws(
 
     let primitive = index(primitives, draw_id);
 
-    let mut draw_buffers: [_; DrawCounts::COUNT] = [
-        opaque_draws,
-        alpha_clip_draws,
-        transmission_draws,
-        transmission_alpha_clip_draws,
-    ];
-
-    let draw_buffer = index_mut(&mut draw_buffers, primitive.draw_buffer_index);
     let draw_count = index_mut(draw_counts, primitive.draw_buffer_index);
 
     let non_zero_draw_id = atomic_i_add(draw_count, 1);
 
-    let draw_command = index_mut(*draw_buffer, non_zero_draw_id);
-
-    *draw_command = vk::DrawIndexedIndirectCommand {
+    let draw_command = vk::DrawIndexedIndirectCommand {
         instance_count,
         index_count: primitive.index_count,
         first_index: primitive.first_index,
         first_instance: primitive.first_instance,
         vertex_offset: 0,
     };
+
+    match primitive.draw_buffer_index {
+        0 => *index_mut(opaque_draws, non_zero_draw_id) = draw_command,
+        1 => *index_mut(alpha_clip_draws, non_zero_draw_id) = draw_command,
+        2 => *index_mut(transmission_draws, non_zero_draw_id) = draw_command,
+        _ => *index_mut(transmission_alpha_clip_draws, non_zero_draw_id) = draw_command
+    };
 }
 
 fn cull(
-    bounding_sphere: PackedBoundingSphere,
+    packed_bounding_sphere: Vec4,
     transform: Similarity,
     push_constants: CullingPushConstants,
 ) -> bool {
-    let mut center = bounding_sphere.center_and_radius.truncate();
+    let mut center = packed_bounding_sphere.truncate();
     center = transform * center;
     center = (push_constants.view * center.extend(1.0)).truncate();
 
-    let mut radius = bounding_sphere.center_and_radius.w;
+    let mut radius = packed_bounding_sphere.w;
     radius *= transform.scale;
 
-    center.z + radius > push_constants.z_near
+    //let visible = center.z + radius > push_constants.z_near;
+
+    false
 }
 
 fn atomic_i_add(reference: &mut u32, value: u32) -> u32 {

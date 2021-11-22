@@ -141,17 +141,11 @@ pub struct Instance {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
 pub struct PrimitiveInfo {
-    pub bounding_sphere: PackedBoundingSphere,
+    pub packed_bounding_sphere: Vec4,
     pub draw_buffer_index: u32,
     pub index_count: u32,
     pub first_index: u32,
     pub first_instance: u32,
-}
-
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy)]
-pub struct PackedBoundingSphere {
-    pub center_and_radius: Vec4,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
