@@ -14,9 +14,9 @@ use glam_pbr::{
     BrdfResult, IblVolumeRefractionParams, IndexOfRefraction, Light, MaterialParams, Normal,
     PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, PackedSimilarity, PointLight, PushConstants, SunUniform};
+use shared_structs::{MaterialInfo, PointLight, PushConstants, SunUniform, Instance, PrimitiveInfo, PackedBoundingSphere, Similarity, CullingPushConstants, DrawCounts};
 use spirv_std::{
-    glam::{Mat3, Vec2, Vec3, Vec4},
+    glam::{Mat3, Vec2, Vec3, Vec4, UVec3},
     num_traits::Float,
     Image, RuntimeArray, Sampler,
 };
@@ -59,7 +59,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     output: &mut Vec4,
 ) {
-    let material = &materials[material_id as usize];
+    let material = index(materials, material_id);
 
     let texture_sampler = TextureSampler {
         uv,
@@ -88,6 +88,8 @@ pub fn fragment_transmission(
 
     let material_params = get_material_params(diffuse, material, &texture_sampler);
 
+    let emission = get_emission(material, &texture_sampler);
+
     let (result, mut transmission) = evaluate_lights_transmission(
         material_params,
         view,
@@ -96,8 +98,6 @@ pub fn fragment_transmission(
         point_lights,
         sun_uniform,
     );
-
-    let emission = get_emission(material, &texture_sampler);
 
     let mut thickness = material.thickness_factor;
 
@@ -161,7 +161,7 @@ pub fn fragment(
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
 ) {
-    let material = &materials[material_id as usize];
+    let material = index(materials, material_id);
 
     let texture_sampler = TextureSampler {
         uv,
@@ -182,6 +182,8 @@ pub fn fragment(
 
     let material_params = get_material_params(diffuse, material, &texture_sampler);
 
+    let emission = get_emission(material, &texture_sampler);
+
     let result = evaluate_lights(
         material_params,
         view,
@@ -190,8 +192,6 @@ pub fn fragment(
         point_lights,
         sun_uniform,
     );
-
-    let emission = get_emission(material, &texture_sampler);
 
     let output = (result.diffuse + result.specular + emission).extend(1.0);
 
@@ -288,11 +288,11 @@ fn evaluate_lights_transmission(
     let mut transmission = sun_uniform.intensity
         * glam_pbr::transmission_btdf(material_params, normal, view, Light(sun_uniform.dir.into()));
 
-    let num_lights = point_lights.len();
+    let num_lights = point_lights.len() as u32;
     let mut i = 0;
 
     while i < num_lights {
-        let light = &point_lights[i];
+        let light = index(point_lights, i);
 
         let (direction, attenuation) =
             light_direction_and_attenuation(light.position.into(), position);
@@ -336,11 +336,11 @@ fn evaluate_lights(
         material_params,
     });
 
-    let num_lights = point_lights.len();
+    let num_lights = point_lights.len() as u32;
     let mut i = 0;
 
     while i < num_lights {
-        let light = &point_lights[i];
+        let light = index(point_lights, i);
 
         let (direction, attenuation) =
             light_direction_and_attenuation(light.position.into(), position);
@@ -371,7 +371,7 @@ pub fn depth_pre_pass_alpha_clip(
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
 ) {
-    let material = &materials[material_id as usize];
+    let material = index(materials, material_id);
 
     let texture_sampler = TextureSampler {
         uv,
@@ -395,14 +395,14 @@ pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
     uv: Vec2,
     material: u32,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
     out_uv: &mut Vec2,
     out_material: &mut u32,
 ) {
-    let similarity = instances[instance_index as usize].unpack();
+    let similarity = index(instances, instance_index).transform.unpack();
 
     let position = similarity * position;
 
@@ -414,12 +414,12 @@ pub fn depth_pre_pass_vertex_alpha_clip(
 #[spirv(vertex)]
 pub fn depth_pre_pass_instanced(
     position: Vec3,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let similarity = instances[instance_index as usize].unpack();
+    let similarity = index(instances, instance_index).transform.unpack();
 
     let position = similarity * position;
 
@@ -432,7 +432,7 @@ pub fn vertex_instanced(
     normal: Vec3,
     uv: Vec2,
     material: u32,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
@@ -441,7 +441,7 @@ pub fn vertex_instanced(
     out_material: &mut u32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let similarity = instances[instance_index as usize].unpack();
+    let similarity = index(instances, instance_index).transform.unpack();
 
     let position = similarity * position;
 
@@ -459,7 +459,7 @@ pub fn vertex_instanced_with_scale(
     normal: Vec3,
     uv: Vec2,
     material: u32,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[PackedSimilarity],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
@@ -469,7 +469,7 @@ pub fn vertex_instanced_with_scale(
     out_scale: &mut f32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let similarity = instances[instance_index as usize].unpack();
+    let similarity = index(instances, instance_index).transform.unpack();
 
     let position = similarity * position;
 
@@ -480,6 +480,171 @@ pub fn vertex_instanced_with_scale(
     *out_scale = similarity.scale;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
+}
+
+trait GetUnchecked<T> {
+    unsafe fn get_unchecked(&self, index: usize) -> &T;
+    unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T;
+}
+
+impl<T> GetUnchecked<T> for [T] {
+    unsafe fn get_unchecked(&self, index: usize) -> &T {
+        asm!(
+            "%slice_ptr = OpLoad _ {slice_ptr_ptr}",
+            "%data_ptr = OpCompositeExtract _ %slice_ptr 0",
+            "%val_ptr = OpAccessChain _ %data_ptr {index}",
+            "OpReturnValue %val_ptr",
+            slice_ptr_ptr = in(reg) &self,
+            index = in(reg) index,
+            options(noreturn)
+        )
+    }
+
+    unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        asm!(
+            "%slice_ptr = OpLoad _ {slice_ptr_ptr}",
+            "%data_ptr = OpCompositeExtract _ %slice_ptr 0",
+            "%val_ptr = OpAccessChain _ %data_ptr {index}",
+            "OpReturnValue %val_ptr",
+            slice_ptr_ptr = in(reg) &self,
+            index = in(reg) index,
+            options(noreturn)
+        )
+    }
+}
+
+impl<T, const N: usize> GetUnchecked<T> for [T; N] {
+    unsafe fn get_unchecked(&self, index: usize) -> &T {
+        asm!(
+            "%val_ptr = OpAccessChain _ {array_ptr} {index}",
+            "OpReturnValue %val_ptr",
+            array_ptr = in(reg) self,
+            index = in(reg) index,
+            options(noreturn)
+        )
+    }
+
+    unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        asm!(
+            "%val_ptr = OpAccessChain _ {array_ptr} {index}",
+            "OpReturnValue %val_ptr",
+            array_ptr = in(reg) self,
+            index = in(reg) index,
+            options(noreturn)
+        )
+    }
+}
+
+fn index<T, S: GetUnchecked<T> + ?Sized>(structure: &S, index: u32) -> &T {
+    unsafe {
+        GetUnchecked::get_unchecked(structure, index as usize)
+    }
+}
+
+fn index_mut<T, S: GetUnchecked<T> + ?Sized>(structure: &mut S, index: u32) -> &mut T {
+    unsafe {
+        GetUnchecked::get_unchecked_mut(structure, index as usize)
+    }
+}
+
+mod vk {
+    pub struct DrawIndexedIndirectCommand {
+        pub index_count: u32,
+        pub instance_count: u32,
+        pub first_index: u32,
+        pub vertex_offset: i32,
+        pub first_instance: u32,
+    }
+}
+
+#[spirv(compute(threads(64)))]
+pub fn frustum_culling(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] instances: &[Instance],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &mut [PrimitiveInfo],
+    #[spirv(push_constant)] push_constants: &CullingPushConstants,
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let instance_id = id.x;
+
+    if instance_id as usize >= instances.len() {
+        return;
+    }
+
+    let instance = index(instances, instance_id);
+    let primitive = index_mut(primitives, instance.primitive_id);
+
+    if cull(primitive.bounding_sphere, instance.transform.unpack(), *push_constants) {
+        return;
+    }
+
+    atomic_i_add(&mut primitive.command.instance_count, 1);
+}
+
+
+#[spirv(compute(threads(64)))]
+pub fn demultiplex_draws(
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &[PrimitiveInfo],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] draw_counts: &mut [u32; DrawCounts::COUNT],
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] opaque_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] transmission_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] transmission_alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let draw_id = id.x;
+
+    if draw_id as usize > primitives.len() {
+        return
+    }
+
+    let primitive = index(primitives, draw_id);
+
+    if primitive.command.instance_count == 0 {
+        return;
+    }
+
+    let mut draw_buffers: [_; DrawCounts::COUNT] = [
+        opaque_draws,
+        alpha_clip_draws,
+        transmission_draws,
+        transmission_alpha_clip_draws
+    ];
+
+    let draw_buffer = index_mut(&mut draw_buffers, primitive.draw_buffer_index);
+    let draw_count = index_mut(draw_counts, primitive.draw_buffer_index);
+
+    let non_zero_draw_id = atomic_i_add(draw_count, 1);
+
+    let draw_command = index_mut(*draw_buffer, non_zero_draw_id);
+
+    *draw_command = vk::DrawIndexedIndirectCommand {
+        instance_count: primitive.command.instance_count,
+        index_count: primitive.command.index_count,
+        first_index: primitive.command.first_index,
+        first_instance: primitive.command.first_instance,
+        vertex_offset: 0,
+    };
+}
+
+fn cull(bounding_sphere: PackedBoundingSphere, transform: Similarity, push_constants: CullingPushConstants) -> bool {
+    let mut center = bounding_sphere.center_and_radius.truncate();
+    center = transform * center;
+    center = (push_constants.view * center.extend(1.0)).truncate();
+
+    let mut radius = bounding_sphere.center_and_radius.w;
+    radius *= transform.scale;
+
+    center.z + radius > push_constants.z_near
+}
+
+fn atomic_i_add(reference: &mut u32, value: u32) -> u32 {
+    unsafe {
+        spirv_std::arch::atomic_i_add::<
+            _,
+            { spirv_std::memory::Scope::Device as u8 },
+            { spirv_std::memory::Semantics::NONE.bits() as u8 }
+        >(reference, value)
+    }
 }
 
 /*

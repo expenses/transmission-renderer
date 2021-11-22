@@ -7,6 +7,6 @@ edition = "2021"
 crate-type = ["dylib", "lib"]
 
 [dependencies]
-spirv-std = { git = "https://github.com/EmbarkStudios/rust-gpu", features = ["glam"] }
+spirv-std = { git = "https://github.com/expenses/rust-gpu", branch = "atomics-updated", features = ["glam"] }
 glam-pbr = { path = "../glam-pbr" }
 shared-structs = { path = "../shared-structs" }

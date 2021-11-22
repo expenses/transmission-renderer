@@ -9,7 +9,7 @@ use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
-use shared_structs::{PointLight, Similarity};
+use shared_structs::{PointLight, Similarity, Instance};
 
 mod profiling;
 
@@ -26,7 +26,6 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
     )
 }
 
-pub const DRAW_COMMAND_SIZE: usize = std::mem::size_of::<vk::DrawIndexedIndirectCommand>();
 pub const MAX_IMAGES: u32 = 195;
 
 fn main() -> anyhow::Result<()> {
@@ -48,7 +47,7 @@ fn main() -> anyhow::Result<()> {
 
     let entry = unsafe { ash::Entry::new() }?;
 
-    let api_version = vk::API_VERSION_1_1;
+    let api_version = vk::API_VERSION_1_2;
 
     let app_info = vk::ApplicationInfo::builder()
         .application_name(CStr::from_bytes_with_nul(b"Nice Grass\0")?)
@@ -66,10 +65,7 @@ fn main() -> anyhow::Result<()> {
         b"VK_LAYER_KHRONOS_validation\0",
     )?]);
 
-    let device_extensions = CStrList::new(vec![
-        SwapchainLoader::name(),
-        vk::ExtDescriptorIndexingFn::name(),
-    ]);
+    let device_extensions = CStrList::new(vec![SwapchainLoader::name()]);
 
     let mut debug_messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
         .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
@@ -120,13 +116,14 @@ fn main() -> anyhow::Result<()> {
             .queue_family_index(graphics_queue_family)
             .queue_priorities(&[1.0])];
 
-        let device_features = vk::PhysicalDeviceFeatures::builder().multi_draw_indirect(true);
+        let device_features = vk::PhysicalDeviceFeatures::builder();
 
         let mut null_descriptor_feature =
             vk::PhysicalDeviceRobustness2FeaturesEXT::builder().null_descriptor(true);
 
-        let mut descriptor_indexing =
-            vk::PhysicalDeviceDescriptorIndexingFeatures::builder().runtime_descriptor_array(true);
+        let mut vulkan_1_2_features = vk::PhysicalDeviceVulkan12Features::builder()
+            .runtime_descriptor_array(true)
+            .draw_indirect_count(true);
 
         let device_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_info)
@@ -134,7 +131,7 @@ fn main() -> anyhow::Result<()> {
             .enabled_extension_names(device_extensions.pointers())
             .enabled_layer_names(enabled_layers.pointers())
             .push_next(&mut null_descriptor_feature)
-            .push_next(&mut descriptor_indexing);
+            .push_next(&mut vulkan_1_2_features);
 
         unsafe { instance.create_device(physical_device, &device_info, None) }?
     };
@@ -276,43 +273,76 @@ fn main() -> anyhow::Result<()> {
 
     let vertex_buffers = vertex_staging_buffers.upload(&mut init_resources)?;
 
+    let opaque_draw_buffer = DrawBuffer::new(
+        &[
+            model.opaque.as_draw_indexed_indirect_command(0),
+            model2.opaque.as_draw_indexed_indirect_command(1),
+        ],
+        "opaque",
+        &mut init_resources,
+    )?;
+
+    let alpha_clip_draw_buffer = DrawBuffer::new(
+        &[
+            model.alpha_clip.as_draw_indexed_indirect_command(0),
+            model2.alpha_clip.as_draw_indexed_indirect_command(1),
+        ],
+        "alpha clip",
+        &mut init_resources,
+    )?;
+
+    let transmission_draw_buffer = DrawBuffer::new(
+        &[
+            model.transmission.as_draw_indexed_indirect_command(0),
+            model2.transmission.as_draw_indexed_indirect_command(1),
+        ],
+        "transmission",
+        &mut init_resources,
+    )?;
+
+    let transmission_alpha_clip_draw_buffer = DrawBuffer::new(
+        &[
+            model
+                .transmission_alpha_clip
+                .as_draw_indexed_indirect_command(0),
+            model2
+                .transmission_alpha_clip
+                .as_draw_indexed_indirect_command(1),
+        ],
+        "transmission alpha clip",
+        &mut init_resources,
+    )?;
+
     let draw_buffers = DrawBuffers {
-        opaque: DrawBuffer::new(
-            &[
-                model.opaque.as_draw_indexed_indirect_command(0),
-                model2.opaque.as_draw_indexed_indirect_command(1),
-            ],
-            "opaque",
+        draw_counts_buffer: ash_abstractions::Buffer::new(
+            unsafe {
+                bytes_of(&shared_structs::DrawCounts {
+                    opaque: opaque_draw_buffer
+                        .as_ref()
+                        .map(|buffer| buffer.max_draws)
+                        .unwrap_or(0),
+                    alpha_clip: alpha_clip_draw_buffer
+                        .as_ref()
+                        .map(|buffer| buffer.max_draws)
+                        .unwrap_or(0),
+                    transmission: transmission_draw_buffer
+                        .as_ref()
+                        .map(|buffer| buffer.max_draws)
+                        .unwrap_or(0),
+                    transmission_alpha_clip: transmission_alpha_clip_draw_buffer
+                        .as_ref()
+                        .map(|buffer| buffer.max_draws)
+                        .unwrap_or(0),
+                })
+            },
+            "draw counts",
+            vk::BufferUsageFlags::INDIRECT_BUFFER,
             &mut init_resources,
         )?,
-        alpha_clip: DrawBuffer::new(
-            &[
-                model.alpha_clip.as_draw_indexed_indirect_command(0),
-                model2.alpha_clip.as_draw_indexed_indirect_command(1),
-            ],
-            "alpha clip",
-            &mut init_resources,
-        )?,
-        transmission: DrawBuffer::new(
-            &[
-                model.transmission.as_draw_indexed_indirect_command(0),
-                model2.transmission.as_draw_indexed_indirect_command(1),
-            ],
-            "transmission",
-            &mut init_resources,
-        )?,
-        transmission_alpha_clip: DrawBuffer::new(
-            &[
-                model
-                    .transmission_alpha_clip
-                    .as_draw_indexed_indirect_command(0),
-                model2
-                    .transmission_alpha_clip
-                    .as_draw_indexed_indirect_command(1),
-            ],
-            "transmission alpha clip",
-            &mut init_resources,
-        )?,
+        opaque: opaque_draw_buffer,
+        alpha_clip: alpha_clip_draw_buffer,
+        transmission: transmission_draw_buffer,
+        transmission_alpha_clip: transmission_alpha_clip_draw_buffer,
     };
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
@@ -399,18 +429,23 @@ fn main() -> anyhow::Result<()> {
     let instance_buffer = ash_abstractions::Buffer::new(
         unsafe {
             cast_slice(&[
-                Similarity {
-                    translation: Vec3::ZERO,
-                    rotation: Quat::IDENTITY,
-                    scale: 1.0 / 0.00800000037997961,
-                }
-                .pack(),
-                Similarity {
-                    translation: Vec3::new(0.0, 250.0, 0.0),
-                    rotation: Quat::IDENTITY,
-                    scale: 10.0,
-                }
-                .pack(),
+                Instance {
+                    transform: Similarity {
+                        translation: Vec3::ZERO,
+                        rotation: Quat::IDENTITY,
+                        scale: 1.0 / 0.00800000037997961,
+                    }.pack(),
+                    primitive_id: 0,
+                },
+                Instance {
+                    transform: Similarity {
+                        translation: Vec3::new(0.0, 250.0, 0.0),
+                        rotation: Quat::IDENTITY,
+                        scale: 10.0,
+                    }
+                    .pack(),
+                    primitive_id: 0,
+                },
             ])
         },
         "instance",
@@ -1099,7 +1134,7 @@ fn main() -> anyhow::Result<()> {
                                     pipelines.depth_pre_pass,
                                 );
 
-                                draw_buffer.record(&device, command_buffer);
+                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
                             }
 
                             if let Some(draw_buffer) = draw_buffers.alpha_clip.as_ref() {
@@ -1111,7 +1146,7 @@ fn main() -> anyhow::Result<()> {
                                     pipelines.depth_pre_pass_alpha_clip,
                                 );
 
-                                draw_buffer.record(&device, command_buffer);
+                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
                             }
                         }
 
@@ -1125,12 +1160,12 @@ fn main() -> anyhow::Result<()> {
 
                         if let Some(draw_buffer) = draw_buffers.opaque.as_ref() {
                             let _profiling_zone = profiling_zone!("main opaque", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
-                            draw_buffer.record(&device, command_buffer);
+                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
                         }
 
                         if let Some(draw_buffer) = draw_buffers.alpha_clip.as_ref() {
                             let _profiling_zone = profiling_zone!("main alpha clipped", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
-                            draw_buffer.record(&device, command_buffer);
+                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
                         }
 
                         device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
@@ -1145,7 +1180,7 @@ fn main() -> anyhow::Result<()> {
                                     pipelines.depth_pre_pass_transmissive,
                                 );
 
-                                draw_buffer.record(&device, command_buffer);
+                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 2, command_buffer);
                             }
 
                             if let Some(draw_buffer) = draw_buffers.transmission_alpha_clip.as_ref() {
@@ -1155,7 +1190,7 @@ fn main() -> anyhow::Result<()> {
                                     pipelines.depth_pre_pass_transmissive_alpha_clip,
                                 );
 
-                                draw_buffer.record(&device, command_buffer);
+                                draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 3, command_buffer);
                             }
                         }
 
@@ -1191,13 +1226,13 @@ fn main() -> anyhow::Result<()> {
                         if let Some(draw_buffer) = draw_buffers.transmission.as_ref() {
                             let _profiling_zone = profiling_zone!("opaque transmissive objects", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            draw_buffer.record(&device, command_buffer);
+                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 2, command_buffer);
                         }
 
                         if let Some(draw_buffer) = draw_buffers.transmission_alpha_clip.as_ref() {
                             let _profiling_zone = profiling_zone!("alpha clip transmissive objects", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            draw_buffer.record(&device, command_buffer);
+                            draw_buffer.record(&device, &draw_buffers.draw_counts_buffer, 3, command_buffer);
                         }
 
                         device.cmd_end_render_pass(command_buffer);
@@ -2167,13 +2202,21 @@ impl DrawBuffer {
         }))
     }
 
-    unsafe fn record(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
-        device.cmd_draw_indexed_indirect(
+    unsafe fn record(
+        &self,
+        device: &ash::Device,
+        draw_count_buffer: &ash_abstractions::Buffer,
+        draw_count_index: u64,
+        command_buffer: vk::CommandBuffer,
+    ) {
+        device.cmd_draw_indexed_indirect_count(
             command_buffer,
             self.buffer.buffer,
             0,
+            draw_count_buffer.buffer,
+            draw_count_index * 4,
             self.max_draws,
-            DRAW_COMMAND_SIZE as u32,
+            std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
         )
     }
 }
@@ -2183,6 +2226,7 @@ struct DrawBuffers {
     alpha_clip: Option<DrawBuffer>,
     transmission: Option<DrawBuffer>,
     transmission_alpha_clip: Option<DrawBuffer>,
+    draw_counts_buffer: ash_abstractions::Buffer,
 }
 
 impl DrawBuffers {
@@ -2200,6 +2244,7 @@ impl DrawBuffers {
         {
             buffer.buffer.cleanup(device, allocator)?;
         }
+        self.draw_counts_buffer.cleanup(device, allocator)?;
         Ok(())
     }
 }
@@ -2579,11 +2624,12 @@ impl Castable for vk::DrawIndexedIndirectCommand {}
 impl Castable for u32 {}
 impl Castable for Vec2 {}
 impl Castable for Vec3 {}
-impl Castable for shared_structs::PackedSimilarity {}
+impl Castable for shared_structs::Instance {}
 impl Castable for shared_structs::PointLight {}
 impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::SunUniform {}
 impl Castable for shared_structs::PushConstants {}
+impl Castable for shared_structs::DrawCounts {}
 impl Castable for colstodian::tonemap::BakedLottesTonemapperParams {}
 
 unsafe fn cast_slice<T: Castable>(slice: &[T]) -> &[u8] {

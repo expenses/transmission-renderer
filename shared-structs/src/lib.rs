@@ -110,3 +110,61 @@ impl Mul<Vec3> for Similarity {
         self.translation + (self.scale * (self.rotation * vector))
     }
 }
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct DrawCounts {
+    pub opaque: u32,
+    pub alpha_clip: u32,
+    pub transmission: u32,
+    pub transmission_alpha_clip: u32,
+}
+
+impl DrawCounts {
+    pub const COUNT: usize = core::mem::size_of::<Self>() / 4;
+}
+
+// GPU Culling architecture:
+//
+// * instances - as usual. References the primitive being drawn.
+// * primitive infos - per each primitive being instanced. Also contains the data for drawing the primitives.
+// * draw buffers - primitive draw commands are demultiplexed into this.
+// * draws - per each potential draw. Has a length equal to the number of primitives.
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct Instance {
+    pub transform: PackedSimilarity,
+    pub primitive_id: u32,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct PrimitiveInfo {
+    pub bounding_sphere: PackedBoundingSphere,
+    pub draw_buffer_index: u32,
+    pub command: PartialDrawIndexedIndirectCommand,
+}
+
+// Missing vertex offset.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct PartialDrawIndexedIndirectCommand {
+    pub instance_count: u32,
+    pub index_count: u32,
+    pub first_index: u32,
+    pub first_instance: u32
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct PackedBoundingSphere {
+    pub center_and_radius: Vec4,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+pub struct CullingPushConstants {
+    pub view: Mat4,
+    pub z_near: f32,
+}
