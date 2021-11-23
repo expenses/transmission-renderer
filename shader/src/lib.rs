@@ -254,11 +254,26 @@ fn get_material_params(
         roughness *= sample.y;
     }
 
+    let mut specular_colour = Vec3::from(material.specular_colour_factor);
+
+    if material.textures.specular_colour != -1 {
+        let sample = texture_sampler.sample(material.textures.specular_colour as u32);
+        specular_colour *= sample.truncate();
+    }
+
+    let mut specular_factor = material.specular_factor;
+
+    if material.textures.specular != -1 {
+        let sample = texture_sampler.sample(material.textures.specular as u32);
+        specular_factor *= sample.w;
+    }
+
     MaterialParams {
         diffuse_colour: diffuse.truncate(),
         metallic,
         perceptual_roughness: PerceptualRoughness(roughness),
         index_of_refraction: IndexOfRefraction(material.index_of_refraction),
+        specular_colour, specular_factor,
     }
 }
 

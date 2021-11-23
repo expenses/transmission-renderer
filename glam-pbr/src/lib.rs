@@ -173,6 +173,8 @@ pub struct MaterialParams {
     pub metallic: f32,
     pub perceptual_roughness: PerceptualRoughness,
     pub index_of_refraction: IndexOfRefraction,
+    pub specular_colour: Vec3,
+    pub specular_factor: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -187,9 +189,11 @@ impl Default for IndexOfRefraction {
 
 impl IndexOfRefraction {
     pub fn to_dielectric_f0(&self) -> f32 {
-        let root = (1.0 - self.0) / (1.0 + self.0);
+        let root = (self.0 - Self::AIR.0) / (self.0 + Self::AIR.0);
         root * root
     }
+
+    const AIR: Self = Self(1.0);
 }
 
 pub fn transmission_btdf(
@@ -219,11 +223,8 @@ pub fn transmission_btdf(
         transmission_roughness,
     );
 
-    let f0 = {
-        Vec3::splat(index_of_refraction.to_dielectric_f0())
-            .lerp(material_params.diffuse_colour, material_params.metallic)
-    };
-    let f90 = Vec3::ONE;
+    let f0 = calculate_combined_f0(material_params);
+    let f90 = calculate_combined_f90(material_params);
 
     let fresnel = fresnel_schlick(view_dot_halfway, f0, f90);
 
@@ -311,8 +312,12 @@ pub fn ibl_volume_refraction<
                 metallic: _,
                 perceptual_roughness,
                 index_of_refraction,
+                specular_colour: _,
+                specular_factor: _,
             },
     } = params;
+
+    let material_params = params.material_params;
 
     //let thickness = 1.0;
     //let perceptual_roughness = PerceptualRoughness(0.25);
@@ -339,8 +344,8 @@ pub fn ibl_volume_refraction<
     let normal_dot_view = normal.0.dot(view.0);
     let brdf = ggx_lut_sampler(normal_dot_view, perceptual_roughness);
 
-    let f0 = index_of_refraction.to_dielectric_f0();
-    let f90 = Vec3::ONE;
+    let f0 = calculate_combined_f0(material_params);
+    let f90 = calculate_combined_f90(material_params);
 
     let specular_colour = f0 * brdf.x + f90 * brdf.y;
 
@@ -348,7 +353,9 @@ pub fn ibl_volume_refraction<
 }
 
 fn diffuse_brdf(base: Vec3, fresnel: Vec3) -> Vec3 {
-    (1.0 - fresnel) * FRAC_1_PI * base
+    // not sure if max_element is needed here:
+    // https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_materials_specular#implementation
+    (1.0 - fresnel.max_element()) * FRAC_1_PI * base
 }
 
 fn specular_brdf(
@@ -377,9 +384,13 @@ pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
                 diffuse_colour,
                 metallic,
                 perceptual_roughness,
-                index_of_refraction,
+                index_of_refraction: _,
+                specular_colour: _,
+                specular_factor: _,
             },
     } = params;
+
+    let material_params = params.material_params;
 
     let actual_roughness = perceptual_roughness.as_actual_roughness();
 
@@ -390,9 +401,11 @@ pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
     let view_dot_halfway = Dot::new(&view, &halfway);
 
     let c_diff = diffuse_colour.lerp(Vec3::ZERO, metallic);
-    let f0 = { Vec3::splat(index_of_refraction.to_dielectric_f0()).lerp(diffuse_colour, metallic) };
 
-    let fresnel = fresnel_schlick(view_dot_halfway, f0, Vec3::splat(1.0));
+    let f0 = calculate_combined_f0(material_params);
+    let f90 = calculate_combined_f90(material_params);
+
+    let fresnel = fresnel_schlick(view_dot_halfway, f0, f90);
 
     let diffuse = light_intensity * normal_dot_light.value * diffuse_brdf(c_diff, fresnel);
     let specular = light_intensity
@@ -406,6 +419,16 @@ pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
         );
 
     BrdfResult { diffuse, specular }
+}
+
+fn calculate_combined_f0(material: MaterialParams) -> Vec3 {
+    let dielectric_specular_f0 = material.index_of_refraction.to_dielectric_f0() * material.specular_colour * material.specular_factor;
+    dielectric_specular_f0.lerp(material.diffuse_colour, material.metallic)
+}
+
+fn calculate_combined_f90(material: MaterialParams) -> Vec3 {
+    let dielectric_specular_f90 = Vec3::splat(material.specular_factor);
+    dielectric_specular_f90.lerp(Vec3::ONE, material.metallic)
 }
 
 #[derive(Default)]
@@ -436,22 +459,4 @@ pub fn compute_f0(
     let metallic_f0 = diffuse_colour;
 
     (1.0 - metallic) * dielectric_f0 + metallic * metallic_f0
-}
-
-#[test]
-fn test_i_havent_broken_anything() {
-    let params = BasicBrdfParams {
-        normal: Normal(Vec3::Y),
-        light: Light(Vec3::new(1.0, 1.0, 0.0).normalize()),
-        light_intensity: Vec3::ONE,
-        view: View(Vec3::new(0.0, 1.0, 1.0).normalize()),
-        material_params: MaterialParams {
-            diffuse_colour: Vec3::ONE,
-            metallic: 0.25,
-            perceptual_roughness: PerceptualRoughness(0.25),
-            index_of_refraction: Default::default(),
-        },
-    };
-
-    assert_eq!(basic_brdf(params), Vec3::splat(0.22577369));
 }
