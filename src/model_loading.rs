@@ -4,6 +4,12 @@ use glam::{Quat, Vec2, Vec3};
 use shared_structs::{DrawCounts, Instance, Similarity};
 use std::path::PathBuf;
 
+enum FormatRequirement {
+    LinearSrgb,
+    EncodedSrgb,
+    DontCare
+}
+
 pub(crate) fn load_gltf(
     name: &str,
     init_resources: &mut ash_abstractions::InitResources,
@@ -159,14 +165,28 @@ pub(crate) fn load_gltf(
 
     for (i, material) in gltf.materials().enumerate() {
         let mut load_optional_texture =
-            |optional_texture_info: Option<gltf::texture::Texture>, name: &str, srgb| {
+            |optional_texture_info: Option<gltf::texture::Texture>, name: &str, format_requirement: FormatRequirement| {
                 match optional_texture_info {
                     Some(info) => {
                         let image_index = info.source().index();
 
-                        let id = match image_index_to_id.entry((image_index, srgb)) {
+                        let is_encoded_srgb = match format_requirement {
+                            FormatRequirement::DontCare => {
+                                // try loading a cached encoded srgb texture
+                                if let Some(id) = image_index_to_id.get(&(image_index, true)) {
+                                    println!("reusing image {} (encoded srgb: don't care)", image_index);
+                                    return Ok(*id as i32);
+                                }
+
+                                false
+                            },
+                            FormatRequirement::EncodedSrgb => true,
+                            FormatRequirement::LinearSrgb => false,
+                        };
+
+                        let id = match image_index_to_id.entry((image_index, is_encoded_srgb)) {
                             std::collections::hash_map::Entry::Occupied(occupied) => {
-                                println!("reusing image {} (srgb: {})", image_index, srgb);
+                                println!("reusing image {} (encoded srgb: {})", image_index, is_encoded_srgb);
                                 *occupied.get()
                             }
                             std::collections::hash_map::Entry::Vacant(vacancy) => {
@@ -174,7 +194,7 @@ pub(crate) fn load_gltf(
 
                                 let texture = load_texture_from_gltf(
                                     image,
-                                    srgb,
+                                    is_encoded_srgb,
                                     &format!("{} {}", name, i),
                                     init_resources,
                                     buffers_to_cleanup,
@@ -201,27 +221,27 @@ pub(crate) fn load_gltf(
                 diffuse: load_optional_texture(
                     pbr.base_color_texture().map(|info| info.texture()),
                     "diffuse",
-                    true,
+                    FormatRequirement::EncodedSrgb,
                 )?,
                 metallic_roughness: load_optional_texture(
                     pbr.metallic_roughness_texture().map(|info| info.texture()),
                     "metallic roughness",
-                    false,
+                    FormatRequirement::LinearSrgb,
                 )?,
                 normal_map: load_optional_texture(
                     material.normal_texture().map(|info| info.texture()),
                     "normal map",
-                    false,
+                    FormatRequirement::LinearSrgb,
                 )?,
                 emissive: load_optional_texture(
                     material.emissive_texture().map(|info| info.texture()),
                     "emissive",
-                    true,
+                    FormatRequirement::EncodedSrgb,
                 )?,
                 occlusion: load_optional_texture(
                     material.occlusion_texture().map(|info| info.texture()),
                     "occlusion",
-                    true,
+                    FormatRequirement::LinearSrgb,
                 )?,
                 transmission: load_optional_texture(
                     material
@@ -229,7 +249,7 @@ pub(crate) fn load_gltf(
                         .and_then(|transmission| transmission.transmission_texture())
                         .map(|info| info.texture()),
                     "transmission",
-                    false,
+                    FormatRequirement::LinearSrgb,
                 )?,
                 thickness: load_optional_texture(
                     material
@@ -237,16 +257,7 @@ pub(crate) fn load_gltf(
                         .and_then(|volume| volume.thickness_texture())
                         .map(|info| info.texture()),
                     "volume",
-                    false,
-                )?,
-                // todo: use a srgb/linear/dontcare enum for better texture re-use (textures that use alpha channels dont care about srgb).
-                specular: load_optional_texture(
-                    material
-                        .specular()
-                        .and_then(|specular| specular.specular_texture())
-                        .map(|info| info.texture()),
-                    "specular",
-                    false,
+                    FormatRequirement::LinearSrgb,
                 )?,
                 specular_colour: load_optional_texture(
                     material
@@ -254,7 +265,17 @@ pub(crate) fn load_gltf(
                         .and_then(|specular| specular.specular_color_texture())
                         .map(|info| info.texture()),
                     "specular colour",
-                    false,
+                    FormatRequirement::EncodedSrgb,
+                )?,
+                specular: load_optional_texture(
+                    material
+                        .specular()
+                        .and_then(|specular| specular.specular_texture())
+                        .map(|info| info.texture()),
+                    "specular",
+                    // This value is read from the alpha channel, so we don't if the texture was previously
+                    // loaded as srgb.
+                    FormatRequirement::DontCare,
                 )?,
             },
             metallic_factor: pbr.metallic_factor(),
