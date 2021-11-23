@@ -53,7 +53,7 @@ impl QueryPool {
         }
 
         vk_sync::cmd::pipeline_barrier(
-            &init_resources.device,
+            init_resources.device,
             init_resources.command_buffer,
             Some(vk_sync::GlobalBarrier {
                 previous_accesses: &[vk_sync::AccessType::HostWrite],
@@ -100,13 +100,12 @@ impl QueryPool {
             None,
         );
 
-        let mut buffer = TimestampBuffer::default();
-
-        // As it contains the initial timestamp.
-        buffer.len = 1;
-
         Ok(ProfilingContext {
-            buffer,
+            buffer: TimestampBuffer {
+                timestamps: [0; 4096],
+                // As it contains the initial timestamp.
+                len: 1,
+            },
             pool: self.pool,
             can_reset: true,
         })
@@ -131,7 +130,7 @@ impl ProfilingContext {
         }
 
         vk_sync::cmd::pipeline_barrier(
-            &device,
+            device,
             command_buffer,
             Some(vk_sync::GlobalBarrier {
                 previous_accesses: &[vk_sync::AccessType::HostWrite],
@@ -176,10 +175,12 @@ macro_rules! profiling_zone {
         struct S;
         let func_name = std::any::type_name::<S>();
         $crate::profiling::ProfilingZone::new(
-            $name,
-            &func_name[..func_name.len() - 3],
-            file!(),
-            line!(),
+            &$crate::profiling::SourceContext {
+                name: $name,
+                function: &func_name[..func_name.len() - 3],
+                file: file!(),
+                line: line!(),
+            },
             $start_stage,
             $end_stage,
             $device,
@@ -187,6 +188,13 @@ macro_rules! profiling_zone {
             $context,
         )
     }};
+}
+
+pub struct SourceContext<'a> {
+    pub name: &'a str,
+    pub function: &'a str,
+    pub file: &'a str,
+    pub line: u32,
 }
 
 pub struct ProfilingZone {
@@ -200,10 +208,7 @@ pub struct ProfilingZone {
 
 impl ProfilingZone {
     pub fn new(
-        name: &str,
-        function: &str,
-        file: &str,
-        line: u32,
+        source_context: &SourceContext,
         start_stage: vk::PipelineStageFlags,
         end_stage: vk::PipelineStageFlags,
         device: &ash::Device,
@@ -224,10 +229,10 @@ impl ProfilingZone {
 
         Self {
             _gpu_zone: tracy_client::GpuZone::new(
-                name,
-                function,
-                file,
-                line,
+                source_context.name,
+                source_context.function,
+                source_context.file,
+                source_context.line,
                 start_query_id,
                 end_query_id,
                 0,

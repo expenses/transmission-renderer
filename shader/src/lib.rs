@@ -16,7 +16,7 @@ use glam_pbr::{
 };
 use shared_structs::{
     CullingPushConstants, DrawCounts, Instance, MaterialInfo, PointLight,
-    PrimitiveInfo, PushConstants, Similarity, SunUniform,
+    PrimitiveInfo, PushConstants, SunUniform,
 };
 use spirv_std::{
     glam::{Mat3, UVec3, Vec2, Vec3, Vec4},
@@ -575,7 +575,7 @@ pub fn frustum_culling(
     let instance = index(instances, instance_id);
     let primitive = index(primitives, instance.primitive_id);
 
-    if cull(
+    if shared_structs::cull(
         primitive.packed_bounding_sphere,
         instance.transform.unpack(),
         *push_constants,
@@ -631,23 +631,6 @@ pub fn demultiplex_draws(
         2 => *index_mut(transmission_draws, non_zero_draw_id) = draw_command,
         _ => *index_mut(transmission_alpha_clip_draws, non_zero_draw_id) = draw_command
     };
-}
-
-fn cull(
-    packed_bounding_sphere: Vec4,
-    transform: Similarity,
-    push_constants: CullingPushConstants,
-) -> bool {
-    let mut center = packed_bounding_sphere.truncate();
-    center = transform * center;
-    center = (push_constants.view * center.extend(1.0)).truncate();
-
-    let mut radius = packed_bounding_sphere.w;
-    radius *= transform.scale;
-
-    //let visible = center.z + radius > push_constants.z_near;
-
-    false
 }
 
 fn atomic_i_add(reference: &mut u32, value: u32) -> u32 {

@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp)]
+
 use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 use ash::extensions::khr::{Surface as SurfaceLoader, Swapchain as SwapchainLoader};
 use ash::vk;
@@ -9,7 +11,7 @@ use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
-use shared_structs::{Instance, PointLight, Similarity};
+use shared_structs::{DrawCounts, Instance, PointLight, Similarity};
 
 mod profiling;
 
@@ -284,106 +286,43 @@ fn main() -> anyhow::Result<()> {
         height: window_size.height,
     };
 
-    let mut vertex_staging_buffers = VertexStagingBuffers::default();
-    let mut materials = Vec::new();
-    let mut instances = Vec::new();
-    let mut primitives = Vec::new();
+    let mut model_staging_buffers = ModelStagingBuffers::default();
+    let mut max_draw_counts = DrawCounts::default();
 
-    let base_transform = Similarity {
-        translation: Vec3::new(0.0, 2.0, 0.0),
-                        rotation: Quat::IDENTITY,
-                        scale: 10.0 / 125.0,
-    };
-
-    let model = load_gltf(
+    load_gltf(
         &std::env::args().nth(1).unwrap(),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
-        &mut materials,
-        &mut vertex_staging_buffers,
-        &mut instances,
-        &mut primitives,
+        &mut model_staging_buffers,
+        &mut max_draw_counts,
         Similarity::IDENTITY,
     )?;
 
-    let model2 = load_gltf(
+    load_gltf(
         &std::env::args().nth(2).unwrap(),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
-        &mut materials,
-        &mut vertex_staging_buffers,
-        &mut instances,
-        &mut primitives,
-        base_transform
-    )?;
-
-    let model_materials = ash_abstractions::Buffer::new(
-        unsafe { cast_slice(&materials) },
-        "materials",
-        vk::BufferUsageFlags::STORAGE_BUFFER,
-        &mut init_resources,
-    )?;
-
-    let vertex_buffers = vertex_staging_buffers.upload(&mut init_resources)?;
-
-    let opaque_draw_buffer = DrawBuffer::new_from_max_draws(
-        // todo: reduce this it model.num_opaque + model2.num_opaque
-        primitives.len() as u32,
-        "opaque",
-        &mut init_resources,
-    )?;
-
-    let alpha_clip_draw_buffer = DrawBuffer::new_from_max_draws(
-        primitives.len() as u32,
-        "alpha clip",
-        &mut init_resources,
-    )?;
-
-    let transmission_draw_buffer = DrawBuffer::new_from_max_draws(
-        primitives.len() as u32,
-        "transmission",
-        &mut init_resources,
-    )?;
-
-    let transmission_alpha_clip_draw_buffer = DrawBuffer::new_from_max_draws(
-        primitives.len() as u32,
-        "transmission alpha clip",
-        &mut init_resources,
-    )?;
-
-    let instance_count_buffer = ash_abstractions::Buffer::new_of_size(
-        4 * primitives.len() as u64,
-        "instance count buffer",
-        vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-        &mut init_resources
-    )?;
-
-    let primitive_info_buffer = ash_abstractions::Buffer::new(
-        unsafe {
-            cast_slice(&primitives)
+        &mut model_staging_buffers,
+        &mut max_draw_counts,
+        Similarity {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::IDENTITY,
+            scale: 10.0 / 125.0,
         },
-        "primitive info buffer",
-        vk::BufferUsageFlags::STORAGE_BUFFER,
-        &mut init_resources
     )?;
 
-    let draw_buffers = DrawBuffers {
-        draw_counts_buffer: ash_abstractions::Buffer::new_of_size(
-            std::mem::size_of::<shared_structs::DrawCounts>() as u64,
-            "draw counts",
-            vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            &mut init_resources,
-        )?,
-        opaque: (opaque_draw_buffer),
-        alpha_clip: (alpha_clip_draw_buffer),
-        transmission: (transmission_draw_buffer),
-        transmission_alpha_clip: (transmission_alpha_clip_draw_buffer),
-        frustum_culling_ds,
-        primitive_info_buffer,
-        instance_count_buffer,
-    };
+    dbg!(max_draw_counts);
+
+    let num_instances = model_staging_buffers.instances.len() as u32;
+    let num_primitives = model_staging_buffers.primitives.len() as u32;
+
+    let model_buffers = model_staging_buffers.upload(&mut init_resources)?;
+
+    // todo: reduce this it model.num_opaque + model2.num_opaque
+
+    let draw_buffers = DrawBuffers::new(max_draw_counts, frustum_culling_ds, &mut init_resources)?;
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
     let mut hdr_framebuffer = create_hdr_framebuffer(
@@ -462,15 +401,6 @@ fn main() -> anyhow::Result<()> {
             ])
         },
         "lights",
-        vk::BufferUsageFlags::STORAGE_BUFFER,
-        &mut init_resources,
-    )?;
-
-    let instance_buffer = ash_abstractions::Buffer::new(
-        unsafe {
-            cast_slice(&instances)
-        },
-        "instance",
         vk::BufferUsageFlags::STORAGE_BUFFER,
         &mut init_resources,
     )?;
@@ -570,12 +500,16 @@ fn main() -> anyhow::Result<()> {
     let mut keyboard_state = KeyboardState::default();
 
     let mut camera = dolly::rig::CameraRig::builder()
-        .with(dolly::drivers::Position::new(Vec3::new(
-            0.0, 3.0, 1.0,
-        )))
+        .with(dolly::drivers::Position::new(Vec3::new(0.0, 3.0, 1.0)))
         .with(dolly::drivers::YawPitch::new().pitch_degrees(-15.0))
         .with(dolly::drivers::Smooth::new_position_rotation(0.5, 0.25))
         .build();
+
+    let mut view_matrix = Mat4::look_at_rh(
+        camera.final_transform.position,
+        camera.final_transform.position + camera.final_transform.forward(),
+        camera.final_transform.up(),
+    );
 
     let mut perspective_matrix = perspective_infinite_z_vk(
         59.0_f32.to_radians(),
@@ -642,7 +576,7 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(model_materials.buffer)
+                        .buffer(model_buffers.materials.buffer)
                         .range(vk::WHOLE_SIZE)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(main_ds)
@@ -661,7 +595,7 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(6)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(instance_buffer.buffer)
+                        .buffer(model_buffers.instances.buffer)
                         .range(vk::WHOLE_SIZE)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(hdr_framebuffer_ds)
@@ -683,14 +617,14 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(instance_buffer.buffer)
+                        .buffer(model_buffers.instances.buffer)
                         .range(vk::WHOLE_SIZE)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(frustum_culling_ds)
                     .dst_binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.primitive_info_buffer.buffer)
+                        .buffer(model_buffers.primitives.buffer)
                         .range(vk::WHOLE_SIZE)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(frustum_culling_ds)
@@ -721,20 +655,20 @@ fn main() -> anyhow::Result<()> {
                     .buffer_info(&[*vk::DescriptorBufferInfo::builder()
                         .buffer(draw_buffers.alpha_clip.buffer.buffer)
                         .range(vk::WHOLE_SIZE)]),
-                        *vk::WriteDescriptorSet::builder()
-                        .dst_set(frustum_culling_ds)
-                        .dst_binding(6)
-                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                        .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                            .buffer(draw_buffers.transmission.buffer.buffer)
-                            .range(vk::WHOLE_SIZE)]),
-                    *vk::WriteDescriptorSet::builder()
-                        .dst_set(frustum_culling_ds)
-                        .dst_binding(7)
-                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                        .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                            .buffer(draw_buffers.transmission_alpha_clip.buffer.buffer)
-                            .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(6)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.transmission.buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(frustum_culling_ds)
+                    .dst_binding(7)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
+                        .buffer(draw_buffers.transmission_alpha_clip.buffer.buffer)
+                        .range(vk::WHOLE_SIZE)]),
             ],
             &[],
         )
@@ -1013,12 +947,12 @@ fn main() -> anyhow::Result<()> {
                     camera.update(delta_time);
 
                     push_constants.proj_view = {
-                        let view = Mat4::look_at_rh(
+                        view_matrix = Mat4::look_at_rh(
                             camera.final_transform.position,
                             camera.final_transform.position + camera.final_transform.forward(),
                             camera.final_transform.up(),
                         );
-                        perspective_matrix * view
+                        perspective_matrix * view_matrix
                     };
                     push_constants.view_position = camera.final_transform.position.into();
 
@@ -1174,11 +1108,7 @@ fn main() -> anyhow::Result<()> {
                                 vk::ShaderStageFlags::COMPUTE,
                                 0,
                                 bytes_of(&shared_structs::CullingPushConstants {
-                                    view: Mat4::look_at_rh(
-                                        camera.final_transform.position,
-                                        camera.final_transform.position + camera.final_transform.forward(),
-                                        camera.final_transform.up(),
-                                    ),
+                                    view: view_matrix,
                                     z_near: NEAR_Z
                                 }),
                             );
@@ -1192,7 +1122,7 @@ fn main() -> anyhow::Result<()> {
                             {
                                 let _profiling_zone = profiling_zone!("frustum culling compute shader", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                                device.cmd_dispatch(command_buffer, dispatch_count(instances.len() as u32, 64), 1, 1);
+                                device.cmd_dispatch(command_buffer, dispatch_count(num_instances, 64), 1, 1);
                             }
 
                             vk_sync::cmd::pipeline_barrier(
@@ -1215,7 +1145,7 @@ fn main() -> anyhow::Result<()> {
                             {
                                 let _profiling_zone = profiling_zone!("demultiplex draws compute shader", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                                device.cmd_dispatch(command_buffer, dispatch_count(primitives.len() as u32, 64), 1, 1);
+                                device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
                             }
 
                             vk_sync::cmd::pipeline_barrier(
@@ -1260,17 +1190,17 @@ fn main() -> anyhow::Result<()> {
                             command_buffer,
                             0,
                             &[
-                                vertex_buffers.position.buffer,
-                                vertex_buffers.normal.buffer,
-                                vertex_buffers.uv.buffer,
-                                vertex_buffers.material.buffer,
+                                model_buffers.position.buffer,
+                                model_buffers.normal.buffer,
+                                model_buffers.uv.buffer,
+                                model_buffers.material_id.buffer,
                             ],
                             &[0, 0, 0, 0],
                         );
 
                         device.cmd_bind_index_buffer(
                             command_buffer,
-                            vertex_buffers.index.buffer,
+                            model_buffers.index.buffer,
                             0,
                             vk::IndexType::UINT32,
                         );
@@ -1495,14 +1425,12 @@ fn main() -> anyhow::Result<()> {
                         depthbuffer.cleanup(&device, &mut allocator)?;
                         lights_buffer.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
-                        model_materials.cleanup(&device, &mut allocator)?;
-                        instance_buffer.cleanup(&device, &mut allocator)?;
                         sun_uniform_buffer.cleanup(&device, &mut allocator)?;
                         draw_buffers.cleanup(&device, &mut allocator)?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
 
-                        vertex_buffers.cleanup(&device, &mut allocator)?;
+                        model_buffers.cleanup(&device, &mut allocator)?;
                     }
                 }
                 _ => {}
@@ -2383,107 +2311,12 @@ fn create_hdr_framebuffer(
     )
 }
 
-struct IndexBufferSlice {
-    offset: u32,
-    count: u32,
-}
-
-impl IndexBufferSlice {
-    fn as_draw_indexed_indirect_command(
-        &self,
-        first_instance: u32,
-    ) -> vk::DrawIndexedIndirectCommand {
-        vk::DrawIndexedIndirectCommand {
-            index_count: self.count,
-            instance_count: 1,
-            first_index: self.offset,
-            vertex_offset: 0,
-            first_instance,
-        }
-    }
-}
-
-#[derive(Default)]
-struct VertexStagingBuffers {
-    position: Vec<Vec3>,
-    normal: Vec<Vec3>,
-    uv: Vec<Vec2>,
-    material: Vec<u32>,
-    index: Vec<u32>,
-}
-
-impl VertexStagingBuffers {
-    fn upload(
-        self,
-        init_resources: &mut ash_abstractions::InitResources,
-    ) -> anyhow::Result<VertexBuffers> {
-        Ok(VertexBuffers {
-            position: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&self.position) },
-                "position buffer",
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                init_resources,
-            )?,
-            normal: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&self.normal) },
-                "normal buffer",
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                init_resources,
-            )?,
-            uv: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&self.uv) },
-                "uv buffer",
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                init_resources,
-            )?,
-            material: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&self.material) },
-                "material buffer",
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                init_resources,
-            )?,
-            index: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&self.index) },
-                "index buffer",
-                vk::BufferUsageFlags::INDEX_BUFFER,
-                init_resources,
-            )?,
-        })
-    }
-}
-
 struct DrawBuffer {
     buffer: ash_abstractions::Buffer,
     max_draws: u32,
 }
 
 impl DrawBuffer {
-    fn new(
-        draws: &[vk::DrawIndexedIndirectCommand],
-        name: &str,
-        init_resources: &mut ash_abstractions::InitResources,
-    ) -> anyhow::Result<Option<Self>> {
-        let draws = draws
-            .iter()
-            .copied()
-            .filter(|draw| draw.index_count > 0 && draw.instance_count > 0)
-            .collect::<Vec<vk::DrawIndexedIndirectCommand>>();
-
-        if draws.is_empty() {
-            return Ok(None);
-        }
-
-        Ok(Some(Self {
-            buffer: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&draws) },
-                name,
-                vk::BufferUsageFlags::INDIRECT_BUFFER,
-                init_resources,
-            )?,
-            max_draws: draws.len() as u32,
-        }))
-    }
-
     fn new_from_max_draws(
         max_draws: u32,
         name: &str,
@@ -2491,7 +2324,8 @@ impl DrawBuffer {
     ) -> anyhow::Result<Self> {
         Ok(Self {
             buffer: ash_abstractions::Buffer::new_of_size(
-                max_draws as u64 * std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u64,
+                max_draws.max(1) as u64
+                    * std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u64,
                 name,
                 vk::BufferUsageFlags::INDIRECT_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
                 init_resources,
@@ -2527,10 +2361,56 @@ struct DrawBuffers {
     draw_counts_buffer: ash_abstractions::Buffer,
     frustum_culling_ds: vk::DescriptorSet,
     instance_count_buffer: ash_abstractions::Buffer,
-    primitive_info_buffer: ash_abstractions::Buffer,
 }
 
 impl DrawBuffers {
+    fn new(
+        max_draw_counts: DrawCounts,
+        frustum_culling_ds: vk::DescriptorSet,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            draw_counts_buffer: ash_abstractions::Buffer::new_of_size(
+                std::mem::size_of::<DrawCounts>() as u64,
+                "draw counts",
+                vk::BufferUsageFlags::INDIRECT_BUFFER
+                    | vk::BufferUsageFlags::STORAGE_BUFFER
+                    | vk::BufferUsageFlags::TRANSFER_DST,
+                init_resources,
+            )?,
+            instance_count_buffer: ash_abstractions::Buffer::new_of_size(
+                4 * (max_draw_counts.opaque
+                    + max_draw_counts.alpha_clip
+                    + max_draw_counts.transmission
+                    + max_draw_counts.transmission_alpha_clip) as u64,
+                "instance count buffer",
+                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                init_resources,
+            )?,
+            opaque: DrawBuffer::new_from_max_draws(
+                max_draw_counts.opaque,
+                "opaque",
+                init_resources,
+            )?,
+            alpha_clip: DrawBuffer::new_from_max_draws(
+                max_draw_counts.alpha_clip,
+                "alpha clip",
+                init_resources,
+            )?,
+            transmission: DrawBuffer::new_from_max_draws(
+                max_draw_counts.transmission,
+                "transmission",
+                init_resources,
+            )?,
+            transmission_alpha_clip: DrawBuffer::new_from_max_draws(
+                max_draw_counts.transmission_alpha_clip,
+                "transmission alpha clip",
+                init_resources,
+            )?,
+            frustum_culling_ds,
+        })
+    }
+
     fn cleanup(
         &self,
         device: &ash::Device,
@@ -2539,43 +2419,99 @@ impl DrawBuffers {
         self.opaque.buffer.cleanup(device, allocator)?;
         self.alpha_clip.buffer.cleanup(device, allocator)?;
         self.transmission.buffer.cleanup(device, allocator)?;
-        self.transmission_alpha_clip.buffer.cleanup(device, allocator)?;
+        self.transmission_alpha_clip
+            .buffer
+            .cleanup(device, allocator)?;
         self.draw_counts_buffer.cleanup(device, allocator)?;
         self.instance_count_buffer.cleanup(device, allocator)?;
-        self.primitive_info_buffer.cleanup(device, allocator)?;
         Ok(())
     }
 }
 
-fn buffers_from_primitives(
-    primitives: &[shared_structs::PrimitiveInfo],
-    init_resources: &mut ash_abstractions::InitResources,
-) -> anyhow::Result<(ash_abstractions::Buffer, ash_abstractions::Buffer)> {
-    Ok((
-        ash_abstractions::Buffer::new(
-            unsafe { cast_slice(primitives) },
-            "primitive info buffer",
-            vk::BufferUsageFlags::STORAGE_BUFFER,
-            init_resources,
-        )?,
-        ash_abstractions::Buffer::new_of_size(
-            primitives.len() as u64 * std::mem::size_of::<u32>() as u64,
-            "instance count buffer",
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            init_resources,
-        )?,
-    ))
+#[derive(Default)]
+struct ModelStagingBuffers {
+    position: Vec<Vec3>,
+    normal: Vec<Vec3>,
+    uv: Vec<Vec2>,
+    material_id: Vec<u32>,
+    index: Vec<u32>,
+    // storage buffers
+    instances: Vec<Instance>,
+    primitives: Vec<shared_structs::PrimitiveInfo>,
+    materials: Vec<shared_structs::MaterialInfo>,
 }
 
-struct VertexBuffers {
+impl ModelStagingBuffers {
+    fn upload(
+        self,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ModelBuffers> {
+        Ok(ModelBuffers {
+            position: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.position) },
+                "position buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            normal: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.normal) },
+                "normal buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            uv: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.uv) },
+                "uv buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            material_id: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.material_id) },
+                "material buffer",
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                init_resources,
+            )?,
+            index: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.index) },
+                "index buffer",
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                init_resources,
+            )?,
+            instances: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.instances) },
+                "instances",
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                init_resources,
+            )?,
+            materials: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.materials) },
+                "materials",
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                init_resources,
+            )?,
+            primitives: ash_abstractions::Buffer::new(
+                unsafe { cast_slice(&self.primitives) },
+                "primitive infos",
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                init_resources,
+            )?,
+        })
+    }
+}
+
+struct ModelBuffers {
     position: ash_abstractions::Buffer,
     normal: ash_abstractions::Buffer,
     uv: ash_abstractions::Buffer,
-    material: ash_abstractions::Buffer,
+    material_id: ash_abstractions::Buffer,
     index: ash_abstractions::Buffer,
+    // storage buffers
+    instances: ash_abstractions::Buffer,
+    materials: ash_abstractions::Buffer,
+    primitives: ash_abstractions::Buffer,
 }
 
-impl VertexBuffers {
+impl ModelBuffers {
     fn cleanup(
         &self,
         device: &ash::Device,
@@ -2584,17 +2520,13 @@ impl VertexBuffers {
         self.position.cleanup(device, allocator)?;
         self.normal.cleanup(device, allocator)?;
         self.uv.cleanup(device, allocator)?;
-        self.material.cleanup(device, allocator)?;
+        self.material_id.cleanup(device, allocator)?;
         self.index.cleanup(device, allocator)?;
+        self.instances.cleanup(device, allocator)?;
+        self.materials.cleanup(device, allocator)?;
+        self.primitives.cleanup(device, allocator)?;
         Ok(())
     }
-}
-
-struct Model {
-    opaque: IndexBufferSlice,
-    alpha_clip: IndexBufferSlice,
-    transmission: IndexBufferSlice,
-    transmission_alpha_clip: IndexBufferSlice,
 }
 
 fn load_gltf(
@@ -2602,10 +2534,8 @@ fn load_gltf(
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
-    materials: &mut Vec<shared_structs::MaterialInfo>,
-    vertex_buffers: &mut VertexStagingBuffers,
-    instances: &mut Vec<Instance>,
-    primitives: &mut Vec<shared_structs::PrimitiveInfo>,
+    model_buffers: &mut ModelStagingBuffers,
+    max_draw_counts: &mut DrawCounts,
     base_transform: Similarity,
 ) -> anyhow::Result<()> {
     let _span = tracy_client::span!(name);
@@ -2651,7 +2581,8 @@ fn load_gltf(
         for primitive in mesh.primitives() {
             let material = primitive.material();
 
-            let draw_buffer_index = match (material.alpha_mode(), material.transmission().is_some()) {
+            let draw_buffer_index = match (material.alpha_mode(), material.transmission().is_some())
+            {
                 (gltf::material::AlphaMode::Opaque, false) => 0,
                 (gltf::material::AlphaMode::Mask, false) => 1,
                 (gltf::material::AlphaMode::Opaque, true) => 2,
@@ -2662,6 +2593,13 @@ fn load_gltf(
                 }
             };
 
+            match draw_buffer_index {
+                0 => max_draw_counts.opaque += 1,
+                1 => max_draw_counts.alpha_clip += 1,
+                2 => max_draw_counts.transmission += 1,
+                _ => max_draw_counts.transmission_alpha_clip += 1,
+            }
+
             // We handle texture transforms, but only scaling and only on the base colour texture.
             // This is the bare minimum to render the SheenCloth correctly.
             let uv_scaling = material
@@ -2671,71 +2609,70 @@ fn load_gltf(
                 .map(|transform| Vec2::from(transform.scale()))
                 .unwrap_or(Vec2::ONE);
 
-            let material_id = material.index().unwrap_or(0) + materials.len();
+            let material_id = material.index().unwrap_or(0) + model_buffers.materials.len();
 
             let reader = primitive.reader(|i| Some(&buffers[i.index()]));
 
             let read_indices = reader.read_indices().unwrap().into_u32();
 
-            let num_vertices = vertex_buffers.position.len() as u32;
+            let num_existing_vertices = model_buffers.position.len();
 
-            let first_index = vertex_buffers.index.len();
+            let first_index = model_buffers.index.len();
 
-            vertex_buffers.index.extend(read_indices.map(|index| index + num_vertices));
+            model_buffers
+                .index
+                .extend(read_indices.map(|index| index + num_existing_vertices as u32));
 
-            let first_instance = instances.len();
+            let first_instance = model_buffers.instances.len();
 
-            let positions = reader.read_positions().unwrap();
-
-            let num_primitive_vertices = positions.clone().count();
-
-            vertex_buffers
+            model_buffers
                 .position
-                .extend(positions.map(|position| Vec3::from(position)));
+                .extend(reader.read_positions().unwrap().map(Vec3::from));
 
-            vertex_buffers
-                .material
-                .extend(std::iter::repeat(material_id as u32).take(num_primitive_vertices));
-            vertex_buffers.normal.extend(
-                reader
-                    .read_normals()
-                    .unwrap()
-                    .map(|normal| (Vec3::from(normal)).normalize()),
-            );
+            let num_current_vertices = model_buffers.position.len() - num_existing_vertices;
+
+            model_buffers
+                .material_id
+                .extend(std::iter::repeat(material_id as u32).take(num_current_vertices));
+            model_buffers
+                .normal
+                .extend(reader.read_normals().unwrap().map(Vec3::from));
 
             // Some test models (AttenuationTest) don't have UVs on some primitives.
             match reader.read_tex_coords(0) {
                 Some(uvs) => {
-                    vertex_buffers
+                    model_buffers
                         .uv
                         .extend(uvs.into_f32().map(|uv| uv_scaling * Vec2::from(uv)));
                 }
                 None => {
-                    vertex_buffers
+                    model_buffers
                         .uv
-                        .extend(std::iter::repeat(Vec2::ZERO).take(num_primitive_vertices));
+                        .extend(std::iter::repeat(Vec2::ZERO).take(num_current_vertices));
                 }
             }
 
-            instances.push(Instance {
+            model_buffers.instances.push(Instance {
                 transform: transform.pack(),
-                primitive_id: primitives.len() as u32,
+                primitive_id: model_buffers.primitives.len() as u32,
             });
 
-            primitives.push(shared_structs::PrimitiveInfo {
-                packed_bounding_sphere: {
-                    let bbox = primitive.bounding_box();
-                    let min = Vec3::from(bbox.min);
-                    let max = Vec3::from(bbox.max);
-                    let center = (min + max) / 2.0;
-                    let radius = min.distance(max) / 2.0;
-                    center.extend(radius)
-                },
-                index_count: (vertex_buffers.index.len() - first_index) as u32,
-                first_index: first_index as u32,
-                first_instance: first_instance as u32,
-                draw_buffer_index
-            });
+            model_buffers
+                .primitives
+                .push(shared_structs::PrimitiveInfo {
+                    packed_bounding_sphere: {
+                        let bbox = primitive.bounding_box();
+                        let min = Vec3::from(bbox.min);
+                        let max = Vec3::from(bbox.max);
+                        let center = (min + max) / 2.0;
+                        let radius = min.distance(max) / 2.0;
+                        center.extend(radius)
+                    },
+                    index_count: (model_buffers.index.len() - first_index) as u32,
+                    first_index: first_index as u32,
+                    first_instance: first_instance as u32,
+                    draw_buffer_index,
+                });
         }
     }
 
@@ -2784,7 +2721,7 @@ fn load_gltf(
 
         let pbr = material.pbr_metallic_roughness();
 
-        materials.push(shared_structs::MaterialInfo {
+        model_buffers.materials.push(shared_structs::MaterialInfo {
             textures: shared_structs::Textures {
                 diffuse: load_optional_texture(
                     pbr.base_color_texture().map(|info| info.texture()),
@@ -2935,7 +2872,7 @@ impl Castable for shared_structs::PointLight {}
 impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::SunUniform {}
 impl Castable for shared_structs::PushConstants {}
-impl Castable for shared_structs::DrawCounts {}
+impl Castable for DrawCounts {}
 impl Castable for shared_structs::CullingPushConstants {}
 impl Castable for shared_structs::PrimitiveInfo {}
 impl Castable for colstodian::tonemap::BakedLottesTonemapperParams {}
@@ -3045,42 +2982,4 @@ impl NodeTree {
 
 const fn dispatch_count(num: u32, group_size: u32) -> u32 {
     ((num - 1) / group_size) + 1
-}
-
-// runs on o(n^2) time
-fn compute_min_bounding_sphere(points: &[Vec3]) -> Vec4 {
-    let span = tracy_client::span!("Computing min bounding sphere");
-
-    let mut a = 0;
-    let mut b = 0;
-    let mut max_distance_sq = 0.0;
-
-    for i in 0 .. points.len() {
-        let point_i = points[i];
-
-        for j in i + 1 .. points.len() {
-            let point_j = points[j];
-
-            let distance_sq = point_i.distance_squared(point_j);
-
-            if distance_sq > max_distance_sq {
-                a = i;
-                b = j;
-                max_distance_sq = distance_sq;
-            }
-        }
-    }
-
-    let center = (points[a] + points[b]) / 2.0;
-    let radius = max_distance_sq.sqrt() / 2.0;
-
-    drop(span);
-
-    /*
-    for point in points {
-        debug_assert!(point.distance_squared(center) < (radius * radius));
-    }
-    */
-
-    center.extend(radius)
 }
