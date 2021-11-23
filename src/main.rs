@@ -8,6 +8,7 @@ use std::ffi::CStr;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
+use structopt::StructOpt;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
 use shared_structs::{DrawCounts, Instance, PointLight, PushConstants, Similarity};
@@ -40,8 +41,26 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
 pub const MAX_IMAGES: u32 = 195;
 pub const NEAR_Z: f32 = 0.01;
 
+#[derive(StructOpt)]
+struct Opt {
+    /// The name of the model inside the glTF-Sample-Models directory to render.
+    gltf_sample_model_name: String,
+    /// A scale factor to be applied to the model.
+    #[structopt(short, long, default_value = "1.0")]
+    scale: f32,
+    /// Override the default roughness factor of the model.
+    /// Doesn't effect models that use a texture for roughness.
+    #[structopt(long)]
+    roughness_override: Option<f32>,
+    /// Log allocator leaks on shutdown. Off by default because it makes panics hard to debug.
+    #[structopt(long)]
+    log_leaks: bool,
+}
+
 fn main() -> anyhow::Result<()> {
     let entire_setup_span = tracy_client::span!("Entire Setup");
+
+    let opt = Opt::from_args();
 
     {
         use simplelog::*;
@@ -55,14 +74,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::Window::new(&event_loop)?;
+    let window = winit::window::WindowBuilder::new().with_title("Transmission Renderer").build(&event_loop)?;
 
     let entry = unsafe { ash::Entry::new() }?;
 
     let api_version = vk::API_VERSION_1_2;
 
     let app_info = vk::ApplicationInfo::builder()
-        .application_name(CStr::from_bytes_with_nul(b"Nice Grass\0")?)
+        .application_name(c_str_macro::c_str!("Transmission Renderer"))
         .application_version(vk::make_api_version(0, 0, 1, 0))
         .engine_version(vk::make_api_version(0, 0, 1, 0))
         .api_version(api_version);
@@ -189,7 +208,7 @@ fn main() -> anyhow::Result<()> {
             device: device.clone(),
             physical_device,
             debug_settings: gpu_allocator::AllocatorDebugSettings {
-                log_leaks_on_shutdown: true,
+                log_leaks_on_shutdown: opt.log_leaks,
                 ..Default::default()
             },
             buffer_device_address: false,
@@ -268,10 +287,11 @@ fn main() -> anyhow::Result<()> {
         &mut model_staging_buffers,
         &mut max_draw_counts,
         Similarity::IDENTITY,
+        None,
     )?;
 
     load_gltf(
-        &std::env::args().nth(1).unwrap(),
+        &opt.gltf_sample_model_name,
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -280,8 +300,9 @@ fn main() -> anyhow::Result<()> {
         Similarity {
             translation: Vec3::new(0.0, 2.0, 0.0),
             rotation: Quat::IDENTITY,
-            scale: 500.0 / 125.0,
+            scale: opt.scale,
         },
+        opt.roughness_override,
     )?;
 
     dbg!(max_draw_counts);

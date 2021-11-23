@@ -9,7 +9,7 @@ mod tonemapping;
 mod asm;
 mod lighting;
 
-use asm::{GetUnchecked, atomic_i_add};
+use asm::{GetUnchecked, atomic_i_increment};
 use tonemapping::{LottesTonemapper, BakedLottesTonemapperParams};
 use lighting::{evaluate_lights, evaluate_lights_transmission, calculate_normal, get_material_params, get_emission};
 
@@ -367,7 +367,7 @@ pub fn frustum_culling(
 
     let instance_count = index_mut(instance_counts, instance.primitive_id);
 
-    atomic_i_add(instance_count, 1);
+    atomic_i_increment(instance_count);
 }
 
 #[spirv(compute(threads(64)))]
@@ -397,7 +397,7 @@ pub fn demultiplex_draws(
 
     let draw_count = index_mut(draw_counts, primitive.draw_buffer_index);
 
-    let non_zero_draw_id = atomic_i_add(draw_count, 1);
+    let non_zero_draw_id = atomic_i_increment(draw_count);
 
     let draw_command = vk::DrawIndexedIndirectCommand {
         instance_count,

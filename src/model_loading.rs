@@ -18,6 +18,7 @@ pub(crate) fn load_gltf(
     model_buffers: &mut ModelStagingBuffers,
     max_draw_counts: &mut DrawCounts,
     base_transform: Similarity,
+    roughness_override: Option<f32>,
 ) -> anyhow::Result<()> {
     let _span = tracy_client::span!(name);
 
@@ -290,7 +291,7 @@ pub(crate) fn load_gltf(
                 )?,
             },
             metallic_factor: pbr.metallic_factor(),
-            roughness_factor: pbr.roughness_factor(),
+            roughness_factor: roughness_override.unwrap_or(pbr.roughness_factor()),
             alpha_clipping_cutoff: material.alpha_cutoff().unwrap_or(0.5),
             diffuse_factor: pbr.base_color_factor().into(),
             emissive_factor: material.emissive_factor().into(),
@@ -451,8 +452,8 @@ impl NodeTree {
         for node in nodes {
             let (translation, rotation, scale) = node.transform().decomposed();
 
-            assert!((scale[0] - scale[1]).abs() <= std::f32::EPSILON);
-            assert!((scale[0] - scale[2]).abs() <= std::f32::EPSILON);
+            assert!((scale[0] - scale[1]).abs() <= std::f32::EPSILON * 10.0, "{:?}", scale);
+            assert!((scale[0] - scale[2]).abs() <= std::f32::EPSILON * 10.0, "{:?}", scale);
 
             inner[node.index()].0 = Similarity {
                 translation: translation.into(),
