@@ -1,4 +1,3 @@
 - Froxel light clustering
-- Implement cool new extensions
 - Test on egpu
-- remove emission from brdf result
+- implement welzl's algorithm for the smallest circle.

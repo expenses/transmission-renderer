@@ -1,17 +1,21 @@
 #![cfg_attr(
     target_arch = "spirv",
-    feature(register_attr),
+    feature(register_attr, asm),
     register_attr(spirv),
     no_std
 )]
-#![feature(asm)]
 
-// This needs to be here to provide `#[panic_handler]`.
-extern crate spirv_std;
+mod tonemapping;
+mod asm;
+mod lighting;
+
+use asm::{GetUnchecked, atomic_i_add};
+use tonemapping::{LottesTonemapper, BakedLottesTonemapperParams};
+use lighting::{evaluate_lights, evaluate_lights_transmission, calculate_normal, get_material_params, get_emission};
 
 use glam_pbr::{
-    basic_brdf, ibl_volume_refraction, light_direction_and_attenuation, BasicBrdfParams,
-    BrdfResult, IblVolumeRefractionParams, IndexOfRefraction, Light, MaterialParams, Normal,
+    ibl_volume_refraction,
+    IblVolumeRefractionParams,
     PerceptualRoughness, View,
 };
 use shared_structs::{
@@ -19,30 +23,12 @@ use shared_structs::{
     PrimitiveInfo, PushConstants, SunUniform,
 };
 use spirv_std::{
-    glam::{Mat3, UVec3, Vec2, Vec3, Vec4},
-    num_traits::Float,
+    self as _,
+    glam::{UVec3, Vec2, Vec3, Vec4},
     Image, RuntimeArray, Sampler,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
-
-fn compute_cotangent_frame(normal: Vec3, position: Vec3, uv: Vec2) -> Mat3 {
-    // get edge vectors of the pixel triangle
-    let delta_pos_1 = spirv_std::arch::ddx_vector(position);
-    let delta_pos_2 = spirv_std::arch::ddy_vector(position);
-    let delta_uv_1 = spirv_std::arch::ddx_vector(uv);
-    let delta_uv_2 = spirv_std::arch::ddy_vector(uv);
-
-    // solve the linear system
-    let delta_pos_2_perp = delta_pos_2.cross(normal);
-    let delta_pos_1_perp = normal.cross(delta_pos_1);
-    let t = delta_pos_2_perp * delta_uv_1.x + delta_pos_1_perp * delta_uv_2.x;
-    let b = delta_pos_2_perp * delta_uv_1.y + delta_pos_1_perp * delta_uv_2.y;
-
-    // construct a scale-invariant frame
-    let invmax = 1.0 / t.length_squared().max(b.length_squared()).sqrt();
-    Mat3::from_cols(t * invmax, b * invmax, normal)
-}
 
 #[spirv(fragment)]
 pub fn fragment_transmission(
@@ -217,172 +203,6 @@ impl<'a> TextureSampler<'a> {
     }
 }
 
-fn calculate_normal(
-    interpolated_normal: Vec3,
-    texture_sampler: &TextureSampler,
-    material: &MaterialInfo,
-    view_vector: Vec3,
-    uv: Vec2,
-) -> Normal {
-    let mut normal = interpolated_normal.normalize();
-
-    if material.textures.normal_map != -1 {
-        let map_normal = texture_sampler
-            .sample(material.textures.normal_map as u32)
-            .truncate();
-        let map_normal = map_normal * 255.0 / 127.0 - 128.0 / 127.0;
-
-        normal = (compute_cotangent_frame(normal, -view_vector, uv) * map_normal).normalize();
-    };
-
-    Normal(normal)
-}
-
-fn get_material_params(
-    diffuse: Vec4,
-    material: &MaterialInfo,
-    texture_sampler: &TextureSampler,
-) -> MaterialParams {
-    let mut metallic = material.metallic_factor;
-    let mut roughness = material.roughness_factor;
-
-    if material.textures.metallic_roughness != -1 {
-        let sample = texture_sampler.sample(material.textures.metallic_roughness as u32);
-
-        // These two are switched!
-        metallic *= sample.z;
-        roughness *= sample.y;
-    }
-
-    let mut specular_colour = Vec3::from(material.specular_colour_factor);
-
-    if material.textures.specular_colour != -1 {
-        let sample = texture_sampler.sample(material.textures.specular_colour as u32);
-        specular_colour *= sample.truncate();
-    }
-
-    let mut specular_factor = material.specular_factor;
-
-    if material.textures.specular != -1 {
-        let sample = texture_sampler.sample(material.textures.specular as u32);
-        specular_factor *= sample.w;
-    }
-
-    MaterialParams {
-        diffuse_colour: diffuse.truncate(),
-        metallic,
-        perceptual_roughness: PerceptualRoughness(roughness),
-        index_of_refraction: IndexOfRefraction(material.index_of_refraction),
-        specular_colour, specular_factor,
-    }
-}
-
-fn get_emission(material: &MaterialInfo, texture_sampler: &TextureSampler) -> Vec3 {
-    let mut emission = Vec3::from(material.emissive_factor);
-
-    if material.textures.emissive != -1 {
-        emission *= texture_sampler
-            .sample(material.textures.emissive as u32)
-            .truncate();
-    }
-
-    emission
-}
-
-fn evaluate_lights_transmission(
-    material_params: MaterialParams,
-    view: View,
-    position: Vec3,
-    normal: Normal,
-    point_lights: &[PointLight],
-    sun_uniform: &SunUniform,
-) -> (BrdfResult, Vec3) {
-    let mut sum = basic_brdf(BasicBrdfParams {
-        light: Light(sun_uniform.dir.into()),
-        light_intensity: sun_uniform.intensity,
-        normal,
-        view,
-        material_params,
-    });
-
-    let mut transmission = sun_uniform.intensity
-        * glam_pbr::transmission_btdf(material_params, normal, view, Light(sun_uniform.dir.into()));
-
-    let num_lights = point_lights.len() as u32;
-    let mut i = 0;
-
-    while i < num_lights {
-        let light = index(point_lights, i);
-
-        let (direction, attenuation) =
-            light_direction_and_attenuation(position, light.position.into());
-
-        let light_colour = light.colour_and_intensity.truncate();
-        let intensity = light.colour_and_intensity.w;
-
-        sum = sum
-            + basic_brdf(BasicBrdfParams {
-                light: Light(direction),
-                light_intensity: light_colour * intensity * attenuation,
-                normal,
-                view,
-                material_params,
-            });
-
-        transmission += light_colour
-            * intensity
-            * attenuation
-            * glam_pbr::transmission_btdf(material_params, normal, view, Light(direction));
-
-        i += 1;
-    }
-
-    (sum, transmission)
-}
-
-fn evaluate_lights(
-    material_params: MaterialParams,
-    view: View,
-    position: Vec3,
-    normal: Normal,
-    point_lights: &[PointLight],
-    sun_uniform: &SunUniform,
-) -> BrdfResult {
-    let mut sum = basic_brdf(BasicBrdfParams {
-        light: Light(sun_uniform.dir.into()),
-        light_intensity: sun_uniform.intensity,
-        normal,
-        view,
-        material_params,
-    });
-
-    let num_lights = point_lights.len() as u32;
-    let mut i = 0;
-
-    while i < num_lights {
-        let light = index(point_lights, i);
-
-        let (direction, attenuation) =
-            light_direction_and_attenuation(position, light.position.into());
-
-        let light_colour = light.colour_and_intensity.truncate();
-        let intensity = light.colour_and_intensity.w;
-
-        sum = sum
-            + basic_brdf(BasicBrdfParams {
-                light: Light(direction),
-                light_intensity: light_colour * intensity * attenuation,
-                normal,
-                view,
-                material_params,
-            });
-
-        i += 1;
-    }
-
-    sum
-}
-
 #[spirv(fragment)]
 pub fn depth_pre_pass_alpha_clip(
     uv: Vec2,
@@ -502,59 +322,6 @@ pub fn vertex_instanced_with_scale(
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
-trait GetUnchecked<T> {
-    unsafe fn get_unchecked(&self, index: usize) -> &T;
-    unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T;
-}
-
-impl<T> GetUnchecked<T> for [T] {
-    unsafe fn get_unchecked(&self, index: usize) -> &T {
-        asm!(
-            "%slice_ptr = OpLoad _ {slice_ptr_ptr}",
-            "%data_ptr = OpCompositeExtract _ %slice_ptr 0",
-            "%val_ptr = OpAccessChain _ %data_ptr {index}",
-            "OpReturnValue %val_ptr",
-            slice_ptr_ptr = in(reg) &self,
-            index = in(reg) index,
-            options(noreturn)
-        )
-    }
-
-    unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
-        asm!(
-            "%slice_ptr = OpLoad _ {slice_ptr_ptr}",
-            "%data_ptr = OpCompositeExtract _ %slice_ptr 0",
-            "%val_ptr = OpAccessChain _ %data_ptr {index}",
-            "OpReturnValue %val_ptr",
-            slice_ptr_ptr = in(reg) &self,
-            index = in(reg) index,
-            options(noreturn)
-        )
-    }
-}
-
-impl<T, const N: usize> GetUnchecked<T> for [T; N] {
-    unsafe fn get_unchecked(&self, index: usize) -> &T {
-        asm!(
-            "%val_ptr = OpAccessChain _ {array_ptr} {index}",
-            "OpReturnValue %val_ptr",
-            array_ptr = in(reg) self,
-            index = in(reg) index,
-            options(noreturn)
-        )
-    }
-
-    unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
-        asm!(
-            "%val_ptr = OpAccessChain _ {array_ptr} {index}",
-            "OpReturnValue %val_ptr",
-            array_ptr = in(reg) self,
-            index = in(reg) index,
-            options(noreturn)
-        )
-    }
-}
-
 fn index<T, S: GetUnchecked<T> + ?Sized>(structure: &S, index: u32) -> &T {
     unsafe { GetUnchecked::get_unchecked(structure, index as usize) }
 }
@@ -648,16 +415,6 @@ pub fn demultiplex_draws(
     };
 }
 
-fn atomic_i_add(reference: &mut u32, value: u32) -> u32 {
-    unsafe {
-        spirv_std::arch::atomic_i_add::<
-            _,
-            { spirv_std::memory::Scope::Device as u8 },
-            { spirv_std::memory::Semantics::NONE.bits() as u8 },
-        >(reference, value)
-    }
-}
-
 /*
 const DEBUG_COLOURS: [Vec3; 13] = [
     const_vec3!([0.0, 0.0, 0.6647]),      // dark blue
@@ -705,42 +462,4 @@ pub fn fragment_tonemap(
     *output = LottesTonemapper
         .tonemap(sample.truncate(), *params)
         .extend(1.0);
-}
-
-// This is just lifted from
-// https://github.com/termhn/colstodian/blob/f2fb0f55d94644dbb753edd5c01da9a08f0e2d3f/src/tonemap.rs#L187-L220
-// because rust-gpu support is hard.
-
-struct LottesTonemapper;
-
-impl LottesTonemapper {
-    #[inline]
-    fn tonemap_inner(x: f32, params: BakedLottesTonemapperParams) -> f32 {
-        let z = x.powf(params.a);
-        z / (z.powf(params.d) * params.b + params.c)
-    }
-
-    fn tonemap(&self, color: Vec3, params: BakedLottesTonemapperParams) -> Vec3 {
-        let max = color.max_element();
-        let mut ratio = color / max;
-        let tonemapped_max = Self::tonemap_inner(max, params);
-
-        ratio = ratio.powf(params.saturation / params.cross_saturation);
-        ratio = ratio.lerp(Vec3::ONE, tonemapped_max.powf(params.crosstalk));
-        ratio = ratio.powf(params.cross_saturation);
-
-        (ratio * tonemapped_max).min(Vec3::ONE).max(Vec3::ZERO)
-    }
-}
-
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct BakedLottesTonemapperParams {
-    a: f32,
-    b: f32,
-    c: f32,
-    d: f32,
-    crosstalk: f32,
-    saturation: f32,
-    cross_saturation: f32,
 }

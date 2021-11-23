@@ -60,6 +60,7 @@ dependencies = [
 [[package]]
 name = "ash-opinionated-abstractions"
 version = "0.1.0"
+source = "git+https://github.com/expenses/ash-opinionated-abstractions#2f524e70a743d47a716b35e6dadc4873df618846"
 dependencies = [
  "anyhow",
  "ash",
@@ -129,6 +130,12 @@ name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
+
+[[package]]
+name = "c_str_macro"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6d44951c469019e225e7667d799052f67fb8ea358d086878f3582b39f0de5e5"
 
 [[package]]
 name = "calloop"
@@ -575,6 +582,7 @@ dependencies = [
 [[package]]
 name = "gltf"
 version = "0.16.0"
+source = "git+https://github.com/expenses/gltf?branch=more-extensions#032493811c34f10197728c422b00483bf74ca7cc"
 dependencies = [
  "base64",
  "byteorder",
@@ -586,6 +594,7 @@ dependencies = [
 [[package]]
 name = "gltf-derive"
 version = "0.16.0"
+source = "git+https://github.com/expenses/gltf?branch=more-extensions#032493811c34f10197728c422b00483bf74ca7cc"
 dependencies = [
  "inflections",
  "proc-macro2",
@@ -596,6 +605,7 @@ dependencies = [
 [[package]]
 name = "gltf-json"
 version = "0.16.0"
+source = "git+https://github.com/expenses/gltf?branch=more-extensions#032493811c34f10197728c422b00483bf74ca7cc"
 dependencies = [
  "gltf-derive",
  "serde",
@@ -901,6 +911,7 @@ dependencies = [
  "ash",
  "ash-opinionated-abstractions",
  "ash-window",
+ "c_str_macro",
  "colstodian",
  "dolly",
  "glam 0.19.0",
@@ -1437,6 +1448,7 @@ dependencies = [
 [[package]]
 name = "tracy-client"
 version = "0.12.6"
+source = "git+https://github.com/expenses/rust_tracy_client?branch=dodgy-high-level-bindings#298159293445ca60d19b4618d2e4b5c72502bf8e"
 dependencies = [
  "tracy-client-sys",
 ]
@@ -1444,6 +1456,7 @@ dependencies = [
 [[package]]
 name = "tracy-client-sys"
 version = "0.16.1"
+source = "git+https://github.com/expenses/rust_tracy_client?branch=dodgy-high-level-bindings#298159293445ca60d19b4618d2e4b5c72502bf8e"
 dependencies = [
  "cc",
 ]

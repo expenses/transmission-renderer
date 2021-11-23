@@ -843,13 +843,13 @@ fn main() -> anyhow::Result<()> {
                             )?;
 
                             device.wait_for_fences(&[fence], true, u64::MAX)?;
-
-                            descriptor_sets.update_framebuffers(
-                                &device,
-                                &hdr_framebuffer,
-                                &opaque_sampled_hdr_framebuffer,
-                            );
                         }
+
+                        descriptor_sets.update_framebuffers(
+                            &device,
+                            &hdr_framebuffer,
+                            &opaque_sampled_hdr_framebuffer,
+                        );
 
                         swapchain_image_framebuffers = create_swapchain_image_framebuffers(
                             &device,
@@ -1649,14 +1649,6 @@ fn create_swapchain_image_framebuffers(
         .collect()
 }
 
-#[derive(Default)]
-struct KeyboardState {
-    forwards: bool,
-    right: bool,
-    backwards: bool,
-    left: bool,
-}
-
 fn create_depthbuffer(
     width: u32,
     height: u32,
@@ -1948,6 +1940,14 @@ unsafe fn cast_slice<T: Castable>(slice: &[T]) -> &[u8] {
 
 unsafe fn bytes_of<T: Castable>(reference: &T) -> &[u8] {
     std::slice::from_raw_parts(reference as *const T as *const u8, std::mem::size_of::<T>())
+}
+
+#[derive(Default)]
+struct KeyboardState {
+    forwards: bool,
+    right: bool,
+    backwards: bool,
+    left: bool,
 }
 
 const fn dispatch_count(num: u32, group_size: u32) -> u32 {

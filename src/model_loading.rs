@@ -7,7 +7,7 @@ use std::path::PathBuf;
 enum FormatRequirement {
     LinearSrgb,
     EncodedSrgb,
-    DontCare
+    DontCare,
 }
 
 pub(crate) fn load_gltf(
@@ -141,6 +141,9 @@ pub(crate) fn load_gltf(
             model_buffers
                 .primitives
                 .push(shared_structs::PrimitiveInfo {
+                    // todo: write an implementation of welzl for this instead of
+                    // using the bounding box.
+                    // https://en.wikipedia.org/wiki/Smallest-circle_problem
                     packed_bounding_sphere: {
                         let bbox = primitive.bounding_box();
                         let min = Vec3::from(bbox.min);
@@ -165,7 +168,9 @@ pub(crate) fn load_gltf(
 
     for (i, material) in gltf.materials().enumerate() {
         let mut load_optional_texture =
-            |optional_texture_info: Option<gltf::texture::Texture>, name: &str, format_requirement: FormatRequirement| {
+            |optional_texture_info: Option<gltf::texture::Texture>,
+             name: &str,
+             format_requirement: FormatRequirement| {
                 match optional_texture_info {
                     Some(info) => {
                         let image_index = info.source().index();
@@ -174,19 +179,25 @@ pub(crate) fn load_gltf(
                             FormatRequirement::DontCare => {
                                 // try loading a cached encoded srgb texture
                                 if let Some(id) = image_index_to_id.get(&(image_index, true)) {
-                                    println!("reusing image {} (encoded srgb: don't care)", image_index);
+                                    println!(
+                                        "reusing image {} (encoded srgb: don't care)",
+                                        image_index
+                                    );
                                     return Ok(*id as i32);
                                 }
 
                                 false
-                            },
+                            }
                             FormatRequirement::EncodedSrgb => true,
                             FormatRequirement::LinearSrgb => false,
                         };
 
                         let id = match image_index_to_id.entry((image_index, is_encoded_srgb)) {
                             std::collections::hash_map::Entry::Occupied(occupied) => {
-                                println!("reusing image {} (encoded srgb: {})", image_index, is_encoded_srgb);
+                                println!(
+                                    "reusing image {} (encoded srgb: {})",
+                                    image_index, is_encoded_srgb
+                                );
                                 *occupied.get()
                             }
                             std::collections::hash_map::Entry::Vacant(vacancy) => {

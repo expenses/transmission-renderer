@@ -422,7 +422,9 @@ pub fn basic_brdf(params: BasicBrdfParams) -> BrdfResult {
 }
 
 fn calculate_combined_f0(material: MaterialParams) -> Vec3 {
-    let dielectric_specular_f0 = material.index_of_refraction.to_dielectric_f0() * material.specular_colour * material.specular_factor;
+    let dielectric_specular_f0 = material.index_of_refraction.to_dielectric_f0()
+        * material.specular_colour
+        * material.specular_factor;
     dielectric_specular_f0.lerp(material.diffuse_colour, material.metallic)
 }
 

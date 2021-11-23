@@ -1,8 +1,8 @@
 use crate::descriptor_sets::DescriptorSetLayouts;
 use crate::render_passes::RenderPasses;
 use ash::vk;
+use c_str_macro::c_str;
 use glam::{Vec2, Vec3};
-use std::ffi::CString;
 
 pub struct Pipelines {
     pub normal: vk::Pipeline,
@@ -29,77 +29,62 @@ impl Pipelines {
     ) -> anyhow::Result<Self> {
         let _span = tracy_client::span!("Pipelines::new");
 
-        let vertex_instanced_entry_point = CString::new("vertex_instanced")?;
-        let vertex_instanced_with_scale_entry_point = CString::new("vertex_instanced_with_scale")?;
-        let fragment_entry_point = CString::new("fragment")?;
-        let vertex_depth_pre_pass_entry_point = CString::new("depth_pre_pass_instanced")?;
-        let vertex_depth_pre_pass_alpha_clip_entry_point =
-            CString::new("depth_pre_pass_vertex_alpha_clip")?;
-        let fragment_depth_pre_pass_alpha_clip_entry_point =
-            CString::new("depth_pre_pass_alpha_clip")?;
-        let fragment_transmission_entry_point = CString::new("fragment_transmission")?;
-        let fullscreen_tri_entry_point = CString::new("fullscreen_tri")?;
-        let fragment_tonemap_entry_point = CString::new("fragment_tonemap")?;
-
-        let frustum_culling_entry_point = CString::new("frustum_culling")?;
-        let demultiplex_draws_entry_point = CString::new("demultiplex_draws")?;
-
         let module = ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), device)?;
 
         let fragment_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(&fragment_entry_point);
+            .name(c_str!("fragment"));
 
         let fragment_transmission_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(&fragment_transmission_entry_point);
+            .name(c_str!("fragment_transmission"));
 
         let vertex_instanced_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
-            .name(&vertex_instanced_entry_point);
+            .name(c_str!("vertex_instanced"));
 
         let vertex_instanced_with_scale_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
-            .name(&vertex_instanced_with_scale_entry_point);
+            .name(c_str!("vertex_instanced_with_scale"));
 
         let vertex_depth_pre_pass_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
-            .name(&vertex_depth_pre_pass_entry_point);
+            .name(c_str!("depth_pre_pass_instanced"));
 
         let vertex_depth_pre_pass_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
-            .name(&vertex_depth_pre_pass_alpha_clip_entry_point);
+            .name(c_str!("depth_pre_pass_vertex_alpha_clip"));
 
         let fragment_depth_pre_pass_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(&fragment_depth_pre_pass_alpha_clip_entry_point);
+            .name(c_str!("depth_pre_pass_alpha_clip"));
 
         let fullscreen_tri_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::VERTEX)
-            .name(&fullscreen_tri_entry_point);
+            .name(c_str!("fullscreen_tri"));
 
         let fragment_tonemap_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(&fragment_tonemap_entry_point);
+            .name(c_str!("fragment_tonemap"));
 
         let frustum_culling_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::COMPUTE)
-            .name(&frustum_culling_entry_point);
+            .name(c_str!("frustum_culling"));
 
         let demultiplex_draws_stage = vk::PipelineShaderStageCreateInfo::builder()
             .module(module)
             .stage(vk::ShaderStageFlags::COMPUTE)
-            .name(&demultiplex_draws_entry_point);
+            .name(c_str!("demultiplex_draws"));
 
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
