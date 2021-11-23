@@ -1282,7 +1282,11 @@ fn main() -> anyhow::Result<()> {
                         {
                             let _profiling_zone = profiling_zone!("opaque framebuffer mipchain", vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::BOTTOM_OF_PIPE, &device, command_buffer, &mut profiling_ctx);
 
-                            ash_abstractions::generate_mips(&device, command_buffer, opaque_sampled_hdr_framebuffer.image, extent.width as i32, extent.height as i32, opaque_mip_levels, &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer], vk_sync::ImageLayout::Optimal);
+                            ash_abstractions::generate_mips(&device, command_buffer, opaque_sampled_hdr_framebuffer.image,
+                                extent.width as i32, extent.height as i32, opaque_mip_levels,
+                                &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+                                vk_sync::ImageLayout::Optimal
+                            );
                         }
 
                         device.cmd_begin_render_pass(
@@ -2060,7 +2064,7 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                //.initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
                 .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // HDR framebuffers
             *vk::AttachmentDescription::builder()
@@ -2068,7 +2072,8 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                //.initial_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                // No initial layout as the framebuffer is either `COLOR_ATTACHMENT_OPTIMAL` (first frame)
+                // or `SHADER_READ_ONLY_OPTIMAL` (all the other frames, as the output from the transmission pass.)
                 .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
             *vk::AttachmentDescription::builder()
                 .format(vk::Format::R16G16B16A16_SFLOAT)
@@ -2108,15 +2113,9 @@ impl RenderPasses {
                 .depth_stencil_attachment(&depth_attachment_ref),
         ];
 
+        // https://themaister.net/blog/2019/08/14/yet-another-blog-explaining-vulkan-synchronization/
+        // says I can ignore external subpass dependencies.
         let draw_subpass_dependencices = [
-            *vk::SubpassDependency::builder()
-                .src_subpass(vk::SUBPASS_EXTERNAL)
-                .dst_subpass(0)
-                .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
-                .src_access_mask(vk::AccessFlags::empty())
-                // We use late and not early fragment tests as we handle alpha clipping in the depth pre pass.
-                .dst_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
-                .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
             *vk::SubpassDependency::builder()
                 .src_subpass(0)
                 .dst_subpass(1)
@@ -2131,13 +2130,6 @@ impl RenderPasses {
                 .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
                 .dst_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
                 .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
-            *vk::SubpassDependency::builder()
-                .src_subpass(2)
-                .dst_subpass(vk::SUBPASS_EXTERNAL)
-                .src_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
-                .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
-                .dst_stage_mask(vk::PipelineStageFlags::TRANSFER)
-                .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
         ];
 
         let draw_render_pass = unsafe {
@@ -2171,13 +2163,7 @@ impl RenderPasses {
                 .color_attachments(&swapchain_image_ref),
         ];
 
-        let tonemap_subpass_dependencies = [*vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
+        let tonemap_subpass_dependencies = [];
 
         let tonemap_render_pass = unsafe {
             device.create_render_pass(
@@ -2221,13 +2207,7 @@ impl RenderPasses {
             .color_attachments(&hdr_framebuffer_ref)
             .depth_stencil_attachment(&depth_attachment_ref)];
 
-        let transmission_subpass_dependency = [*vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)];
+        let transmission_subpass_dependency = [];
 
         let transmission_render_pass = unsafe {
             device.create_render_pass(
@@ -2700,7 +2680,7 @@ fn load_gltf(
                                 let texture = load_texture_from_gltf(
                                     image,
                                     srgb,
-                                    &format!("{} {} {}", name, name, i),
+                                    &format!("{} {}", name, i),
                                     init_resources,
                                     buffers_to_cleanup,
                                 )?;
@@ -2951,8 +2931,8 @@ impl NodeTree {
         for node in nodes {
             let (translation, rotation, scale) = node.transform().decomposed();
 
-            assert_eq!(scale[0], scale[1]);
-            assert_eq!(scale[0], scale[2]);
+            assert!((scale[0] - scale[1]).abs() <= std::f32::EPSILON);
+            assert!((scale[0] - scale[2]).abs() <= std::f32::EPSILON);
 
             inner[node.index()].0 = Similarity {
                 translation: translation.into(),
