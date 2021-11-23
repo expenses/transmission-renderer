@@ -11,7 +11,7 @@ enum FormatRequirement {
 }
 
 pub(crate) fn load_gltf(
-    name: &str,
+    path: &PathBuf,
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
@@ -20,11 +20,13 @@ pub(crate) fn load_gltf(
     base_transform: Similarity,
     roughness_override: Option<f32>,
 ) -> anyhow::Result<()> {
+    let name = path.file_name().unwrap().to_str().unwrap();
+
     let _span = tracy_client::span!(name);
 
     let importing_gltf_span = tracy_client::span!("Importing gltf");
 
-    let (gltf, buffers, mut images) = gltf::import(path_for_gltf_model(name))?;
+    let (gltf, buffers, mut images) = gltf::import(path)?;
 
     drop(importing_gltf_span);
 
@@ -378,7 +380,7 @@ fn load_texture_from_gltf(
     Ok(image)
 }
 
-fn path_for_gltf_model(model: &str) -> PathBuf {
+pub fn path_for_gltf_model(model: &str) -> PathBuf {
     let mut path = PathBuf::new();
     path.push("glTF-Sample-Models");
     path.push("2.0");

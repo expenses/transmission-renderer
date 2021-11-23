@@ -31,9 +31,11 @@ USAGE:
     transmission-renderer [FLAGS] [OPTIONS] <gltf-sample-model-name>
 
 FLAGS:
-    -h, --help         Prints help information
-        --log-leaks    Log allocator leaks on shutdown. Off by default because it makes panics hard to debug
-    -V, --version      Prints version information
+        --external-model    Render a model external to the glTF-Sample-Models directory, in which case the full path
+                            needs to be specified
+    -h, --help              Prints help information
+        --log-leaks         Log allocator leaks on shutdown. Off by default because it makes panics hard to debug
+    -V, --version           Prints version information
 
 OPTIONS:
         --roughness-override <roughness-override>

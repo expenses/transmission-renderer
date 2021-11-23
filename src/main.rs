@@ -55,6 +55,9 @@ struct Opt {
     /// Log allocator leaks on shutdown. Off by default because it makes panics hard to debug.
     #[structopt(long)]
     log_leaks: bool,
+    /// Render a model external to the glTF-Sample-Models directory, in which case the full path needs to be specified.
+    #[structopt(long)]
+    external_model: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -280,7 +283,7 @@ fn main() -> anyhow::Result<()> {
     let mut max_draw_counts = DrawCounts::default();
 
     load_gltf(
-        "Sponza",
+        &model_loading::path_for_gltf_model("Sponza"),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -291,7 +294,11 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     load_gltf(
-        &opt.gltf_sample_model_name,
+        &if opt.external_model {
+            std::path::PathBuf::from(&opt.gltf_sample_model_name)
+        } else {
+            model_loading::path_for_gltf_model(&opt.gltf_sample_model_name)
+        },
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
