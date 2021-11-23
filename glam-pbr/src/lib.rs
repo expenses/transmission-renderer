@@ -258,12 +258,10 @@ fn get_volume_transmission_ray(
     view: View,
     thickness: f32,
     index_of_refraction: IndexOfRefraction,
-    scale: f32,
+    model_scale: f32,
 ) -> (Vec3, f32) {
     let refraction = refract(-view.0, normal.0, index_of_refraction);
-    // todo: work out a better instancing scheme so we don't have to hardcode this.
-    let gltf_primitive_scale = 1.0;
-    let length = thickness * scale * gltf_primitive_scale;
+    let length = thickness * model_scale;
     (refraction.normalize() * length, length)
 }
 
@@ -334,7 +332,7 @@ pub fn ibl_volume_refraction<
     let attenuated_colour = apply_volume_attenuation(
         transmitted_light,
         ray_length,
-        attenuation_distance * model_scale,
+        attenuation_distance,
         attenuation_colour,
     );
 

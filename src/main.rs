@@ -290,7 +290,7 @@ fn main() -> anyhow::Result<()> {
     let mut max_draw_counts = DrawCounts::default();
 
     load_gltf(
-        &std::env::args().nth(1).unwrap(),
+        "Sponza",
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -300,7 +300,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     load_gltf(
-        &std::env::args().nth(2).unwrap(),
+        &std::env::args().nth(1).unwrap(),
         &mut init_resources,
         &mut image_manager,
         &mut buffers_to_cleanup,
@@ -2789,7 +2789,7 @@ fn load_gltf(
                 .unwrap_or(0.0),
             attenuation_distance: material
                 .volume()
-                .map(|volume| volume.attenuation_distance())
+                .map(|volume| volume.attenuation_distance() * base_transform.scale)
                 .unwrap_or(f32::INFINITY),
             attenuation_colour: material
                 .volume()
