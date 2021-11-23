@@ -3,6 +3,8 @@
 use core::ops::Mul;
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
 pub struct PushConstants {
     pub proj_view: Mat4,
     pub view_position: Vec3A,

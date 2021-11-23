@@ -1,5 +1,5 @@
-use ash::vk;
 use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
+use ash::vk;
 
 pub struct RenderPasses {
     pub draw: vk::RenderPass,

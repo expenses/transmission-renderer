@@ -1,8 +1,8 @@
+use crate::{mip_levels_for_size, ModelStagingBuffers};
 use ash::vk;
 use glam::{Quat, Vec2, Vec3};
 use shared_structs::{DrawCounts, Instance, Similarity};
 use std::path::PathBuf;
-use crate::{ModelStagingBuffers, mip_levels_for_size};
 
 pub(crate) fn load_gltf(
     name: &str,
@@ -288,8 +288,15 @@ pub(crate) fn load_gltf(
                 .map(|volume| volume.attenuation_color())
                 .unwrap_or([1.0; 3])
                 .into(),
-            specular_factor: material.specular().map(|specular| specular.specular_factor()).unwrap_or(1.0),
-            specular_colour_factor: material.specular().map(|specular| specular.specular_color_factor()).unwrap_or([1.0; 3]).into(),
+            specular_factor: material
+                .specular()
+                .map(|specular| specular.specular_factor())
+                .unwrap_or(1.0),
+            specular_colour_factor: material
+                .specular()
+                .map(|specular| specular.specular_color_factor())
+                .unwrap_or([1.0; 3])
+                .into(),
         });
     }
 

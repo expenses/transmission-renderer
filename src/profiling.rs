@@ -171,6 +171,16 @@ impl ProfilingContext {
 
 #[macro_export]
 macro_rules! profiling_zone {
+    ($name:expr, $device:expr, $command_buffer:expr, $context:expr) => {
+        profiling_zone!(
+            $name,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            $device,
+            $command_buffer,
+            $context
+        )
+    };
     ($name:expr, $start_stage:expr, $end_stage:expr, $device:expr, $command_buffer:expr, $context:expr) => {{
         struct S;
         let func_name = std::any::type_name::<S>();
