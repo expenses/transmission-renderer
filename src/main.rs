@@ -2744,6 +2744,23 @@ fn load_gltf(
                     "volume",
                     false,
                 )?,
+                // todo: use a srgb/linear/dontcare enum for better texture re-use (textures that use alpha channels dont care about srgb).
+                specular: load_optional_texture(
+                    material
+                        .specular()
+                        .and_then(|specular| specular.specular_texture())
+                        .map(|info| info.texture()),
+                    "specular",
+                    false,
+                )?,
+                specular_colour: load_optional_texture(
+                    material
+                        .specular()
+                        .and_then(|specular| specular.specular_color_texture())
+                        .map(|info| info.texture()),
+                    "specular colour",
+                    false,
+                )?,
             },
             metallic_factor: pbr.metallic_factor(),
             roughness_factor: pbr.roughness_factor(),
@@ -2776,6 +2793,8 @@ fn load_gltf(
                 .map(|volume| volume.attenuation_color())
                 .unwrap_or([1.0; 3])
                 .into(),
+            specular_factor: material.specular().map(|specular| specular.specular_factor()).unwrap_or(1.0),
+            specular_colour_factor: material.specular().map(|specular| specular.specular_color_factor()).unwrap_or([1.0; 3]).into(),
         });
     }
 
