@@ -53,9 +53,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.45"
+version = "1.0.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
+checksum = "62e1f47f7dc0422027a4e370dd4548d4d66b26782e513e98dca1e689e058a80e"
 
 [[package]]
 name = "ash"
@@ -63,7 +63,7 @@ version = "0.33.3+1.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc4f1d82f164f838ae413296d1131aa6fa79b917d25bebaa7033d25620c09219"
 dependencies = [
- "libloading 0.7.1",
+ "libloading 0.7.2",
 ]
 
 [[package]]
@@ -354,9 +354,9 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81156fece84ab6a9f2afdb109ce3ae577e42b1228441eded99bd77f627953b1a"
+checksum = "3825b1e8580894917dc4468cb634a1b4e9745fddc854edad72d9c04644c0319f"
 dependencies = [
  "cfg-if 1.0.0",
 ]
@@ -526,7 +526,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac1b7517328c04c2aa68422fc60a41b92208182142ed04a25879c26c8f878794"
 dependencies = [
- "libloading 0.7.1",
+ "libloading 0.7.2",
 ]
 
 [[package]]
@@ -753,9 +753,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.107"
+version = "0.2.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbe5e23404da5b4f555ef85ebed98fb4083e55a00c317800bc2a50ede9f3d219"
+checksum = "8521a1b57e76b1ec69af7599e75e38e7b7fad6610f037db8c79b127201b5d119"
 
 [[package]]
 name = "libloading"
@@ -769,9 +769,9 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0cf036d15402bea3c5d4de17b3fce76b3e4a56ebc1f577be0e7a72f7c607cf0"
+checksum = "afe203d669ec979b7128619bae5a63b7b42e9203c1b29146079ee05e2f604b52"
 dependencies = [
  "cfg-if 1.0.0",
  "winapi",
@@ -934,9 +934,9 @@ dependencies = [
 
 [[package]]
 name = "ndk-sys"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c44922cb3dbb1c70b5e5f443d63b64363a898564d739ba5198e3a9138442868d"
+checksum = "e1bcdd74c20ad5d95aacd60ef9ba40fdf77f767051040541df557b7a9b2a2121"
 
 [[package]]
 name = "nix"
@@ -1326,9 +1326,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.70"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e277c495ac6cd1a01a58d0a0c574568b4d1ddf14f59965c6a58b8d96400b54f3"
+checksum = "063bf466a64011ac24040a49009724ee60a57da1b437617ceb32e53ad61bfb19"
 dependencies = [
  "itoa",
  "ryu",
@@ -1390,7 +1390,7 @@ dependencies = [
 [[package]]
 name = "spirv-std"
 version = "0.4.0-alpha.12"
-source = "git+https://github.com/EmbarkStudios/rust-gpu#c1dd14d86368df660b11e80a4ba16dec5a9b3ee5"
+source = "git+https://github.com/EmbarkStudios/rust-gpu#d789b58b2e3f57bdd1cfc30ae4fed98e736b9577"
 dependencies = [
  "bitflags",
  "glam 0.19.0",
@@ -1402,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "spirv-std-macros"
 version = "0.4.0-alpha.12"
-source = "git+https://github.com/EmbarkStudios/rust-gpu#c1dd14d86368df660b11e80a4ba16dec5a9b3ee5"
+source = "git+https://github.com/EmbarkStudios/rust-gpu#d789b58b2e3f57bdd1cfc30ae4fed98e736b9577"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1413,7 +1413,7 @@ dependencies = [
 [[package]]
 name = "spirv-types"
 version = "0.4.0-alpha.12"
-source = "git+https://github.com/EmbarkStudios/rust-gpu#c1dd14d86368df660b11e80a4ba16dec5a9b3ee5"
+source = "git+https://github.com/EmbarkStudios/rust-gpu#d789b58b2e3f57bdd1cfc30ae4fed98e736b9577"
 
 [[package]]
 name = "strsim"
@@ -1522,7 +1522,7 @@ dependencies = [
 [[package]]
 name = "tracy-client"
 version = "0.12.6"
-source = "git+https://github.com/expenses/rust_tracy_client?branch=dodgy-high-level-bindings#298159293445ca60d19b4618d2e4b5c72502bf8e"
+source = "git+https://github.com/expenses/rust_tracy_client?branch=dodgy-high-level-bindings#dd4b750dcd87ceda9d065c8cece374d73e3fd702"
 dependencies = [
  "tracy-client-sys",
 ]
@@ -1530,7 +1530,7 @@ dependencies = [
 [[package]]
 name = "tracy-client-sys"
 version = "0.16.1"
-source = "git+https://github.com/expenses/rust_tracy_client?branch=dodgy-high-level-bindings#298159293445ca60d19b4618d2e4b5c72502bf8e"
+source = "git+https://github.com/expenses/rust_tracy_client?branch=dodgy-high-level-bindings#dd4b750dcd87ceda9d065c8cece374d73e3fd702"
 dependencies = [
  "cc",
 ]
