@@ -117,19 +117,6 @@ impl Mul<Vec3> for Similarity {
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default)]
-pub struct DrawCounts {
-    pub opaque: u32,
-    pub alpha_clip: u32,
-    pub transmission: u32,
-    pub transmission_alpha_clip: u32,
-}
-
-impl DrawCounts {
-    pub const COUNT: usize = core::mem::size_of::<Self>() / 4;
-}
-
 // GPU Culling architecture:
 //
 // * instances - as usual. References the primitive being drawn.
@@ -142,6 +129,7 @@ impl DrawCounts {
 pub struct Instance {
     pub transform: PackedSimilarity,
     pub primitive_id: u32,
+    pub material_id: u32,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]

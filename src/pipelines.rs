@@ -143,7 +143,6 @@ impl Pipelines {
             &[ash_abstractions::VertexAttribute::Vec3],
             &[ash_abstractions::VertexAttribute::Vec3],
             &[ash_abstractions::VertexAttribute::Vec2],
-            &[ash_abstractions::VertexAttribute::Uint],
         ]);
 
         let full_vertex_bindings = [
@@ -156,9 +155,6 @@ impl Pipelines {
             *vk::VertexInputBindingDescription::builder()
                 .binding(2)
                 .stride(std::mem::size_of::<Vec2>() as u32),
-            *vk::VertexInputBindingDescription::builder()
-                .binding(3)
-                .stride(std::mem::size_of::<u32>() as u32),
         ];
 
         let normal_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -240,7 +236,6 @@ impl Pipelines {
                 &[ash_abstractions::VertexAttribute::Vec3],
                 &[],
                 &[ash_abstractions::VertexAttribute::Vec2],
-                &[ash_abstractions::VertexAttribute::Uint],
             ]),
             vertex_bindings: &[
                 *vk::VertexInputBindingDescription::builder()
@@ -249,9 +244,6 @@ impl Pipelines {
                 *vk::VertexInputBindingDescription::builder()
                     .binding(2)
                     .stride(std::mem::size_of::<Vec2>() as u32),
-                *vk::VertexInputBindingDescription::builder()
-                    .binding(3)
-                    .stride(std::mem::size_of::<u32>() as u32),
             ],
             colour_attachments: &[],
         };

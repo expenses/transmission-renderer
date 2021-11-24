@@ -19,7 +19,7 @@ use glam_pbr::{
     PerceptualRoughness, View,
 };
 use shared_structs::{
-    CullingPushConstants, DrawCounts, Instance, MaterialInfo, PointLight,
+    CullingPushConstants, Instance, MaterialInfo, PointLight,
     PrimitiveInfo, PushConstants, SunUniform,
 };
 use spirv_std::{
@@ -234,20 +234,20 @@ pub fn depth_pre_pass_alpha_clip(
 pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
     uv: Vec2,
-    material: u32,
     #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
     out_uv: &mut Vec2,
-    out_material: &mut u32,
+    out_material_id: &mut u32,
 ) {
-    let similarity = index(instances, instance_index).transform.unpack();
+    let instance = index(instances, instance_index);
+    let similarity = instance.transform.unpack();
 
     let position = similarity * position;
 
     *out_uv = uv;
-    *out_material = material;
+    *out_material_id = instance.material_id;
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
@@ -271,24 +271,24 @@ pub fn vertex_instanced(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
-    material: u32,
     #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
     out_uv: &mut Vec2,
-    out_material: &mut u32,
+    out_material_id: &mut u32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let similarity = index(instances, instance_index).transform.unpack();
+    let instance = index(instances, instance_index);
+    let similarity = instance.transform.unpack();
 
     let position = similarity * position;
 
     *out_position = position;
     *out_normal = similarity.rotation * normal;
     *out_uv = uv;
-    *out_material = material;
+    *out_material_id = instance.material_id;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
@@ -298,25 +298,25 @@ pub fn vertex_instanced_with_scale(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
-    material: u32,
     #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
     out_uv: &mut Vec2,
-    out_material: &mut u32,
+    out_material_id: &mut u32,
     out_scale: &mut f32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
-    let similarity = index(instances, instance_index).transform.unpack();
+    let instance = index(instances, instance_index);
+    let similarity = instance.transform.unpack();
 
     let position = similarity * position;
 
     *out_position = position;
     *out_normal = similarity.rotation * normal;
     *out_uv = uv;
-    *out_material = material;
+    *out_material_id = instance.material_id;
     *out_scale = similarity.scale;
 
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
@@ -370,11 +370,13 @@ pub fn frustum_culling(
     atomic_i_increment(instance_count);
 }
 
+const NUM_DRAW_BUFFERS: usize = 4;
+
 #[spirv(compute(threads(64)))]
 pub fn demultiplex_draws(
     #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &[PrimitiveInfo],
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] instance_counts: &[u32],
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] draw_counts: &mut [u32; DrawCounts::COUNT],
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] draw_counts: &mut [u32; NUM_DRAW_BUFFERS],
     #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] opaque_draws: &mut [vk::DrawIndexedIndirectCommand],
     #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
     #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] transmission_draws: &mut [vk::DrawIndexedIndirectCommand],

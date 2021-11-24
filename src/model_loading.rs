@@ -1,7 +1,7 @@
-use crate::{mip_levels_for_size, ModelStagingBuffers};
+use crate::{mip_levels_for_size, ModelStagingBuffers, MaxDrawCounts};
 use ash::vk;
 use glam::{Quat, Vec2, Vec3};
-use shared_structs::{DrawCounts, Instance, Similarity};
+use shared_structs::{Instance, Similarity};
 use std::path::PathBuf;
 
 enum FormatRequirement {
@@ -16,7 +16,7 @@ pub(crate) fn load_gltf(
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
     model_buffers: &mut ModelStagingBuffers,
-    max_draw_counts: &mut DrawCounts,
+    max_draw_counts: &mut MaxDrawCounts,
     base_transform: Similarity,
     roughness_override: Option<f32>,
 ) -> anyhow::Result<()> {
@@ -116,9 +116,6 @@ pub(crate) fn load_gltf(
             let num_current_vertices = model_buffers.position.len() - num_existing_vertices;
 
             model_buffers
-                .material_id
-                .extend(std::iter::repeat(material_id as u32).take(num_current_vertices));
-            model_buffers
                 .normal
                 .extend(reader.read_normals().unwrap().map(Vec3::from));
 
@@ -139,6 +136,7 @@ pub(crate) fn load_gltf(
             model_buffers.instances.push(Instance {
                 transform: transform.pack(),
                 primitive_id: model_buffers.primitives.len() as u32,
+                material_id: material_id as u32,
             });
 
             model_buffers

@@ -11,7 +11,7 @@ use winit::window::Fullscreen;
 use structopt::StructOpt;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
-use shared_structs::{DrawCounts, Instance, PointLight, PushConstants, Similarity};
+use shared_structs::{Instance, PointLight, PushConstants, Similarity};
 
 mod descriptor_sets;
 mod model_loading;
@@ -280,7 +280,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut model_staging_buffers = ModelStagingBuffers::default();
-    let mut max_draw_counts = DrawCounts::default();
+    let mut max_draw_counts = MaxDrawCounts::default();
 
     load_gltf(
         &model_loading::path_for_gltf_model("Sponza"),
@@ -1336,9 +1336,8 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             model_buffers.position.buffer,
             model_buffers.normal.buffer,
             model_buffers.uv.buffer,
-            model_buffers.material_id.buffer,
         ],
-        &[0, 0, 0, 0],
+        &[0, 0, 0],
     );
 
     device.cmd_bind_index_buffer(
@@ -1775,12 +1774,12 @@ struct DrawBuffers {
 
 impl DrawBuffers {
     fn new(
-        max_draw_counts: DrawCounts,
+        max_draw_counts: MaxDrawCounts,
         init_resources: &mut ash_abstractions::InitResources,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             draw_counts_buffer: ash_abstractions::Buffer::new_of_size(
-                std::mem::size_of::<DrawCounts>() as u64,
+                std::mem::size_of::<MaxDrawCounts>() as u64,
                 "draw counts",
                 vk::BufferUsageFlags::INDIRECT_BUFFER
                     | vk::BufferUsageFlags::STORAGE_BUFFER
@@ -1841,7 +1840,6 @@ struct ModelStagingBuffers {
     position: Vec<Vec3>,
     normal: Vec<Vec3>,
     uv: Vec<Vec2>,
-    material_id: Vec<u32>,
     index: Vec<u32>,
     // storage buffers
     instances: Vec<Instance>,
@@ -1870,12 +1868,6 @@ impl ModelStagingBuffers {
             uv: ash_abstractions::Buffer::new(
                 unsafe { cast_slice(&self.uv) },
                 "uv buffer",
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                init_resources,
-            )?,
-            material_id: ash_abstractions::Buffer::new(
-                unsafe { cast_slice(&self.material_id) },
-                "material buffer",
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 init_resources,
             )?,
@@ -1911,7 +1903,6 @@ struct ModelBuffers {
     position: ash_abstractions::Buffer,
     normal: ash_abstractions::Buffer,
     uv: ash_abstractions::Buffer,
-    material_id: ash_abstractions::Buffer,
     index: ash_abstractions::Buffer,
     // storage buffers
     instances: ash_abstractions::Buffer,
@@ -1928,7 +1919,6 @@ impl ModelBuffers {
         self.position.cleanup(device, allocator)?;
         self.normal.cleanup(device, allocator)?;
         self.uv.cleanup(device, allocator)?;
-        self.material_id.cleanup(device, allocator)?;
         self.index.cleanup(device, allocator)?;
         self.instances.cleanup(device, allocator)?;
         self.materials.cleanup(device, allocator)?;
@@ -1954,7 +1944,7 @@ impl Castable for shared_structs::PointLight {}
 impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::SunUniform {}
 impl Castable for shared_structs::PushConstants {}
-impl Castable for DrawCounts {}
+impl Castable for MaxDrawCounts {}
 impl Castable for shared_structs::CullingPushConstants {}
 impl Castable for shared_structs::PrimitiveInfo {}
 impl Castable for colstodian::tonemap::BakedLottesTonemapperParams {}
@@ -1980,4 +1970,12 @@ struct KeyboardState {
 
 const fn dispatch_count(num: u32, group_size: u32) -> u32 {
     ((num - 1) / group_size) + 1
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct MaxDrawCounts {
+    opaque: u32,
+    alpha_clip: u32,
+    transmission: u32,
+    transmission_alpha_clip: u32,
 }
