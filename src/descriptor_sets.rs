@@ -3,6 +3,7 @@ use ash::vk;
 
 pub struct DescriptorSetLayouts {
     pub main: vk::DescriptorSetLayout,
+    pub instance_buffer: vk::DescriptorSetLayout,
     pub hdr_framebuffer: vk::DescriptorSetLayout,
     pub frustum_culling: vk::DescriptorSetLayout,
 }
@@ -43,11 +44,6 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::SAMPLER)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(6)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::VERTEX),
                     ]),
                     None,
                 )?
@@ -102,21 +98,29 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(7)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
                     ]),
                     None,
                 )?
             },
+            instance_buffer: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::COMPUTE),
+                    ]),
+                    None,
+                )?
+            }
         })
     }
 }
 
 pub struct DescriptorSets {
     pub main: vk::DescriptorSet,
+    pub instance_buffer: vk::DescriptorSet,
     pub hdr_framebuffer: vk::DescriptorSet,
     pub opaque_sampled_hdr_framebuffer: vk::DescriptorSet,
     pub frustum_culling: vk::DescriptorSet,
@@ -140,9 +144,9 @@ impl DescriptorSets {
                             .descriptor_count(MAX_IMAGES),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLER)
-                            .descriptor_count(3),
+                            .descriptor_count(2),
                     ])
-                    .max_sets(4),
+                    .max_sets(5),
                 None,
             )
         }?;
@@ -152,6 +156,7 @@ impl DescriptorSets {
                 &vk::DescriptorSetAllocateInfo::builder()
                     .set_layouts(&[
                         layouts.main,
+                        layouts.instance_buffer,
                         layouts.hdr_framebuffer,
                         layouts.hdr_framebuffer,
                         layouts.frustum_culling,
@@ -162,9 +167,10 @@ impl DescriptorSets {
 
         Ok(Self {
             main: descriptor_sets[0],
-            hdr_framebuffer: descriptor_sets[1],
-            opaque_sampled_hdr_framebuffer: descriptor_sets[2],
-            frustum_culling: descriptor_sets[3],
+            instance_buffer: descriptor_sets[1],
+            hdr_framebuffer: descriptor_sets[2],
+            opaque_sampled_hdr_framebuffer: descriptor_sets[3],
+            frustum_culling: descriptor_sets[4],
             _descriptor_pool: descriptor_pool,
         })
     }

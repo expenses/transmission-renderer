@@ -38,14 +38,13 @@ pub fn fragment_transmission(
     #[spirv(flat)] material_id: u32,
     #[spirv(flat)] model_scale: f32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    //#[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
     #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
     #[spirv(descriptor_set = 0, binding = 5)] clamp_sampler: &Sampler,
-    #[spirv(descriptor_set = 1, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 2, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     output: &mut Vec4,
 ) {
     let material = index(materials, material_id);
@@ -141,7 +140,6 @@ pub fn fragment(
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    //#[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
     #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
@@ -234,7 +232,7 @@ pub fn depth_pre_pass_alpha_clip(
 pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
     uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
@@ -254,7 +252,7 @@ pub fn depth_pre_pass_vertex_alpha_clip(
 #[spirv(vertex)]
 pub fn depth_pre_pass_instanced(
     position: Vec3,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
@@ -271,7 +269,7 @@ pub fn vertex_instanced(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
@@ -298,7 +296,7 @@ pub fn vertex_instanced_with_scale(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] instances: &[Instance],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
     out_position: &mut Vec3,
@@ -342,9 +340,9 @@ mod vk {
 
 #[spirv(compute(threads(64)))]
 pub fn frustum_culling(
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] instances: &[Instance],
-    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &[PrimitiveInfo],
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] instance_counts: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] primitives: &[PrimitiveInfo],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] instance_counts: &mut [u32],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
     #[spirv(push_constant)] push_constants: &CullingPushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
@@ -374,13 +372,13 @@ const NUM_DRAW_BUFFERS: usize = 4;
 
 #[spirv(compute(threads(64)))]
 pub fn demultiplex_draws(
-    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] primitives: &[PrimitiveInfo],
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] instance_counts: &[u32],
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] draw_counts: &mut [u32; NUM_DRAW_BUFFERS],
-    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] opaque_draws: &mut [vk::DrawIndexedIndirectCommand],
-    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] transmission_draws: &mut [vk::DrawIndexedIndirectCommand],
-    #[spirv(descriptor_set = 0, binding = 7, storage_buffer)] transmission_alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] primitives: &[PrimitiveInfo],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] instance_counts: &[u32],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] draw_counts: &mut [u32; NUM_DRAW_BUFFERS],
+    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] opaque_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 4, storage_buffer)] alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] transmission_draws: &mut [vk::DrawIndexedIndirectCommand],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] transmission_alpha_clip_draws: &mut [vk::DrawIndexedIndirectCommand],
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
     let draw_id = id.x;
