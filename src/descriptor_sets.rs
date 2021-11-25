@@ -109,11 +109,13 @@ impl DescriptorSetLayouts {
                             .binding(0)
                             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                             .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::COMPUTE),
+                            .stage_flags(
+                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::COMPUTE,
+                            ),
                     ]),
                     None,
                 )?
-            }
+            },
         })
     }
 }

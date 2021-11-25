@@ -1,30 +1,20 @@
 use ash::vk;
+use std::sync::atomic::{AtomicU16, Ordering};
 
 struct TimestampBuffer<const N: usize> {
     timestamps: [i64; N],
-    len: usize,
-}
-
-impl<const N: usize> Default for TimestampBuffer<N> {
-    fn default() -> Self {
-        Self {
-            timestamps: [0; N],
-            len: 0,
-        }
-    }
+    len: AtomicU16,
 }
 
 impl<const N: usize> TimestampBuffer<N> {
-    fn emit(&mut self) {
-        for i in 0..self.len {
+    fn emit(&self) {
+        for i in 0..self.len.load(Ordering::Relaxed) as usize {
             tracy_client::emit_gpu_time(self.timestamps[i], 0, i as u16);
         }
     }
 
-    fn next_id(&mut self) -> usize {
-        let next_id = self.len;
-        self.len += 1;
-        next_id
+    fn next_id(&self) -> u16 {
+        self.len.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -104,7 +94,7 @@ impl QueryPool {
             buffer: TimestampBuffer {
                 timestamps: [0; 4096],
                 // As it contains the initial timestamp.
-                len: 1,
+                len: AtomicU16::new(1),
             },
             pool: self.pool,
             can_reset: true,
@@ -120,13 +110,15 @@ pub struct ProfilingContext {
 
 impl ProfilingContext {
     /// Must be called before using for the first time and between collecting and recording zones. Ideally you call this immediately after starting a command buffer each frame.
-    pub fn reset(&mut self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
+    pub fn reset(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
         if !self.can_reset {
             return;
         }
 
+        let len = self.buffer.len.swap(0, Ordering::Relaxed) as u32;
+
         unsafe {
-            device.cmd_reset_query_pool(command_buffer, self.pool, 0, self.buffer.len as u32);
+            device.cmd_reset_query_pool(command_buffer, self.pool, 0, len);
         }
 
         vk_sync::cmd::pipeline_barrier(
@@ -139,18 +131,18 @@ impl ProfilingContext {
             &[],
             &[],
         );
-
-        self.buffer.len = 0;
     }
 
     // Must be called once per frame outside of a command buffer. Ideally as the last thing per frame.
     pub fn collect(&mut self, device: &ash::Device) -> anyhow::Result<()> {
+        let len = self.buffer.len.load(Ordering::Relaxed);
+
         let res = unsafe {
             device.get_query_pool_results(
                 self.pool,
                 0,
-                self.buffer.len as u32,
-                &mut self.buffer.timestamps[..self.buffer.len],
+                len as u32,
+                &mut self.buffer.timestamps[..len as usize],
                 vk::QueryResultFlags::WAIT | vk::QueryResultFlags::TYPE_64,
             )
         };
@@ -223,10 +215,10 @@ impl ProfilingZone {
         end_stage: vk::PipelineStageFlags,
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
-        context: &mut ProfilingContext,
+        context: &ProfilingContext,
     ) -> Self {
-        let start_query_id = context.buffer.next_id() as u16;
-        let end_query_id = context.buffer.next_id() as u16;
+        let start_query_id = context.buffer.next_id();
+        let end_query_id = context.buffer.next_id();
 
         unsafe {
             device.cmd_write_timestamp(

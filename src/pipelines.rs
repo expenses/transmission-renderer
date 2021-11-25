@@ -89,7 +89,10 @@ impl Pipelines {
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.main, descriptor_set_layouts.instance_buffer])
+                    .set_layouts(&[
+                        descriptor_set_layouts.main,
+                        descriptor_set_layouts.instance_buffer,
+                    ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
@@ -115,7 +118,10 @@ impl Pipelines {
         let frustum_culling_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.frustum_culling, descriptor_set_layouts.instance_buffer])
+                    .set_layouts(&[
+                        descriptor_set_layouts.frustum_culling,
+                        descriptor_set_layouts.instance_buffer,
+                    ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .size(std::mem::size_of::<shared_structs::CullingPushConstants>() as u32)]),

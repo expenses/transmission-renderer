@@ -1,8 +1,8 @@
-use crate::{mip_levels_for_size, ModelStagingBuffers, MaxDrawCounts};
+use crate::{mip_levels_for_size, MaxDrawCounts, ModelStagingBuffers};
 use ash::vk;
 use glam::{Quat, Vec2, Vec3};
 use shared_structs::{Instance, Similarity};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 enum FormatRequirement {
     LinearSrgb,
@@ -11,7 +11,7 @@ enum FormatRequirement {
 }
 
 pub(crate) fn load_gltf(
-    path: &PathBuf,
+    path: &Path,
     init_resources: &mut ash_abstractions::InitResources,
     image_manager: &mut ImageManager,
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
@@ -291,7 +291,7 @@ pub(crate) fn load_gltf(
                 )?,
             },
             metallic_factor: pbr.metallic_factor(),
-            roughness_factor: roughness_override.unwrap_or(pbr.roughness_factor()),
+            roughness_factor: roughness_override.unwrap_or_else(|| pbr.roughness_factor()),
             alpha_clipping_cutoff: material.alpha_cutoff().unwrap_or(0.5),
             diffuse_factor: pbr.base_color_factor().into(),
             emissive_factor: material.emissive_factor().into(),
@@ -452,8 +452,16 @@ impl NodeTree {
         for node in nodes {
             let (translation, rotation, scale) = node.transform().decomposed();
 
-            assert!((scale[0] - scale[1]).abs() <= std::f32::EPSILON * 10.0, "{:?}", scale);
-            assert!((scale[0] - scale[2]).abs() <= std::f32::EPSILON * 10.0, "{:?}", scale);
+            assert!(
+                (scale[0] - scale[1]).abs() <= std::f32::EPSILON * 10.0,
+                "{:?}",
+                scale
+            );
+            assert!(
+                (scale[0] - scale[2]).abs() <= std::f32::EPSILON * 10.0,
+                "{:?}",
+                scale
+            );
 
             inner[node.index()].0 = Similarity {
                 translation: translation.into(),

@@ -5,10 +5,10 @@ use ash::extensions::khr::{Surface as SurfaceLoader, Swapchain as SwapchainLoade
 use ash::vk;
 use ash_abstractions::CStrList;
 use std::ffi::CStr;
+use structopt::StructOpt;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
-use structopt::StructOpt;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
 use shared_structs::{Instance, PointLight, PushConstants, Similarity};
@@ -77,7 +77,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::WindowBuilder::new().with_title("Transmission Renderer").build(&event_loop)?;
+    let window = winit::window::WindowBuilder::new()
+        .with_title("Transmission Renderer")
+        .build(&event_loop)?;
 
     let entry = unsafe { ash::Entry::new() }?;
 
@@ -554,6 +556,14 @@ fn main() -> anyhow::Result<()> {
         )
     }?;
 
+    fn buffer_info(buffer: &ash_abstractions::Buffer) -> [vk::DescriptorBufferInfo; 1] {
+        [vk::DescriptorBufferInfo {
+            buffer: buffer.buffer,
+            range: vk::WHOLE_SIZE,
+            offset: 0,
+        }]
+    }
+
     unsafe {
         device.update_descriptor_sets(
             &[
@@ -561,9 +571,7 @@ fn main() -> anyhow::Result<()> {
                     .dst_set(descriptor_sets.main)
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(lights_buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&lights_buffer)),
                 *image_manager.write_descriptor_set(descriptor_sets.main, 1),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
@@ -574,16 +582,12 @@ fn main() -> anyhow::Result<()> {
                     .dst_set(descriptor_sets.main)
                     .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(model_buffers.materials.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&model_buffers.materials)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
                     .dst_binding(4)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(sun_uniform_buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&sun_uniform_buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
                     .dst_binding(5)
@@ -594,60 +598,44 @@ fn main() -> anyhow::Result<()> {
                     .dst_set(descriptor_sets.instance_buffer)
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(model_buffers.instances.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&model_buffers.instances)),
                 // Frustum culling
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(model_buffers.primitives.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&model_buffers.primitives)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.instance_count_buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&draw_buffers.instance_count_buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(2)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.draw_counts_buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&draw_buffers.draw_counts_buffer)),
                 // frustum buffers
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.opaque.buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&draw_buffers.opaque.buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(4)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.alpha_clip.buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&draw_buffers.alpha_clip.buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(5)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.transmission.buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&draw_buffers.transmission.buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.frustum_culling)
                     .dst_binding(6)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&[*vk::DescriptorBufferInfo::builder()
-                        .buffer(draw_buffers.transmission_alpha_clip.buffer.buffer)
-                        .range(vk::WHOLE_SIZE)]),
+                    .buffer_info(&buffer_info(&draw_buffers.transmission_alpha_clip.buffer)),
             ],
             &[],
         )
@@ -1048,7 +1036,7 @@ struct RecordParams<'a> {
     command_buffer: vk::CommandBuffer,
     pipelines: &'a Pipelines,
     draw_buffers: &'a DrawBuffers,
-    profiling_ctx: &'a mut ProfilingContext,
+    profiling_ctx: &'a ProfilingContext,
     model_buffers: &'a ModelBuffers,
     render_passes: &'a RenderPasses,
     draw_framebuffer: vk::Framebuffer,
@@ -1225,7 +1213,10 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             vk::PipelineBindPoint::COMPUTE,
             pipelines.frustum_culling_pipeline_layout,
             0,
-            &[descriptor_sets.frustum_culling, descriptor_sets.instance_buffer],
+            &[
+                descriptor_sets.frustum_culling,
+                descriptor_sets.instance_buffer,
+            ],
             &[],
         );
 

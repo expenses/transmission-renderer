@@ -5,22 +5,21 @@
     no_std
 )]
 
-mod tonemapping;
 mod asm;
 mod lighting;
+mod tonemapping;
 
-use asm::{GetUnchecked, atomic_i_increment};
-use tonemapping::{LottesTonemapper, BakedLottesTonemapperParams};
-use lighting::{evaluate_lights, evaluate_lights_transmission, calculate_normal, get_material_params, get_emission};
-
-use glam_pbr::{
-    ibl_volume_refraction,
-    IblVolumeRefractionParams,
-    PerceptualRoughness, View,
+use asm::{atomic_i_increment, GetUnchecked};
+use lighting::{
+    calculate_normal, evaluate_lights, evaluate_lights_transmission, get_emission,
+    get_material_params,
 };
+use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
+
+use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
-    CullingPushConstants, Instance, MaterialInfo, PointLight,
-    PrimitiveInfo, PushConstants, SunUniform,
+    CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
+    SunUniform,
 };
 use spirv_std::{
     self as _,
@@ -411,7 +410,7 @@ pub fn demultiplex_draws(
         0 => *index_mut(opaque_draws, non_zero_draw_id) = draw_command,
         1 => *index_mut(alpha_clip_draws, non_zero_draw_id) = draw_command,
         2 => *index_mut(transmission_draws, non_zero_draw_id) = draw_command,
-        _ => *index_mut(transmission_alpha_clip_draws, non_zero_draw_id) = draw_command
+        _ => *index_mut(transmission_alpha_clip_draws, non_zero_draw_id) = draw_command,
     };
 }
 
