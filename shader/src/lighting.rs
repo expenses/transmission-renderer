@@ -5,7 +5,7 @@ use glam_pbr::{
 };
 use shared_structs::{MaterialInfo, PointLight, SunUniform};
 use spirv_std::{
-    glam::{Mat3, Vec2, Vec3, Vec4},
+    glam::{Mat3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
 };
 
@@ -154,8 +154,10 @@ pub(crate) fn get_material_params(
         let sample = texture_sampler.sample(material.textures.metallic_roughness as u32);
 
         // These two are switched!
-        metallic *= sample.z;
-        roughness *= sample.y;
+        let metallic_roughness = sample.zy();
+
+        metallic *= metallic_roughness.x;
+        roughness *= metallic_roughness.y;
     }
 
     let mut specular_colour = Vec3::from(material.specular_colour_factor);

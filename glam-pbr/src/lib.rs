@@ -4,7 +4,7 @@ use core::{
     f32::consts::{FRAC_1_PI, PI},
     ops::Add,
 };
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3, Vec4Swizzles};
 use num_traits::Float;
 
 // Workarounds: can't use f32.lerp, f32.clamp or f32.powi.
@@ -327,7 +327,7 @@ pub fn ibl_volume_refraction<
     let refracted_ray_exit = position + ray;
 
     let device_coords = proj_view_matrix * refracted_ray_exit.extend(1.0);
-    let screen_coords = Vec2::new(device_coords.x, device_coords.y) / device_coords.w;
+    let screen_coords = device_coords.xy() / device_coords.w;
     let texture_coords = (screen_coords + 1.0) / 2.0;
 
     let framebuffer_lod =

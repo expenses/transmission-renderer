@@ -146,87 +146,9 @@ pub struct PrimitiveInfo {
 #[derive(Clone, Copy)]
 pub struct CullingPushConstants {
     pub view: Mat4,
+    // As the frustum planes are symmetrical, we only need some of the data:
+    // https://github.com/zeux/niagara/commit/6db6db6a7f152fe3b7ba310e267d93d3d7c96ef3
+    pub frustum_x_xz: Vec2,
+    pub frustum_y_yz: Vec2,
     pub z_near: f32,
-}
-
-pub fn cull(
-    packed_bounding_sphere: Vec4,
-    transform: Similarity,
-    push_constants: CullingPushConstants,
-) -> bool {
-    let mut center = packed_bounding_sphere.truncate();
-    center = transform * center;
-    center = (push_constants.view * center.extend(1.0)).truncate();
-
-    let mut radius = packed_bounding_sphere.w;
-    radius *= transform.scale;
-
-    // in the view, +z = back
-
-    let lowest_z = center.z - radius;
-
-    let visible = lowest_z < -push_constants.z_near;
-
-    !visible
-}
-
-#[test]
-fn test_culling() {
-    let mut push_constants = CullingPushConstants {
-        view: Mat4::look_at_rh(Vec3::ZERO, Vec3::Z, Vec3::Y),
-        z_near: 0.1,
-    };
-
-    let pack = |center: Vec3, radius| center.extend(radius);
-
-    let test = |push_constants: CullingPushConstants| {
-        assert!(!cull(
-            pack(Vec3::Z, 0.1),
-            Similarity::IDENTITY,
-            push_constants
-        ));
-        assert!(!cull(
-            pack(Vec3::new(0.0, 0.0, 100.0), 0.1),
-            Similarity::IDENTITY,
-            push_constants
-        ));
-
-        assert!(!cull(
-            pack(Vec3::new(1.0, 0.0, 1.0), 0.1),
-            Similarity::IDENTITY,
-            push_constants
-        ));
-        assert!(!cull(
-            pack(Vec3::new(-1.0, 0.0, 1.0), 0.1),
-            Similarity::IDENTITY,
-            push_constants
-        ));
-        assert!(!cull(
-            pack(Vec3::new(0.0, -1.0, 1.0), 0.1),
-            Similarity::IDENTITY,
-            push_constants
-        ));
-        assert!(!cull(
-            pack(Vec3::new(0.0, 1.0, 1.0), 0.1),
-            Similarity::IDENTITY,
-            push_constants
-        ));
-    };
-
-    test(push_constants);
-
-    assert!(cull(
-        pack(-Vec3::Z, 0.1),
-        Similarity::IDENTITY,
-        push_constants
-    ));
-    assert!(cull(
-        pack(-Vec3::Z, 0.1),
-        Similarity::IDENTITY,
-        push_constants
-    ));
-
-    push_constants.view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, -100.0), Vec3::Z, Vec3::Y);
-
-    test(push_constants);
 }

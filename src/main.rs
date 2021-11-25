@@ -10,7 +10,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
-use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
 use shared_structs::{Instance, PointLight, PushConstants, Similarity};
 
 mod descriptor_sets;
@@ -964,6 +964,7 @@ fn main() -> anyhow::Result<()> {
                                 num_instances,
                                 push_constants,
                                 view_matrix,
+                                perspective_matrix,
                                 opaque_mip_levels,
                                 tonemapping_params,
                             },
@@ -1053,6 +1054,7 @@ struct DynamicRecordParams {
     num_instances: u32,
     push_constants: PushConstants,
     view_matrix: Mat4,
+    perspective_matrix: Mat4,
     opaque_mip_levels: u32,
     tonemapping_params: colstodian::tonemap::BakedLottesTonemapperParams,
 }
@@ -1076,6 +1078,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 num_instances,
                 push_constants,
                 view_matrix,
+                perspective_matrix,
                 extent,
                 opaque_mip_levels,
                 tonemapping_params,
@@ -1220,6 +1223,13 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             &[],
         );
 
+        let trunc_row = |index| perspective_matrix.row(index).truncate();
+
+        // Get the left and top planes (the ones that satisfy 'x + w < 0' and 'y + w < 0') (I think, don't quote me on this)
+        // https://github.com/zeux/niagara/blob/98f5d5ae2b48e15e145e3ad13ae7f4f9f1e0e297/src/niagara.cpp#L822-L823
+        let frustum_x = (trunc_row(3) + trunc_row(0)).normalize();
+        let frustum_y = (trunc_row(3) + trunc_row(1)).normalize();
+
         device.cmd_push_constants(
             command_buffer,
             pipelines.frustum_culling_pipeline_layout,
@@ -1227,6 +1237,8 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             0,
             bytes_of(&shared_structs::CullingPushConstants {
                 view: view_matrix,
+                frustum_x_xz: frustum_x.xz(),
+                frustum_y_yz: frustum_y.yz(),
                 z_near: NEAR_Z,
             }),
         );

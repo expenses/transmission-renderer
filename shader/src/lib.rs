@@ -19,12 +19,12 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    SunUniform,
+    SunUniform, Similarity,
 };
 use spirv_std::{
     self as _,
-    glam::{UVec3, Vec2, Vec3, Vec4},
-    Image, RuntimeArray, Sampler,
+    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    Image, RuntimeArray, Sampler, num_traits::Float,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -98,7 +98,7 @@ pub fn fragment_transmission(
         let texture = unsafe { textures.index(push_constants.ggx_lut_texture_index as usize) };
         let sample: Vec4 = texture.sample(*clamp_sampler, uv);
 
-        Vec2::new(sample.x, sample.y)
+        sample.xy()
     };
 
     let framebuffer_sampler = |uv, lod| {
@@ -354,7 +354,7 @@ pub fn frustum_culling(
     let instance = index(instances, instance_id);
     let primitive = index(primitives, instance.primitive_id);
 
-    if shared_structs::cull(
+    if cull(
         primitive.packed_bounding_sphere,
         instance.transform.unpack(),
         *push_constants,
@@ -365,6 +365,30 @@ pub fn frustum_culling(
     let instance_count = index_mut(instance_counts, instance.primitive_id);
 
     atomic_i_increment(instance_count);
+}
+
+fn cull(
+    packed_bounding_sphere: Vec4,
+    transform: Similarity,
+    push_constants: CullingPushConstants,
+) -> bool {
+    let mut center = packed_bounding_sphere.truncate();
+    center = transform * center;
+    center = (push_constants.view * center.extend(1.0)).truncate();
+    // in the view, +z = back so we flip it.
+    center.z = -center.z;
+
+    let mut radius = packed_bounding_sphere.w;
+    radius *= transform.scale;
+
+    let mut visible = (center.z + radius > push_constants.z_near) as u32;
+
+    // Check that object does not cross over either of the left/right/top/bottom planes by
+    // radius distance (exploits frustum symmetry with the abs()).
+    visible &= (center.z * push_constants.frustum_x_xz.y - center.x.abs() * push_constants.frustum_x_xz.x < radius) as u32;
+    visible &= (center.z * push_constants.frustum_y_yz.y - center.y.abs() * push_constants.frustum_y_yz.x < radius) as u32;
+
+    visible == 0
 }
 
 const NUM_DRAW_BUFFERS: usize = 4;
