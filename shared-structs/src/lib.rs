@@ -2,6 +2,8 @@
 
 use core::ops::Mul;
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
+#[cfg(target_arch = "spirv")]
+use num_traits::Float;
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
@@ -22,7 +24,22 @@ pub struct SunUniform {
 
 pub struct PointLight {
     pub position: Vec3A,
-    pub colour_and_intensity: Vec4,
+    pub colour_emission_and_falloff_distance: Vec4,
+}
+
+impl PointLight {
+    pub fn new(position: Vec3, colour: Vec3, intensity: f32) -> Self {
+        fn distance_at_strength(intensity: f32, strength: f32) -> f32 {
+            (intensity / strength).sqrt()
+        }
+
+        let distance_at_0_1 = distance_at_strength(intensity, 0.1);
+
+        Self {
+            position: position.into(),
+            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1)
+        }
+    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -152,3 +169,10 @@ pub struct CullingPushConstants {
     pub frustum_y_yz: Vec2,
     pub z_near: f32,
 }
+
+pub struct Frustum {
+    planes: [Vec4; 4],
+    z_slice: Vec2,
+}
+
+pub const MAX_LIGHTS_PER_FROXEL: u32 = 128;

@@ -19,7 +19,7 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    SunUniform, Similarity,
+    SunUniform, Similarity, MAX_LIGHTS_PER_FROXEL,
 };
 use spirv_std::{
     self as _,
@@ -406,7 +406,7 @@ pub fn demultiplex_draws(
 ) {
     let draw_id = id.x;
 
-    if draw_id as usize > instance_counts.len() {
+    if draw_id as usize >= instance_counts.len() {
         return;
     }
 
@@ -436,6 +436,31 @@ pub fn demultiplex_draws(
         2 => *index_mut(transmission_draws, non_zero_draw_id) = draw_command,
         _ => *index_mut(transmission_alpha_clip_draws, non_zero_draw_id) = draw_command,
     };
+}
+
+#[spirv(compute(threads(8, 8)))]
+pub fn assign_lights_to_froxels(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] froxel_light_counts: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] froxel_light_indices: &mut [u32],
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let froxel_id = id.x;
+    let light_id = id.y;
+
+    if froxel_id as usize >= froxel_light_counts.len() {
+        return;
+    }
+
+    if light_id as usize >= point_lights.len() {
+        return;
+    }
+
+    let light_offset = atomic_i_increment(index_mut(froxel_light_counts, froxel_id));
+
+    let global_light_index = froxel_id * MAX_LIGHTS_PER_FROXEL + light_offset;
+
+    *index_mut(froxel_light_indices, global_light_index) = light_id;
 }
 
 /*
