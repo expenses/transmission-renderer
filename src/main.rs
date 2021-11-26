@@ -690,7 +690,8 @@ fn main() -> anyhow::Result<()> {
     let profiling_ctx =
         std::sync::Arc::new(query_pool.into_profiling_context(&device, physical_device_properties.limits)?);
 
-    let command_graph = command_graph::CommandGraph::new(&device, 16, graphics_queue_family, profiling_ctx.clone())?;
+    let mut command_graph = command_graph::CommandGraph::new(&device, 16, graphics_queue_family)?;
+    let task_pool = bevy_tasks::TaskPool::new();
 
     drop(entire_setup_span);
 
@@ -974,33 +975,44 @@ fn main() -> anyhow::Result<()> {
 
                     command_graph.reset();
 
-                    let reset_query_pool = command_graph.register_commands(&[], move |record_context| {
-                        record_context.profiling_ctx.reset(&record_context.device, record_context.command_buffer);
-                    })?;
+                    let command_graph = &mut command_graph;
+
+                    let _ = task_pool.scope(|scope| {
+
+                        let mut command_graph = command_graph::ScopedCommandGraph {
+                            scope,
+                            inner: command_graph
+                        };
+
+                    let profiling_ctx = &profiling_ctx;
+                    let device = &device;
+
+                    let reset_query_pool = command_graph.register_commands("reset_query_pool", &[], &device, move |command_buffer| {
+                        profiling_ctx.reset(&device, command_buffer);
+                    }).unwrap();
 
                     // todo: this needs to be here because we're not syncing the query pool reset properly.
                     dbg!(reset_query_pool);
 
-                    let transfer_to_compute_barrier = command_graph.register_global_barrier(vk_sync::GlobalBarrier {
+                    let transfer_to_compute_barrier = command_graph.register_global_barrier(&device, vk_sync::GlobalBarrier {
                         previous_accesses: &[vk_sync::AccessType::TransferWrite],
                         next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-                    })?;
+                    }).unwrap();
 
-                    let compute_to_compute_barrier = command_graph.register_global_barrier(vk_sync::GlobalBarrier {
+                    let compute_to_compute_barrier = command_graph.register_global_barrier(&device, vk_sync::GlobalBarrier {
                         previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
                         next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-                    })?;
+                    }).unwrap();
 
                     let instance_count_buffer = draw_buffers.instance_count_buffer.buffer;
                     let draw_count_buffer = draw_buffers.draw_counts_buffer.buffer;
 
-                    let zero_frustum_culling_buffers = command_graph.register_commands(&[(reset_query_pool, None)], move |record_ctx| {
-                        let device = record_ctx.device;
-                        let command_buffer = record_ctx.command_buffer;
-
+                    let zero_frustum_culling_buffers = command_graph.register_commands("zero_frustum_culling_buffers", &[(reset_query_pool, None)], &device, move |command_buffer| {
                         let profiling_zone = profiling_zone!(
                             "zeroing the instance count buffer",
-                            record_ctx
+                            &device,
+                            command_buffer,
+                            &profiling_ctx
                         );
 
                         device.cmd_fill_buffer(
@@ -1015,7 +1027,9 @@ fn main() -> anyhow::Result<()> {
 
                         let profiling_zone = profiling_zone!(
                             "zeroing the draw count buffer",
-                            record_ctx
+                            &device,
+                            command_buffer,
+                            &profiling_ctx
                         );
 
                         device.cmd_fill_buffer(
@@ -1027,13 +1041,9 @@ fn main() -> anyhow::Result<()> {
                         );
 
                         drop(profiling_zone);
-                    })?;
+                    }).unwrap();
 
-                    let frustum_culling = command_graph.register_commands(&[(zero_frustum_culling_buffers, Some(transfer_to_compute_barrier))], move |record_ctx| {
-                        let device = record_ctx.device;
-                        let command_buffer = record_ctx.command_buffer;
-                        let profiling_ctx = record_ctx.profiling_ctx;
-
+                    let frustum_culling = command_graph.register_commands("frustum culling", &[(zero_frustum_culling_buffers, Some(transfer_to_compute_barrier))], &device, move |command_buffer| {
                         record_frustum_culling(RecordFrustumCullingParams {
                             device: device.clone(),
                             command_buffer,
@@ -1044,12 +1054,9 @@ fn main() -> anyhow::Result<()> {
                             view_matrix,
                             perspective_matrix,
                         });
-                    })?;
+                    }).unwrap();
 
-                    let frustum_culling_demultiplex_draws = command_graph.register_commands(&[(frustum_culling, Some(compute_to_compute_barrier))], move |record_ctx| {
-                        let device = record_ctx.device;
-                        let command_buffer = record_ctx.command_buffer;
-
+                    let frustum_culling_demultiplex_draws = command_graph.register_commands("frustum_culling_demultiplex_draws", &[(frustum_culling, Some(compute_to_compute_barrier))], &device, move |command_buffer| {
                         device.cmd_bind_pipeline(
                             command_buffer,
                             vk::PipelineBindPoint::COMPUTE,
@@ -1059,7 +1066,9 @@ fn main() -> anyhow::Result<()> {
                         {
                             let _profiling_zone = profiling_zone!(
                                 "demultiplex draws compute shader",
-                                record_ctx
+                                &device,
+                                command_buffer,
+                                &profiling_ctx
                             );
 
                             device.cmd_bind_descriptor_sets(
@@ -1082,15 +1091,11 @@ fn main() -> anyhow::Result<()> {
 
                             device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
                         }
-                    })?;
+                    }).unwrap();
 
                     let light_buffers = light_buffers.clone();
 
-                    let light_assignment = command_graph.register_commands(&[(reset_query_pool, None)], move |record_ctx| {
-                        let device = record_ctx.device;
-                        let command_buffer = record_ctx.command_buffer;
-                        let profiling_ctx = record_ctx.profiling_ctx;
-
+                    let light_assignment = command_graph.register_commands("light_assignment", &[(reset_query_pool, None)], &device, move |command_buffer| {
                         record_light_assignment(RecordLightAssignmentParams {
                             device,
                             command_buffer,
@@ -1098,18 +1103,14 @@ fn main() -> anyhow::Result<()> {
                             descriptor_sets: &descriptor_sets,
                             light_buffers: &light_buffers,
                         });
-                    })?;
+                    }).unwrap();
 
                     let opaque_sampled_hdr_framebuffer = &opaque_sampled_hdr_framebuffer;
                     let opaque_sampled_hdr_framebuffer_image = opaque_sampled_hdr_framebuffer.image;
                     let draw_buffers = draw_buffers.clone();
                     let model_buffers = model_buffers.clone();
 
-                    command_graph.register_commands(&[(frustum_culling_demultiplex_draws, None), (light_assignment, None)], move |record_ctx| {
-                        let device = record_ctx.device;
-                        let command_buffer = record_ctx.command_buffer;
-                        let profiling_ctx = record_ctx.profiling_ctx;
-
+                    command_graph.register_commands("render", &[(frustum_culling_demultiplex_draws, None), (light_assignment, None)], &device, move |command_buffer| {
                         record(RecordParams {
                             device,
                             command_buffer,
@@ -1130,9 +1131,11 @@ fn main() -> anyhow::Result<()> {
                                 tonemapping_params,
                             },
                         });
-                    })?;
+                    }).unwrap();
 
-                    let command_buffers = command_graph.get_buffers()?;
+                        //Ok::<_, anyhow::Error>(())
+                        //command_graph.get_buffers(scope)
+                    });
 
                     {
                         let _submission_span = tracy_client::span!("Command buffer submission");
@@ -1143,7 +1146,7 @@ fn main() -> anyhow::Result<()> {
                                 *vk::SubmitInfo::builder()
                                     .wait_semaphores(&[present_semaphore])
                                     .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-                                    .command_buffers(&command_buffers)
+                                    .command_buffers(&command_graph.get_buffers())
                                     .signal_semaphores(&[render_semaphore]),
                             ],
                             render_fence,
