@@ -120,6 +120,17 @@ impl ProfilingContext {
         unsafe {
             device.cmd_reset_query_pool(command_buffer, self.pool, 0, len);
         }
+
+        vk_sync::cmd::pipeline_barrier(
+            device,
+            command_buffer,
+            Some(vk_sync::GlobalBarrier {
+                previous_accesses: &[vk_sync::AccessType::HostWrite],
+                next_accesses: &[vk_sync::AccessType::HostWrite],
+            }),
+            &[],
+            &[],
+        );
     }
 
     // Must be called once per frame outside of a command buffer. Ideally as the last thing per frame.
