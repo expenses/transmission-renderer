@@ -210,8 +210,6 @@ fn main() -> anyhow::Result<()> {
 
     let command_buffer = command_buffers[0];
 
-    let command_graph = command_graph::CommandGraph::new(&device, 16, graphics_queue_family)?;
-
     let mut allocator =
         gpu_allocator::vulkan::Allocator::new(&gpu_allocator::vulkan::AllocatorCreateDesc {
             instance: instance.clone(),
@@ -692,6 +690,8 @@ fn main() -> anyhow::Result<()> {
     let profiling_ctx =
         std::sync::Arc::new(query_pool.into_profiling_context(&device, physical_device_properties.limits)?);
 
+    let command_graph = command_graph::CommandGraph::new(&device, 16, graphics_queue_family, profiling_ctx.clone())?;
+
     drop(entire_setup_span);
 
     event_loop.run(move |event, _, control_flow| {
@@ -974,10 +974,11 @@ fn main() -> anyhow::Result<()> {
 
                     command_graph.reset();
 
-                    let reset_query_pool = command_graph.register_commands(Vec::new(), |device, command_buffer, profiling_ctx| {
-                        profiling_ctx.reset(&device, command_buffer);
-                    }, profiling_ctx.clone())?;
+                    let reset_query_pool = command_graph.register_commands(&[], move |record_context| {
+                        record_context.profiling_ctx.reset(&record_context.device, record_context.command_buffer);
+                    })?;
 
+                    // todo: this needs to be here because we're not syncing the query pool reset properly.
                     dbg!(reset_query_pool);
 
                     let transfer_to_compute_barrier = command_graph.register_global_barrier(vk_sync::GlobalBarrier {
@@ -990,12 +991,16 @@ fn main() -> anyhow::Result<()> {
                         next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
                     })?;
 
-                    let zero_frustum_culling_buffers = command_graph.register_commands(vec![(reset_query_pool, None)], |device, command_buffer, (profiling_ctx, instance_count_buffer, draw_count_buffer)| {
+                    let instance_count_buffer = draw_buffers.instance_count_buffer.buffer;
+                    let draw_count_buffer = draw_buffers.draw_counts_buffer.buffer;
+
+                    let zero_frustum_culling_buffers = command_graph.register_commands(&[(reset_query_pool, None)], move |record_ctx| {
+                        let device = record_ctx.device;
+                        let command_buffer = record_ctx.command_buffer;
+
                         let profiling_zone = profiling_zone!(
                             "zeroing the instance count buffer",
-                            &device,
-                            command_buffer,
-                            &profiling_ctx
+                            record_ctx
                         );
 
                         device.cmd_fill_buffer(
@@ -1010,9 +1015,7 @@ fn main() -> anyhow::Result<()> {
 
                         let profiling_zone = profiling_zone!(
                             "zeroing the draw count buffer",
-                            &device,
-                            command_buffer,
-                            &profiling_ctx
+                            record_ctx
                         );
 
                         device.cmd_fill_buffer(
@@ -1024,9 +1027,13 @@ fn main() -> anyhow::Result<()> {
                         );
 
                         drop(profiling_zone);
-                    }, (profiling_ctx.clone(), draw_buffers.instance_count_buffer.buffer, draw_buffers.draw_counts_buffer.buffer))?;
+                    })?;
 
-                    let frustum_culling = command_graph.register_commands(vec![(zero_frustum_culling_buffers, Some(transfer_to_compute_barrier))], move |device, command_buffer, (pipelines, profiling_ctx, descriptor_sets)| {
+                    let frustum_culling = command_graph.register_commands(&[(zero_frustum_culling_buffers, Some(transfer_to_compute_barrier))], move |record_ctx| {
+                        let device = record_ctx.device;
+                        let command_buffer = record_ctx.command_buffer;
+                        let profiling_ctx = record_ctx.profiling_ctx;
+
                         record_frustum_culling(RecordFrustumCullingParams {
                             device: device.clone(),
                             command_buffer,
@@ -1037,9 +1044,12 @@ fn main() -> anyhow::Result<()> {
                             view_matrix,
                             perspective_matrix,
                         });
-                    }, (pipelines.clone(), profiling_ctx.clone(), descriptor_sets.clone()))?;
+                    })?;
 
-                    let frustum_culling_demultiplex_draws = command_graph.register_commands(vec![(frustum_culling, Some(compute_to_compute_barrier))], move |device, command_buffer, (profiling_ctx, pipelines, descriptor_sets)| {
+                    let frustum_culling_demultiplex_draws = command_graph.register_commands(&[(frustum_culling, Some(compute_to_compute_barrier))], move |record_ctx| {
+                        let device = record_ctx.device;
+                        let command_buffer = record_ctx.command_buffer;
+
                         device.cmd_bind_pipeline(
                             command_buffer,
                             vk::PipelineBindPoint::COMPUTE,
@@ -1049,9 +1059,7 @@ fn main() -> anyhow::Result<()> {
                         {
                             let _profiling_zone = profiling_zone!(
                                 "demultiplex draws compute shader",
-                                &device,
-                                command_buffer,
-                                &profiling_ctx
+                                record_ctx
                             );
 
                             device.cmd_bind_descriptor_sets(
@@ -1074,9 +1082,15 @@ fn main() -> anyhow::Result<()> {
 
                             device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
                         }
-                    }, (profiling_ctx.clone(), pipelines, descriptor_sets))?;
+                    })?;
 
-                    let light_assignment = command_graph.register_commands(vec![(reset_query_pool, None)], |device, command_buffer, (profiling_ctx, light_buffers, descriptor_sets)| {
+                    let light_buffers = light_buffers.clone();
+
+                    let light_assignment = command_graph.register_commands(&[(reset_query_pool, None)], move |record_ctx| {
+                        let device = record_ctx.device;
+                        let command_buffer = record_ctx.command_buffer;
+                        let profiling_ctx = record_ctx.profiling_ctx;
+
                         record_light_assignment(RecordLightAssignmentParams {
                             device,
                             command_buffer,
@@ -1084,14 +1098,20 @@ fn main() -> anyhow::Result<()> {
                             descriptor_sets: &descriptor_sets,
                             light_buffers: &light_buffers,
                         });
-                    }, (profiling_ctx.clone(), light_buffers.clone(), descriptor_sets))?;
+                    })?;
 
                     let opaque_sampled_hdr_framebuffer = &opaque_sampled_hdr_framebuffer;
                     let opaque_sampled_hdr_framebuffer_image = opaque_sampled_hdr_framebuffer.image;
+                    let draw_buffers = draw_buffers.clone();
+                    let model_buffers = model_buffers.clone();
 
-                    command_graph.register_commands(vec![(frustum_culling_demultiplex_draws, None), (light_assignment, None)], move |device, command_buffer, (profiling_ctx, draw_buffers, model_buffers)| {
+                    command_graph.register_commands(&[(frustum_culling_demultiplex_draws, None), (light_assignment, None)], move |record_ctx| {
+                        let device = record_ctx.device;
+                        let command_buffer = record_ctx.command_buffer;
+                        let profiling_ctx = record_ctx.profiling_ctx;
+
                         record(RecordParams {
-                            device: device.clone(),
+                            device,
                             command_buffer,
                             pipelines,
                             draw_buffers: &draw_buffers,
@@ -1110,7 +1130,7 @@ fn main() -> anyhow::Result<()> {
                                 tonemapping_params,
                             },
                         });
-                    }, (profiling_ctx.clone(), draw_buffers.clone(), model_buffers.clone(), ))?;
+                    })?;
 
                     let command_buffers = command_graph.get_buffers()?;
 
@@ -1214,10 +1234,10 @@ unsafe fn record_light_assignment(params: RecordLightAssignmentParams) {
     );
 }
 
-struct RecordFrustumCullingParams {
+struct RecordFrustumCullingParams<'a> {
     device: ash::Device,
     command_buffer: vk::CommandBuffer,
-    profiling_ctx: std::sync::Arc<ProfilingContext>,
+    profiling_ctx: &'a ProfilingContext,
     pipelines: Pipelines,
     descriptor_sets: DescriptorSets,
     perspective_matrix: Mat4,
@@ -1299,11 +1319,11 @@ unsafe fn record_frustum_culling(params: RecordFrustumCullingParams) {
 }
 
 struct RecordParams<'a> {
-    device: ash::Device,
+    device: &'a ash::Device,
     command_buffer: vk::CommandBuffer,
     pipelines: Pipelines,
     draw_buffers: &'a DrawBuffers,
-    profiling_ctx: std::sync::Arc<ProfilingContext>,
+    profiling_ctx: &'a ProfilingContext,
     model_buffers: &'a ModelBuffers,
     render_passes: RenderPasses,
     draw_framebuffer: vk::Framebuffer,

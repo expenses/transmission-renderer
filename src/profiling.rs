@@ -153,6 +153,14 @@ impl ProfilingContext {
 
 #[macro_export]
 macro_rules! profiling_zone {
+    ($name:expr, $record_ctx:expr) => {
+        profiling_zone!(
+            $name,
+            $record_ctx.device,
+            $record_ctx.command_buffer,
+            $record_ctx.profiling_ctx
+        )
+    };
     ($name:expr, $device:expr, $command_buffer:expr, $context:expr) => {
         profiling_zone!(
             $name,

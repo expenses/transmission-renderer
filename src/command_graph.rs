@@ -2,11 +2,18 @@ use ash::vk;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use parking_lot::Mutex;
 use std::sync::Arc;
+use crate::profiling::ProfilingContext;
 
 #[derive(Copy, Clone)]
 struct CommandPoolBufferPair {
     pool: vk::CommandPool,
     buffer: vk::CommandBuffer,
+}
+
+pub struct RecordContext<'a> {
+    pub device: &'a ash::Device,
+    pub command_buffer: vk::CommandBuffer,
+    pub profiling_ctx: &'a ProfilingContext,
 }
 
 pub struct CommandGraph {
@@ -16,10 +23,11 @@ pub struct CommandGraph {
     nodes: Arc<Mutex<petgraph::Graph<CommandBufferId, ()>>>,
     root: AtomicUsize,
     handles: Mutex<Vec<async_std::task::JoinHandle<anyhow::Result<()>>>>,
+    profiling_context: Arc<ProfilingContext>,
 }
 
 impl CommandGraph {
-    pub fn new(device: &ash::Device, num_command_buffers: u32, graphics_queue_family: u32) -> anyhow::Result<Self> {
+    pub fn new(device: &ash::Device, num_command_buffers: u32, graphics_queue_family: u32, profiling_context: Arc<ProfilingContext>) -> anyhow::Result<Self> {
         Ok(Self {
             buffers: (0 .. num_command_buffers).map(|_| {
                 let pool = unsafe {
@@ -45,7 +53,8 @@ impl CommandGraph {
             buffer_index: Default::default(),
             nodes: Default::default(),
             root: Default::default(),
-            handles: Default::default()
+            handles: Default::default(),
+            profiling_context
         })
     }
 
@@ -54,7 +63,7 @@ impl CommandGraph {
         self.buffer_index.store(0, Ordering::Relaxed);
     }
 
-    pub fn register_commands<I: Send + 'static, FN: FnOnce(&ash::Device, vk::CommandBuffer, I) + Send + Sync + 'static>(&self, parents: Vec<(NodeId, Option<BarrierId>)>, record_function: FN, input: I) -> anyhow::Result<NodeId> {
+    pub fn register_commands<FN: FnOnce(&RecordContext) + Send + Sync + 'static>(&self, parents: &[(NodeId, Option<BarrierId>)], record_function: FN) -> anyhow::Result<NodeId> {
         let _span = tracy_client::span!("Registering commands");
 
         let buffer_id = self.buffer_index.fetch_add(1, Ordering::Relaxed);
@@ -62,6 +71,7 @@ impl CommandGraph {
         let command_pair = self.buffers[buffer_id];
 
         let device = self.device.clone();
+        let profiling_ctx = self.profiling_context.clone();
 
         let handle = async_std::task::spawn(async move {
             unsafe {
@@ -76,7 +86,13 @@ impl CommandGraph {
                                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
                 )?;
 
-                record_function(&device, command_pair.buffer, input);
+                let record_context = RecordContext {
+                    device: &device,
+                    command_buffer: command_pair.buffer,
+                    profiling_ctx: &profiling_ctx,
+                };
+
+                record_function(&record_context);
 
                 device.end_command_buffer(command_pair.buffer)?;
             }
@@ -142,36 +158,32 @@ impl CommandGraph {
         Ok(BarrierId(node_id))
     }
 
-    async fn get_buffers_async(&self) -> anyhow::Result<Vec<vk::CommandBuffer>> {
-        let nodes = self.nodes.clone();
-
-        let sort_handle = async_std::task::spawn(async move {
-            let _span = tracy_client::span!("toposort");
-
-            let nodes = nodes.lock();
-
-            petgraph::algo::toposort(&*nodes, None)
-        });
-
-        futures::future::try_join_all(
-            self.handles.lock().drain(..)
-        ).await?;
-
-        let sort = sort_handle.await.unwrap();
-
-        let nodes = self.nodes.lock();
-
-        let buffers = sort.iter().map(|id| self.buffers[nodes[*id].0].buffer).collect();
-
-        Ok(buffers)
-    }
-
     pub fn get_buffers(&self) -> anyhow::Result<Vec<vk::CommandBuffer>> {
         let _span = tracy_client::span!("get buffers");
 
-        async_std::task::block_on(
-            self.get_buffers_async()
-        )
+        async_std::task::block_on(async move {
+            let nodes = self.nodes.clone();
+
+            let sort_handle = async_std::task::spawn(async move {
+                let _span = tracy_client::span!("toposort");
+
+                let nodes = nodes.lock();
+
+                petgraph::algo::toposort(&*nodes, None)
+            });
+
+            futures::future::try_join_all(
+                self.handles.lock().drain(..)
+            ).await?;
+
+            let sort = sort_handle.await.unwrap();
+
+            let nodes = self.nodes.lock();
+
+            let buffers = sort.iter().map(|id| self.buffers[nodes[*id].0].buffer).collect();
+
+            Ok(buffers)
+        })
     }
 }
 
