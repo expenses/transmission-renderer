@@ -1,31 +1,51 @@
 use ash::vk;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use parking_lot::Mutex;
-use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
+
+#[derive(Copy, Clone)]
+struct CommandPoolBufferPair {
+    pool: vk::CommandPool,
+    buffer: vk::CommandBuffer,
+}
 
 pub struct CommandGraph {
-    buffers: Vec<vk::CommandBuffer>,
+    buffers: Vec<CommandPoolBufferPair>,
     buffer_index: AtomicUsize,
     device: ash::Device,
-    nodes: Mutex<petgraph::Graph<CommandBufferId, ()>>,
+    nodes: Arc<Mutex<petgraph::Graph<CommandBufferId, ()>>>,
     root: AtomicUsize,
+    handles: Mutex<Vec<async_std::task::JoinHandle<anyhow::Result<()>>>>,
 }
 
 impl CommandGraph {
-    pub fn new(device: &ash::Device, pool: vk::CommandPool, num_command_buffers: u32) -> anyhow::Result<Self> {
+    pub fn new(device: &ash::Device, num_command_buffers: u32, graphics_queue_family: u32) -> anyhow::Result<Self> {
         Ok(Self {
-            buffers: unsafe {
-                device.allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::builder()
-                        .command_pool(pool)
-                        .level(vk::CommandBufferLevel::PRIMARY)
-                        .command_buffer_count(num_command_buffers),
-                )
-            }?,
+            buffers: (0 .. num_command_buffers).map(|_| {
+                let pool = unsafe {
+                    device.create_command_pool(
+                        &vk::CommandPoolCreateInfo::builder().queue_family_index(graphics_queue_family),
+                        None,
+                    )
+                }?;
+
+                Ok(CommandPoolBufferPair {
+                    pool,
+                    buffer: unsafe {
+                        device.allocate_command_buffers(
+                            &vk::CommandBufferAllocateInfo::builder()
+                                .command_pool(pool)
+                                .level(vk::CommandBufferLevel::PRIMARY)
+                                .command_buffer_count(1),
+                        )
+                    }?[0]
+                })
+            }).collect::<anyhow::Result<_>>()?,
             device: device.clone(),
             buffer_index: Default::default(),
             nodes: Default::default(),
-            root: Default::default()
+            root: Default::default(),
+            handles: Default::default()
         })
     }
 
@@ -34,26 +54,37 @@ impl CommandGraph {
         self.buffer_index.store(0, Ordering::Relaxed);
     }
 
-    pub fn register_commands<FN: Fn(vk::CommandBuffer)>(&self, parents: Vec<(NodeId, Option<BarrierId>)>, record_function: FN) -> anyhow::Result<NodeId> {
+    pub fn register_commands<I: Send + 'static, FN: FnOnce(&ash::Device, vk::CommandBuffer, I) + Send + Sync + 'static>(&self, parents: Vec<(NodeId, Option<BarrierId>)>, record_function: FN, input: I) -> anyhow::Result<NodeId> {
         let _span = tracy_client::span!("Registering commands");
 
         let buffer_id = self.buffer_index.fetch_add(1, Ordering::Relaxed);
 
-        let buffer = self.buffers[buffer_id];
+        let command_pair = self.buffers[buffer_id];
 
-        unsafe {
-            self.device.begin_command_buffer(
-                buffer,
-                &vk::CommandBufferBeginInfo::builder()
-                                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-            )?;
+        let device = self.device.clone();
 
-            record_function(buffer);
+        let handle = async_std::task::spawn(async move {
+            unsafe {
+                device.reset_command_pool(
+                    command_pair.pool,
+                    vk::CommandPoolResetFlags::empty(),
+                )?;
 
-            self.device.end_command_buffer(buffer)?;
-        }
+                device.begin_command_buffer(
+                    command_pair.buffer,
+                    &vk::CommandBufferBeginInfo::builder()
+                                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                )?;
 
-        let command_buffer_id = CommandBufferId(buffer_id);
+                record_function(&device, command_pair.buffer, input);
+
+                device.end_command_buffer(command_pair.buffer)?;
+            }
+
+            Ok::<_, anyhow::Error>(())
+        });
+
+        self.handles.lock().push(handle);
 
         let mut nodes = self.nodes.lock();
 
@@ -81,24 +112,29 @@ impl CommandGraph {
     pub fn register_global_barrier(&self, barrier: vk_sync::GlobalBarrier) -> anyhow::Result<BarrierId> {
         let buffer_id = self.buffer_index.fetch_add(1, Ordering::Relaxed);
 
-        let buffer = self.buffers[buffer_id];
+        let command_pair = self.buffers[buffer_id];
 
         unsafe {
+            self.device.reset_command_pool(
+                command_pair.pool,
+                vk::CommandPoolResetFlags::empty(),
+            )?;
+
             self.device.begin_command_buffer(
-                buffer,
+                command_pair.buffer,
                 &vk::CommandBufferBeginInfo::builder()
                                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
             )?;
 
             vk_sync::cmd::pipeline_barrier(
                 &self.device,
-                buffer,
+                command_pair.buffer,
                 Some(barrier),
                 &[],
                 &[],
             );
 
-            self.device.end_command_buffer(buffer)?;
+            self.device.end_command_buffer(command_pair.buffer)?;
         }
 
         let node_id = self.nodes.lock().add_node(CommandBufferId(buffer_id));
@@ -106,19 +142,41 @@ impl CommandGraph {
         Ok(BarrierId(node_id))
     }
 
-    pub fn get_buffers(&self) -> Vec<vk::CommandBuffer> {
-        let _span = tracy_client::span!("toposort");
+    async fn get_buffers_async(&self) -> anyhow::Result<Vec<vk::CommandBuffer>> {
+        let nodes = self.nodes.clone();
+
+        let sort_handle = async_std::task::spawn(async move {
+            let _span = tracy_client::span!("toposort");
+
+            let nodes = nodes.lock();
+
+            petgraph::algo::toposort(&*nodes, None)
+        });
+
+        futures::future::try_join_all(
+            self.handles.lock().drain(..)
+        ).await?;
+
+        let sort = sort_handle.await.unwrap();
 
         let nodes = self.nodes.lock();
 
-        let sort = petgraph::algo::toposort(&*nodes, None).unwrap();
+        let buffers = sort.iter().map(|id| self.buffers[nodes[*id].0].buffer).collect();
 
-        sort.iter().map(|id| self.buffers[nodes[*id].0]).collect()
+        Ok(buffers)
+    }
+
+    pub fn get_buffers(&self) -> anyhow::Result<Vec<vk::CommandBuffer>> {
+        let _span = tracy_client::span!("get buffers");
+
+        async_std::task::block_on(
+            self.get_buffers_async()
+        )
     }
 }
 
 struct CommandBufferId(usize);
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct NodeId(petgraph::graph::NodeIndex);
 #[derive(Clone, Copy)]
 pub struct BarrierId(petgraph::graph::NodeIndex);
