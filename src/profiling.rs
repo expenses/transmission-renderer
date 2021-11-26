@@ -1,15 +1,16 @@
 use ash::vk;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicBool, Ordering};
 
 struct TimestampBuffer<const N: usize> {
-    timestamps: [i64; N],
+    timestamps: parking_lot::Mutex<[i64; N]>,
     len: AtomicU16,
 }
 
 impl<const N: usize> TimestampBuffer<N> {
     fn emit(&self) {
+        let timestamps = self.timestamps.lock();
         for i in 0..self.len.load(Ordering::Relaxed) as usize {
-            tracy_client::emit_gpu_time(self.timestamps[i], 0, i as u16);
+            tracy_client::emit_gpu_time(timestamps[i], 0, i as u16);
         }
     }
 
@@ -92,12 +93,12 @@ impl QueryPool {
 
         Ok(ProfilingContext {
             buffer: TimestampBuffer {
-                timestamps: [0; 4096],
+                timestamps: parking_lot::Mutex::new([0; 4096]),
                 // As it contains the initial timestamp.
                 len: AtomicU16::new(1),
             },
             pool: self.pool,
-            can_reset: true,
+            can_reset: AtomicBool::new(true),
         })
     }
 }
@@ -105,13 +106,13 @@ impl QueryPool {
 pub struct ProfilingContext {
     buffer: TimestampBuffer<4096>,
     pool: vk::QueryPool,
-    can_reset: bool,
+    can_reset: AtomicBool,
 }
 
 impl ProfilingContext {
     /// Must be called before using for the first time and between collecting and recording zones. Ideally you call this immediately after starting a command buffer each frame.
     pub fn reset(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
-        if !self.can_reset {
+        if !self.can_reset.load(Ordering::Relaxed) {
             return;
         }
 
@@ -123,7 +124,7 @@ impl ProfilingContext {
     }
 
     // Must be called once per frame outside of a command buffer. Ideally as the last thing per frame.
-    pub fn collect(&mut self, device: &ash::Device) -> anyhow::Result<()> {
+    pub fn collect(&self, device: &ash::Device) -> anyhow::Result<()> {
         let len = self.buffer.len.load(Ordering::Relaxed);
 
         let res = unsafe {
@@ -131,20 +132,20 @@ impl ProfilingContext {
                 self.pool,
                 0,
                 len as u32,
-                &mut self.buffer.timestamps[..len as usize],
+                &mut self.buffer.timestamps.lock()[..len as usize],
                 vk::QueryResultFlags::WAIT | vk::QueryResultFlags::TYPE_64,
             )
         };
 
         // Even though we're setting the WAIT flag, get_query_pool_results still seems
         // to sometimes return NOT_READY occasionally. In this case we just ignore it.
-        self.can_reset = if res.is_ok() {
+        self.can_reset.store(if res.is_ok() {
             self.buffer.emit();
             true
         } else {
             println!("vkGetQueryResults just returned NOT_READY illegally");
             false
-        };
+        }, Ordering::Relaxed);
 
         Ok(())
     }

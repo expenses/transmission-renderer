@@ -37,13 +37,13 @@ pub fn fragment_transmission(
     #[spirv(flat)] material_id: u32,
     #[spirv(flat)] model_scale: f32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
-    #[spirv(descriptor_set = 0, binding = 5)] clamp_sampler: &Sampler,
-    #[spirv(descriptor_set = 2, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     output: &mut Vec4,
 ) {
     let material = index(materials, material_id);
@@ -139,11 +139,11 @@ pub fn fragment(
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
 ) {
@@ -204,9 +204,9 @@ impl<'a> TextureSampler<'a> {
 pub fn depth_pre_pass_alpha_clip(
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
-    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
 ) {
     let material = index(materials, material_id);
 
@@ -500,7 +500,7 @@ pub fn fullscreen_tri(
 #[spirv(fragment)]
 pub fn fragment_tonemap(
     uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 1, binding = 0)] texture: &Image!(2D, type=f32, sampled),
     #[spirv(push_constant)] params: &BakedLottesTonemapperParams,
     output: &mut Vec4,

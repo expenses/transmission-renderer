@@ -18,6 +18,7 @@ mod model_loading;
 mod pipelines;
 mod profiling;
 mod render_passes;
+mod command_graph;
 
 use descriptor_sets::{DescriptorSetLayouts, DescriptorSets};
 use model_loading::{load_gltf, ImageManager};
@@ -38,7 +39,7 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
     )
 }
 
-pub const MAX_IMAGES: u32 = 195;
+pub const MAX_IMAGES: u32 = 193;
 pub const NEAR_Z: f32 = 0.01;
 
 #[derive(StructOpt)]
@@ -189,6 +190,8 @@ fn main() -> anyhow::Result<()> {
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
+    ash_abstractions::set_object_name(&device, &debug_utils_loader, queue, "graphics queue")?;
+
     let command_pool = unsafe {
         device.create_command_pool(
             &vk::CommandPoolCreateInfo::builder().queue_family_index(graphics_queue_family),
@@ -201,13 +204,16 @@ fn main() -> anyhow::Result<()> {
             &vk::CommandBufferAllocateInfo::builder()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(3),
+                .command_buffer_count(4),
         )
     }?;
 
     let command_buffer = command_buffers[0];
     let compute_command_buffer = command_buffers[1];
     let reset_query_pool_command_buffer = command_buffers[2];
+    let light_assignment_command_buffer = command_buffers[3];
+
+    let command_graph = command_graph::CommandGraph::new(&device, command_pool, 16)?;
 
     let mut allocator =
         gpu_allocator::vulkan::Allocator::new(&gpu_allocator::vulkan::AllocatorCreateDesc {
@@ -390,17 +396,33 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let lights_buffer = ash_abstractions::Buffer::new(
-        unsafe {
-            cast_slice(&[
-                PointLight::new(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
-                PointLight::new(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
-            ])
-        },
-        "lights",
-        vk::BufferUsageFlags::STORAGE_BUFFER,
-        &mut init_resources,
-    )?;
+    let num_froxels = 1024;
+
+    let light_buffers = LightBuffers {
+        lights: ash_abstractions::Buffer::new(
+            unsafe {
+                cast_slice(&[
+                    PointLight::new(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
+                    PointLight::new(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
+                ])
+            },
+            "lights",
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            &mut init_resources,
+        )?,
+        froxel_light_counts: ash_abstractions::Buffer::new_of_size(
+            4 * num_froxels,
+            "froxel light counts",
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            &mut init_resources
+        )?,
+        froxel_light_indices: ash_abstractions::Buffer::new_of_size(
+            4 * num_froxels * shared_structs::MAX_LIGHTS_PER_FROXEL as u64,
+            "froxel light indices",
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            &mut init_resources
+        )?,
+    };
 
     let tonemapping_params = colstodian::tonemap::BakedLottesTonemapperParams::from(
         colstodian::tonemap::LottesTonemapperParams {
@@ -563,30 +585,25 @@ fn main() -> anyhow::Result<()> {
     unsafe {
         device.update_descriptor_sets(
             &[
+                *image_manager.write_descriptor_set(descriptor_sets.main, 0),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&buffer_info(&lights_buffer)),
-                *image_manager.write_descriptor_set(descriptor_sets.main, 1),
-                *vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_sets.main)
-                    .dst_binding(2)
+                    .dst_binding(1)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(sampler)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(3)
+                    .dst_binding(2)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&buffer_info(&model_buffers.materials)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(4)
+                    .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&buffer_info(&sun_uniform_buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(5)
+                    .dst_binding(4)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(clamp_sampler)]),
                 // Instance buffer
@@ -632,6 +649,22 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(6)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&buffer_info(&draw_buffers.transmission_alpha_clip.buffer)),
+                // lights
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.lights)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&light_buffers.lights)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.lights)
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&light_buffers.froxel_light_counts)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.lights)
+                    .dst_binding(2)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&light_buffers.froxel_light_indices)),
             ],
             &[],
         )
@@ -653,7 +686,9 @@ fn main() -> anyhow::Result<()> {
     let present_semaphore = create_named_semaphore("present semaphore")?;
     let render_semaphore = create_named_semaphore("render semaphore")?;
     let frustum_culling_semaphore = create_named_semaphore("frustum culling semaphore")?;
-    let reset_query_pool_semaphore = create_named_semaphore("reset query pool semaphore")?;
+    let start_frustum_culling_semaphore = create_named_semaphore("start frustum culling semaphore")?;
+    let start_light_assignment_semaphore = create_named_semaphore("start light assignment semaphore")?;
+    let light_assignment_semaphore = create_named_semaphore("light assignment semaphore")?;
     let render_fence = unsafe { device.create_fence(&fence_info, None)? };
 
     let mut cursor_grab = false;
@@ -944,28 +979,62 @@ fn main() -> anyhow::Result<()> {
                     let tonemap_framebuffer =
                         swapchain_image_framebuffers[swapchain_image_index as usize];
 
-                    {
-                        device.begin_command_buffer(
-                            reset_query_pool_command_buffer,
-                            &vk::CommandBufferBeginInfo::builder()
-                                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                        )?;
+                    command_graph.reset();
 
-                        profiling_ctx.reset(&device, reset_query_pool_command_buffer);
+                    let reset_query_pool = command_graph.register_commands(Vec::new(), |command_buffer| {
+                        profiling_ctx.reset(&device, command_buffer);
+                    })?;
 
-                        device.end_command_buffer(reset_query_pool_command_buffer)?;
-                    }
+                    let transfer_to_compute_barrier = command_graph.register_global_barrier(vk_sync::GlobalBarrier {
+                        previous_accesses: &[vk_sync::AccessType::TransferWrite],
+                        next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                    })?;
 
-                    {
-                        device.begin_command_buffer(
-                            compute_command_buffer,
-                            &vk::CommandBufferBeginInfo::builder()
-                                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                        )?;
+                    let compute_to_compute_barrier = command_graph.register_global_barrier(vk_sync::GlobalBarrier {
+                        previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                        next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                    })?;
 
+                    let zero_frustum_culling_buffers = command_graph.register_commands(vec![(reset_query_pool, None)], |command_buffer| {
+                        let profiling_zone = profiling_zone!(
+                            "zeroing the instance count buffer",
+                            &device,
+                            command_buffer,
+                            &profiling_ctx
+                        );
+
+                        device.cmd_fill_buffer(
+                            command_buffer,
+                            draw_buffers.instance_count_buffer.buffer,
+                            0,
+                            vk::WHOLE_SIZE,
+                            0,
+                        );
+
+                        drop(profiling_zone);
+
+                        let profiling_zone = profiling_zone!(
+                            "zeroing the draw count buffer",
+                            &device,
+                            command_buffer,
+                            &profiling_ctx
+                        );
+
+                        device.cmd_fill_buffer(
+                            command_buffer,
+                            draw_buffers.draw_counts_buffer.buffer,
+                            0,
+                            vk::WHOLE_SIZE,
+                            0,
+                        );
+
+                        drop(profiling_zone);
+                    })?;
+
+                    let frustum_culling = command_graph.register_commands(vec![(zero_frustum_culling_buffers, Some(transfer_to_compute_barrier))], |command_buffer| {
                         record_frustum_culling(RecordFrustumCullingParams {
                             device: &device,
-                            command_buffer: compute_command_buffer,
+                            command_buffer,
                             pipelines: &pipelines,
                             draw_buffers: &draw_buffers,
                             profiling_ctx: &profiling_ctx,
@@ -975,17 +1044,56 @@ fn main() -> anyhow::Result<()> {
                             view_matrix,
                             perspective_matrix,
                         });
+                    })?;
 
-                        device.end_command_buffer(compute_command_buffer)?;
-                    }
-
-                    {
-                        device.begin_command_buffer(
+                    let frustum_culling_demultiplex_draws = command_graph.register_commands(vec![(frustum_culling, Some(compute_to_compute_barrier))], |command_buffer| {
+                        device.cmd_bind_pipeline(
                             command_buffer,
-                            &vk::CommandBufferBeginInfo::builder()
-                                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                        )?;
+                            vk::PipelineBindPoint::COMPUTE,
+                            pipelines.demultiplex_draws,
+                        );
 
+                        {
+                            let _profiling_zone = profiling_zone!(
+                                "demultiplex draws compute shader",
+                                &device,
+                                command_buffer,
+                                &profiling_ctx
+                            );
+
+                            device.cmd_bind_descriptor_sets(
+                                command_buffer,
+                                vk::PipelineBindPoint::COMPUTE,
+                                pipelines.frustum_culling_pipeline_layout,
+                                0,
+                                &[
+                                    descriptor_sets.frustum_culling,
+                                    descriptor_sets.instance_buffer,
+                                ],
+                                &[],
+                            );
+
+                            device.cmd_bind_pipeline(
+                                command_buffer,
+                                vk::PipelineBindPoint::COMPUTE,
+                                pipelines.demultiplex_draws,
+                            );
+
+                            device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
+                        }
+                    })?;
+
+                    let light_assignment = command_graph.register_commands(vec![(reset_query_pool, None)], |command_buffer| {
+                        record_light_assignment(RecordLightAssignmentParams {
+                            device: &device,
+                            command_buffer,
+                            profiling_ctx: &profiling_ctx,
+                            descriptor_sets: &descriptor_sets,
+                            light_buffers: &light_buffers,
+                        });
+                    })?;
+
+                    let rendering = command_graph.register_commands(vec![(frustum_culling_demultiplex_draws, None), (light_assignment, None)], |command_buffer| {
                         record(RecordParams {
                             device: &device,
                             command_buffer,
@@ -1005,10 +1113,8 @@ fn main() -> anyhow::Result<()> {
                                 opaque_mip_levels,
                                 tonemapping_params,
                             },
-                        })?;
-
-                        device.end_command_buffer(command_buffer)?;
-                    }
+                        });
+                    })?;
 
                     {
                         let _submission_span = tracy_client::span!("Command buffer submission");
@@ -1018,18 +1124,8 @@ fn main() -> anyhow::Result<()> {
                             &[
                                 *vk::SubmitInfo::builder()
                                     .wait_semaphores(&[present_semaphore])
-                                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::TRANSFER])
-                                    .command_buffers(&[reset_query_pool_command_buffer])
-                                    .signal_semaphores(&[reset_query_pool_semaphore]),
-                                *vk::SubmitInfo::builder()
-                                    .wait_semaphores(&[reset_query_pool_semaphore])
-                                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::DRAW_INDIRECT])
-                                    .command_buffers(&[compute_command_buffer])
-                                    .signal_semaphores(&[frustum_culling_semaphore]),
-                                *vk::SubmitInfo::builder()
-                                    .wait_semaphores(&[frustum_culling_semaphore])
-                                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::BOTTOM_OF_PIPE])
-                                    .command_buffers(&[command_buffer])
+                                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+                                    .command_buffers(&command_graph.get_buffers())
                                     .signal_semaphores(&[render_semaphore]),
                             ],
                             render_fence,
@@ -1059,7 +1155,7 @@ fn main() -> anyhow::Result<()> {
 
                     {
                         depthbuffer.cleanup(&device, &mut allocator)?;
-                        lights_buffer.cleanup(&device, &mut allocator)?;
+                        light_buffers.lights.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         sun_uniform_buffer.cleanup(&device, &mut allocator)?;
                         draw_buffers.cleanup(&device, &mut allocator)?;
@@ -1079,6 +1175,45 @@ fn main() -> anyhow::Result<()> {
             log::error!("Error: {}", loop_closure);
         }
     });
+}
+
+struct LightBuffers {
+    lights: ash_abstractions::Buffer,
+    froxel_light_counts: ash_abstractions::Buffer,
+    froxel_light_indices: ash_abstractions::Buffer,
+}
+
+struct RecordLightAssignmentParams<'a> {
+    device: &'a ash::Device,
+    command_buffer: vk::CommandBuffer,
+    profiling_ctx: &'a ProfilingContext,
+    descriptor_sets: &'a DescriptorSets,
+    light_buffers: &'a LightBuffers,
+}
+
+unsafe fn record_light_assignment(params: RecordLightAssignmentParams) {
+    let _span = tracy_client::span!("Light assignment command buffer recording");
+
+    let RecordLightAssignmentParams {
+        device, command_buffer, profiling_ctx, descriptor_sets, light_buffers
+    } = params;
+
+    let _profiling_zone = profiling_zone!(
+        "light assignment",
+        vk::PipelineStageFlags::TOP_OF_PIPE,
+        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+        device,
+        command_buffer,
+        profiling_ctx
+    );
+
+    device.cmd_fill_buffer(
+        command_buffer,
+        light_buffers.froxel_light_counts.buffer,
+        0,
+        vk::WHOLE_SIZE,
+        0,
+    );
 }
 
 struct RecordFrustumCullingParams<'a> {
@@ -1117,53 +1252,6 @@ unsafe fn record_frustum_culling(params: RecordFrustumCullingParams) {
         device,
         command_buffer,
         profiling_ctx
-    );
-
-    {
-        let profiling_zone = profiling_zone!(
-            "zeroing the instance count buffer",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        device.cmd_fill_buffer(
-            command_buffer,
-            draw_buffers.instance_count_buffer.buffer,
-            0,
-            vk::WHOLE_SIZE,
-            0,
-        );
-
-        drop(profiling_zone);
-
-        let profiling_zone = profiling_zone!(
-            "zeroing the draw count buffer",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        device.cmd_fill_buffer(
-            command_buffer,
-            draw_buffers.draw_counts_buffer.buffer,
-            0,
-            vk::WHOLE_SIZE,
-            0,
-        );
-
-        drop(profiling_zone);
-    }
-
-    vk_sync::cmd::pipeline_barrier(
-        device,
-        command_buffer,
-        Some(vk_sync::GlobalBarrier {
-            previous_accesses: &[vk_sync::AccessType::TransferWrite],
-            next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-        }),
-        &[],
-        &[],
     );
 
     device.cmd_bind_descriptor_sets(
@@ -1214,34 +1302,6 @@ unsafe fn record_frustum_culling(params: RecordFrustumCullingParams) {
 
         device.cmd_dispatch(command_buffer, dispatch_count(num_instances, 64), 1, 1);
     }
-
-    vk_sync::cmd::pipeline_barrier(
-        device,
-        command_buffer,
-        Some(vk_sync::GlobalBarrier {
-            previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-            next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-        }),
-        &[],
-        &[],
-    );
-
-    device.cmd_bind_pipeline(
-        command_buffer,
-        vk::PipelineBindPoint::COMPUTE,
-        pipelines.demultiplex_draws,
-    );
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "demultiplex draws compute shader",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
-    }
 }
 
 struct RecordParams<'a> {
@@ -1267,7 +1327,7 @@ struct DynamicRecordParams {
     tonemapping_params: colstodian::tonemap::BakedLottesTonemapperParams,
 }
 
-unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
+unsafe fn record(params: RecordParams) {
     let _span = tracy_client::span!("Main command buffer recording");
 
     let RecordParams {
@@ -1370,7 +1430,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         vk::PipelineBindPoint::GRAPHICS,
         pipelines.pipeline_layout,
         0,
-        &[descriptor_sets.main, descriptor_sets.instance_buffer],
+        &[descriptor_sets.main, descriptor_sets.instance_buffer, descriptor_sets.lights],
         &[],
     );
 
@@ -1546,6 +1606,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         &[
             descriptor_sets.main,
             descriptor_sets.instance_buffer,
+            descriptor_sets.lights,
             descriptor_sets.opaque_sampled_hdr_framebuffer,
         ],
         &[],
@@ -1655,8 +1716,6 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     }
 
     drop(all_commands_profiling_zone);
-
-    Ok(())
 }
 
 fn create_transmission_framebuffer(

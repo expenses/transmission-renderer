@@ -92,6 +92,7 @@ impl Pipelines {
                     .set_layouts(&[
                         descriptor_set_layouts.main,
                         descriptor_set_layouts.instance_buffer,
+                        descriptor_set_layouts.lights,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -106,6 +107,7 @@ impl Pipelines {
                     .set_layouts(&[
                         descriptor_set_layouts.main,
                         descriptor_set_layouts.instance_buffer,
+                        descriptor_set_layouts.lights,
                         descriptor_set_layouts.hdr_framebuffer,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
