@@ -1,7 +1,6 @@
 use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 use ash::vk;
 
-#[derive(Clone, Copy)]
 pub struct RenderPasses {
     pub draw: vk::RenderPass,
     pub transmission: vk::RenderPass,

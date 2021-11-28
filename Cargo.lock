@@ -1593,7 +1593,6 @@ dependencies = [
  "gpu-allocator",
  "image",
  "log",
- "num_cpus",
  "parking_lot",
  "petgraph",
  "shared-structs",

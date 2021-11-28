@@ -1,21 +1,9 @@
 use ash::vk;
-use std::sync::atomic::{AtomicU16, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 
-struct TimestampBuffer<const N: usize> {
-    timestamps: parking_lot::Mutex<[i64; N]>,
-    len: AtomicU16,
-}
-
-impl<const N: usize> TimestampBuffer<N> {
-    fn emit(&self) {
-        let timestamps = self.timestamps.lock();
-        for i in 0..self.len.load(Ordering::Relaxed) as usize {
-            tracy_client::emit_gpu_time(timestamps[i], 0, i as u16);
-        }
-    }
-
-    fn next_id(&self) -> u16 {
-        self.len.fetch_add(1, Ordering::Relaxed)
+fn emit(timestamps: &[i64]) {
+    for (i, timestamp) in timestamps.iter().enumerate() {
+        tracy_client::emit_gpu_time(*timestamp, 0, i as u16);
     }
 }
 
@@ -41,20 +29,7 @@ impl QueryPool {
                 0,
                 2048,
             );
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            init_resources.device,
-            init_resources.command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::HostWrite],
-                next_accesses: &[vk_sync::AccessType::HostWrite],
-            }),
-            &[],
-            &[],
-        );
-
-        unsafe {
+        
             init_resources.device.cmd_write_timestamp(
                 init_resources.command_buffer,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -92,60 +67,62 @@ impl QueryPool {
         );
 
         Ok(ProfilingContext {
-            buffer: TimestampBuffer {
-                timestamps: parking_lot::Mutex::new([0; 4096]),
-                // As it contains the initial timestamp.
-                len: AtomicU16::new(1),
-            },
+            buffer: [0; 4096],
+            buffer_len: Default::default(),
             pool: self.pool,
-            can_reset: AtomicBool::new(true),
+            // As it contains the initial timestamp.
+            previous_len: Some(1),
         })
     }
 }
 
 pub struct ProfilingContext {
-    buffer: TimestampBuffer<4096>,
+    buffer: [i64; 4096],
+    buffer_len: AtomicU16,
     pool: vk::QueryPool,
-    can_reset: AtomicBool,
+    previous_len: Option<u16>,
 }
 
 impl ProfilingContext {
     /// Must be called before using for the first time and between collecting and recording zones. Ideally you call this immediately after starting a command buffer each frame.
     pub fn reset(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
-        if !self.can_reset.load(Ordering::Relaxed) {
-            return;
-        }
-
-        let len = self.buffer.len.swap(0, Ordering::Relaxed) as u32;
+        let previous_len = match self.previous_len {
+            Some(previous_len) => previous_len,
+            _ => return
+        };
 
         unsafe {
-            device.cmd_reset_query_pool(command_buffer, self.pool, 0, len);
+            device.cmd_reset_query_pool(command_buffer, self.pool, 0, previous_len as u32);
         }
     }
 
     // Must be called once per frame outside of a command buffer. Ideally as the last thing per frame.
-    pub fn collect(&self, device: &ash::Device) -> anyhow::Result<()> {
-        let len = self.buffer.len.load(Ordering::Relaxed);
+    pub fn collect(&mut self, device: &ash::Device) -> anyhow::Result<()> {
+        let len = self.buffer_len.load(Ordering::Acquire);
+
+        let timestamps = &mut self.buffer[..len as usize];
 
         let res = unsafe {
             device.get_query_pool_results(
                 self.pool,
                 0,
                 len as u32,
-                &mut self.buffer.timestamps.lock()[..len as usize],
+                timestamps,
                 vk::QueryResultFlags::WAIT | vk::QueryResultFlags::TYPE_64,
             )
         };
 
         // Even though we're setting the WAIT flag, get_query_pool_results still seems
         // to sometimes return NOT_READY occasionally. In this case we just ignore it.
-        self.can_reset.store(if res.is_ok() {
-            self.buffer.emit();
-            true
+        self.previous_len = if res.is_ok() {
+            self.buffer_len.store(0, Ordering::Release);
+            emit(timestamps);
+
+            Some(len)
         } else {
             println!("vkGetQueryResults just returned NOT_READY illegally");
-            false
-        }, Ordering::Relaxed);
+            None
+        };
 
         Ok(())
     }
@@ -207,8 +184,8 @@ impl ProfilingZone {
         command_buffer: vk::CommandBuffer,
         context: &ProfilingContext,
     ) -> Self {
-        let start_query_id = context.buffer.next_id();
-        let end_query_id = context.buffer.next_id();
+        let start_query_id = context.buffer_len.fetch_add(1, Ordering::Relaxed);
+        let end_query_id = context.buffer_len.fetch_add(1, Ordering::Relaxed);
 
         unsafe {
             device.cmd_write_timestamp(

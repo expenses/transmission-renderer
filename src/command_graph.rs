@@ -143,7 +143,9 @@ impl CommandGraph {
         drop(span);
 
         for handle in self.handles.drain(..) {
-            handle.block_on_result();
+            if let Err(err) = handle.block_on_result() {
+                eprintln!("{}", err);
+            }
         }
 
         buffers

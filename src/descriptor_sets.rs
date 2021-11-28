@@ -144,7 +144,6 @@ impl DescriptorSetLayouts {
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct DescriptorSets {
     pub main: vk::DescriptorSet,
     pub instance_buffer: vk::DescriptorSet,

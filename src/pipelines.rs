@@ -4,7 +4,6 @@ use ash::vk;
 use c_str_macro::c_str;
 use glam::{Vec2, Vec3};
 
-#[derive(Clone, Copy)]
 pub struct Pipelines {
     pub normal: vk::Pipeline,
     pub depth_pre_pass: vk::Pipeline,
