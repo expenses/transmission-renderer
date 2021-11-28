@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [".", "glam-pbr", "shader", "shared-structs"]
+members = [".", "glam-pbr", "shader", "shared-structs", "thread-pool"]
 
 [dependencies]
 anyhow = "1.0.45"
@@ -27,8 +27,7 @@ c_str_macro = "1.0.3"
 structopt = "0.3.25"
 parking_lot = "0.11.2"
 petgraph = "0.6.0"
-futures = "0.3.18"
-bevy_tasks = "0.5.0"
+thread-pool = {path = "thread-pool"}
 
 [profile.dev.package."*"]
 opt-level = 3

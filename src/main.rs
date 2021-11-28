@@ -208,7 +208,7 @@ fn main() -> anyhow::Result<()> {
         )
     }?;
 
-    let command_buffer = command_buffers[0];
+    let init_command_buffer = command_buffers[0];
 
     let mut allocator =
         gpu_allocator::vulkan::Allocator::new(&gpu_allocator::vulkan::AllocatorCreateDesc {
@@ -224,14 +224,14 @@ fn main() -> anyhow::Result<()> {
 
     unsafe {
         device.begin_command_buffer(
-            command_buffer,
+            init_command_buffer,
             &vk::CommandBufferBeginInfo::builder()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
         )
     }?;
 
     let mut init_resources = ash_abstractions::InitResources {
-        command_buffer,
+        command_buffer: init_command_buffer,
         device: &device,
         allocator: &mut allocator,
         debug_utils_loader: Some(&debug_utils_loader),
@@ -444,12 +444,12 @@ fn main() -> anyhow::Result<()> {
     unsafe {
         let _span = tracy_client::span!("Waiting on the init command buffer");
 
-        device.end_command_buffer(command_buffer)?;
+        device.end_command_buffer(init_command_buffer)?;
         let fence = device.create_fence(&vk::FenceCreateInfo::builder(), None)?;
 
         device.queue_submit(
             queue,
-            &[*vk::SubmitInfo::builder().command_buffers(&[command_buffer])],
+            &[*vk::SubmitInfo::builder().command_buffers(&[init_command_buffer])],
             fence,
         )?;
 
@@ -691,7 +691,7 @@ fn main() -> anyhow::Result<()> {
         std::sync::Arc::new(query_pool.into_profiling_context(&device, physical_device_properties.limits)?);
 
     let mut command_graph = command_graph::CommandGraph::new(&device, 16, graphics_queue_family)?;
-    let task_pool = bevy_tasks::TaskPool::new();
+    let thread_pool = thread_pool::ThreadPool::new();
 
     drop(entire_setup_span);
 
@@ -797,7 +797,7 @@ fn main() -> anyhow::Result<()> {
                             )?;
 
                             device.begin_command_buffer(
-                                command_buffer,
+                                init_command_buffer,
                                 &vk::CommandBufferBeginInfo::builder()
                                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                             )?;
@@ -808,7 +808,7 @@ fn main() -> anyhow::Result<()> {
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
-                            command_buffer,
+                            command_buffer: init_command_buffer,
                             device: &device,
                             allocator: &mut allocator,
                             debug_utils_loader: Some(&debug_utils_loader),
@@ -877,13 +877,13 @@ fn main() -> anyhow::Result<()> {
                         drop(init_resources);
 
                         unsafe {
-                            device.end_command_buffer(command_buffer)?;
+                            device.end_command_buffer(init_command_buffer)?;
                             let fence =
                                 device.create_fence(&vk::FenceCreateInfo::builder(), None)?;
 
                             device.queue_submit(
                                 queue,
-                                &[*vk::SubmitInfo::builder().command_buffers(&[command_buffer])],
+                                &[*vk::SubmitInfo::builder().command_buffers(&[init_command_buffer])],
                                 fence,
                             )?;
 
@@ -977,19 +977,12 @@ fn main() -> anyhow::Result<()> {
 
                     let command_graph = &mut command_graph;
 
-                    let _ = task_pool.scope(|scope| {
-
-                        let mut command_graph = command_graph::ScopedCommandGraph {
-                            scope,
-                            inner: command_graph
-                        };
-
                     let profiling_ctx = &profiling_ctx;
                     let device = &device;
 
                     let reset_query_pool = command_graph.register_commands("reset_query_pool", &[], &device, move |command_buffer| {
                         profiling_ctx.reset(&device, command_buffer);
-                    }).unwrap();
+                    }, &thread_pool).unwrap();
 
                     // todo: this needs to be here because we're not syncing the query pool reset properly.
                     dbg!(reset_query_pool);
@@ -1041,7 +1034,7 @@ fn main() -> anyhow::Result<()> {
                         );
 
                         drop(profiling_zone);
-                    }).unwrap();
+                    }, &thread_pool).unwrap();
 
                     let frustum_culling = command_graph.register_commands("frustum culling", &[(zero_frustum_culling_buffers, Some(transfer_to_compute_barrier))], &device, move |command_buffer| {
                         record_frustum_culling(RecordFrustumCullingParams {
@@ -1054,7 +1047,7 @@ fn main() -> anyhow::Result<()> {
                             view_matrix,
                             perspective_matrix,
                         });
-                    }).unwrap();
+                    }, &thread_pool).unwrap();
 
                     let frustum_culling_demultiplex_draws = command_graph.register_commands("frustum_culling_demultiplex_draws", &[(frustum_culling, Some(compute_to_compute_barrier))], &device, move |command_buffer| {
                         device.cmd_bind_pipeline(
@@ -1091,7 +1084,7 @@ fn main() -> anyhow::Result<()> {
 
                             device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
                         }
-                    }).unwrap();
+                    }, &thread_pool).unwrap();
 
                     let light_buffers = light_buffers.clone();
 
@@ -1103,7 +1096,7 @@ fn main() -> anyhow::Result<()> {
                             descriptor_sets: &descriptor_sets,
                             light_buffers: &light_buffers,
                         });
-                    }).unwrap();
+                    }, &thread_pool).unwrap();
 
                     let opaque_sampled_hdr_framebuffer = &opaque_sampled_hdr_framebuffer;
                     let opaque_sampled_hdr_framebuffer_image = opaque_sampled_hdr_framebuffer.image;
@@ -1131,11 +1124,7 @@ fn main() -> anyhow::Result<()> {
                                 tonemapping_params,
                             },
                         });
-                    }).unwrap();
-
-                        //Ok::<_, anyhow::Error>(())
-                        //command_graph.get_buffers(scope)
-                    });
+                    }, &thread_pool).unwrap();
 
                     {
                         let _submission_span = tracy_client::span!("Command buffer submission");
@@ -1213,8 +1202,6 @@ struct RecordLightAssignmentParams<'a> {
 }
 
 unsafe fn record_light_assignment(params: RecordLightAssignmentParams) {
-    let _span = tracy_client::span!("Light assignment command buffer recording");
-
     let RecordLightAssignmentParams {
         device, command_buffer, profiling_ctx, descriptor_sets, light_buffers
     } = params;
@@ -1249,8 +1236,6 @@ struct RecordFrustumCullingParams<'a> {
 }
 
 unsafe fn record_frustum_culling(params: RecordFrustumCullingParams) {
-    let _span = tracy_client::span!("Frustum culling command buffer recording");
-
     let RecordFrustumCullingParams {
         device,
         command_buffer,
@@ -1345,8 +1330,6 @@ struct DynamicRecordParams {
 }
 
 unsafe fn record(params: RecordParams) {
-    let _span = tracy_client::span!("Main command buffer recording");
-
     let RecordParams {
         device,
         command_buffer,

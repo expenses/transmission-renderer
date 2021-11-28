@@ -1,7 +1,6 @@
 use ash::vk;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use parking_lot::Mutex;
-use std::sync::Arc;
+use thread_pool::{Handle, ThreadPool};
 
 #[derive(Copy, Clone)]
 struct CommandPoolBufferPair {
@@ -13,6 +12,7 @@ pub struct CommandGraph {
     buffers: Vec<CommandPoolBufferPair>,
     buffer_index: AtomicUsize,
     nodes: petgraph::Graph<CommandBufferId, ()>,
+    handles: Vec<Handle>,
 }
 
 impl CommandGraph {
@@ -40,6 +40,7 @@ impl CommandGraph {
             }).collect::<anyhow::Result<_>>()?,
             buffer_index: Default::default(),
             nodes: Default::default(),
+            handles: Default::default(),
         })
     }
 
@@ -48,7 +49,7 @@ impl CommandGraph {
         self.buffer_index.store(0, Ordering::Relaxed);
     }
 
-    pub fn register_commands<'a, FN: FnOnce(vk::CommandBuffer) + Send + Sync + 'a>(&mut self, name: &str, parents: &[(NodeId, Option<BarrierId>)], device: &'a ash::Device, record_function: FN, scope: &mut bevy_tasks::Scope<'a, anyhow::Result<()>>) -> anyhow::Result<NodeId> {
+    pub fn register_commands<'a, FN: Fn(vk::CommandBuffer) + Send + Sync + 'a>(&mut self, name: &str, parents: &[(NodeId, Option<BarrierId>)], device: &'a ash::Device, record_function: FN, thread_pool: &ThreadPool) -> anyhow::Result<NodeId> {
         let _span = tracy_client::span!(&format!("Registering commands for {}", name));
 
         let buffer_id = self.buffer_index.fetch_add(1, Ordering::Relaxed);
@@ -57,9 +58,9 @@ impl CommandGraph {
 
         let span = tracy_client::span!("spawning");
 
-        //let record_function = Box::new(record_function);
+        self.handles.push(thread_pool.spawn(move || {
+            let _span = tracy_client::span!(&format!("Recording commands for {}", name));
 
-        scope.spawn(async move {
             unsafe {
                 device.reset_command_pool(
                     command_pair.pool,
@@ -78,19 +79,11 @@ impl CommandGraph {
             }
 
             Ok::<_, anyhow::Error>(())
-        });
+        }));
 
         drop(span);
 
-        let timing_test = tracy_client::span!("timing test");
-
-        scope.spawn(async move {
-            Ok::<_, anyhow::Error>(())
-        });
-
         let node_id = self.nodes.add_node(CommandBufferId(buffer_id));
-
-        let span = tracy_client::span!("Adding edges");
 
         for (parent_node_id, barrier_id) in parents {
             match barrier_id {
@@ -103,8 +96,6 @@ impl CommandGraph {
                 }
             }
         }
-
-        drop(span);
 
         Ok(NodeId(node_id))
     }
@@ -142,34 +133,20 @@ impl CommandGraph {
         Ok(BarrierId(node_id))
     }
 
-    pub fn get_buffers(&self) -> Vec<vk::CommandBuffer> {
-        let _span = tracy_client::span!("toposort");
+    pub fn get_buffers(&mut self) -> Vec<vk::CommandBuffer> {
+        let span = tracy_client::span!("toposort");
 
         let sort = petgraph::algo::toposort(&self.nodes, None).unwrap();
 
-        sort.iter().map(|id| self.buffers[self.nodes[*id].0].buffer).collect()
-    }
+        let buffers = sort.iter().map(|id| self.buffers[self.nodes[*id].0].buffer).collect();
 
-    pub fn scoped<'a>(&'a mut self, scope: &'a mut bevy_tasks::Scope<'a, anyhow::Result<()>>) -> ScopedCommandGraph<'a, 'a> {
-        ScopedCommandGraph {
-            inner: self,
-            scope
+        drop(span);
+
+        for handle in self.handles.drain(..) {
+            handle.block_on_result();
         }
-    }
-}
 
-pub struct ScopedCommandGraph<'a, 'b> {
-    pub inner: &'a mut CommandGraph,
-    pub scope: &'b mut bevy_tasks::Scope<'a, anyhow::Result<()>>
-}
-
-impl<'a, 'b> ScopedCommandGraph<'a, 'b> {
-    pub fn register_commands<FN: FnOnce(vk::CommandBuffer) + Send + Sync + 'a>(&mut self, name: &str, parents: &[(NodeId, Option<BarrierId>)], device: &'a ash::Device, record_function: FN) -> anyhow::Result<NodeId> {
-        self.inner.register_commands(name, parents, device, record_function, self.scope)
-    }
-
-    pub fn register_global_barrier(&mut self, device: &ash::Device, barrier: vk_sync::GlobalBarrier) -> anyhow::Result<BarrierId> {
-        self.inner.register_global_barrier(device, barrier)
+        buffers
     }
 }
 
@@ -178,38 +155,3 @@ struct CommandBufferId(usize);
 pub struct NodeId(petgraph::graph::NodeIndex);
 #[derive(Clone, Copy)]
 pub struct BarrierId(petgraph::graph::NodeIndex);
-
-#[test]
-fn hmmm() {
-    let command_graph = CommandGraph {
-        buffers: (0 .. 10).map(|_| DummyCommandBuffer(Default::default())).collect(),
-        buffer_index: Default::default(),
-        nodes: Default::default(),
-        root: Default::default()
-    };
-
-    let barrier = command_graph.register_global_barrier(vk_sync::GlobalBarrier::default()).unwrap();
-
-    let a = command_graph.register_commands(vec![], |buffer| {
-        buffer.0.fetch_add(1, Ordering::Relaxed);
-        Ok(())
-    }).unwrap();
-
-    let b = command_graph.register_commands(vec![(a, None)], |buffer| {
-        buffer.0.fetch_add(2, Ordering::Relaxed);
-        Ok(())
-    }).unwrap();
-
-    let c = command_graph.register_commands(vec![(a, Some(barrier))], |buffer| {
-        buffer.0.fetch_add(3, Ordering::Relaxed);
-        Ok(())
-    }).unwrap();
-
-    let d = command_graph.register_commands(vec![(b, None), (c, None)], |buffer| {
-        buffer.0.fetch_add(99, Ordering::Relaxed);
-        Ok(())
-    }).unwrap();
-
-    panic!("{:?}", command_graph.get_buffers());
-
-}
