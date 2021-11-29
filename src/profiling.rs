@@ -120,7 +120,8 @@ impl ProfilingContext {
             emit(timestamps);
 
             self.num_written_timestamps.store(0, Ordering::Release);
-            self.timestamps_to_reset.store(num_timestamps, Ordering::Relaxed);
+            self.timestamps_to_reset
+                .store(num_timestamps, Ordering::Relaxed);
         } else {
             println!("vkGetQueryResults just returned NOT_READY illegally");
             self.timestamps_to_reset.store(0, Ordering::Relaxed);
@@ -186,8 +187,12 @@ impl ProfilingZone {
         command_buffer: vk::CommandBuffer,
         context: &ProfilingContext,
     ) -> Self {
-        let start_query_id = context.num_written_timestamps.fetch_add(1, Ordering::Relaxed);
-        let end_query_id = context.num_written_timestamps.fetch_add(1, Ordering::Relaxed);
+        let start_query_id = context
+            .num_written_timestamps
+            .fetch_add(1, Ordering::Relaxed);
+        let end_query_id = context
+            .num_written_timestamps
+            .fetch_add(1, Ordering::Relaxed);
 
         unsafe {
             device.cmd_write_timestamp(

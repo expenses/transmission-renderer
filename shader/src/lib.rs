@@ -9,7 +9,7 @@ mod asm;
 mod lighting;
 mod tonemapping;
 
-use asm::{atomic_i_increment, GetUnchecked};
+use asm::atomic_i_increment;
 use lighting::{
     calculate_normal, evaluate_lights, evaluate_lights_transmission, get_emission,
     get_material_params,
@@ -25,6 +25,7 @@ use spirv_std::{
     self as _,
     glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
     Image, RuntimeArray, Sampler, num_traits::Float,
+    arch::IndexUnchecked
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -319,12 +320,12 @@ pub fn vertex_instanced_with_scale(
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
-fn index<T, S: GetUnchecked<T> + ?Sized>(structure: &S, index: u32) -> &T {
-    unsafe { GetUnchecked::get_unchecked(structure, index as usize) }
+fn index<T, S: IndexUnchecked<T> + ?Sized>(structure: &S, index: u32) -> &T {
+    unsafe { structure.index_unchecked(index as usize) }
 }
 
-fn index_mut<T, S: GetUnchecked<T> + ?Sized>(structure: &mut S, index: u32) -> &mut T {
-    unsafe { GetUnchecked::get_unchecked_mut(structure, index as usize) }
+fn index_mut<T, S: IndexUnchecked<T> + ?Sized>(structure: &mut S, index: u32) -> &mut T {
+    unsafe { structure.index_unchecked_mut(index as usize) }
 }
 
 mod vk {

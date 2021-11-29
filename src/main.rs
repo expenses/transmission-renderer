@@ -155,19 +155,16 @@ fn main() -> anyhow::Result<()> {
 
         let device_features = vk::PhysicalDeviceFeatures::builder();
 
-        let mut null_descriptor_feature =
-            vk::PhysicalDeviceRobustness2FeaturesEXT::builder().null_descriptor(true);
-
         let mut vulkan_1_2_features = vk::PhysicalDeviceVulkan12Features::builder()
             .runtime_descriptor_array(true)
-            .draw_indirect_count(true);
+            .draw_indirect_count(true)
+            .descriptor_binding_partially_bound(true);
 
         let device_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_info)
             .enabled_features(&device_features)
             .enabled_extension_names(device_extensions.pointers())
             .enabled_layer_names(enabled_layers.pointers())
-            .push_next(&mut null_descriptor_feature)
             .push_next(&mut vulkan_1_2_features);
 
         unsafe { instance.create_device(physical_device, &device_info, None) }?
@@ -409,13 +406,13 @@ fn main() -> anyhow::Result<()> {
             4 * num_froxels,
             "froxel light counts",
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-            &mut init_resources
+            &mut init_resources,
         )?,
         froxel_light_indices: ash_abstractions::Buffer::new_of_size(
             4 * num_froxels * shared_structs::MAX_LIGHTS_PER_FROXEL as u64,
             "froxel light indices",
             vk::BufferUsageFlags::STORAGE_BUFFER,
-            &mut init_resources
+            &mut init_resources,
         )?,
     };
 
@@ -459,8 +456,6 @@ fn main() -> anyhow::Result<()> {
     for buffer in buffers_to_cleanup.drain(..) {
         buffer.cleanup_and_drop(&device, &mut allocator)?;
     }
-
-    image_manager.fill_with_dummy_images_up_to(MAX_IMAGES as usize);
 
     // Swapchain
 
@@ -1412,7 +1407,11 @@ unsafe fn record(params: RecordParams) {
         vk::PipelineBindPoint::GRAPHICS,
         pipelines.pipeline_layout,
         0,
-        &[descriptor_sets.main, descriptor_sets.instance_buffer, descriptor_sets.lights],
+        &[
+            descriptor_sets.main,
+            descriptor_sets.instance_buffer,
+            descriptor_sets.lights,
+        ],
         &[],
     );
 

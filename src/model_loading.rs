@@ -410,12 +410,6 @@ impl ImageManager {
         index
     }
 
-    pub fn fill_with_dummy_images_up_to(&mut self, items: usize) {
-        while self.image_infos.len() < items {
-            self.image_infos.push(self.image_infos[0]);
-        }
-    }
-
     pub fn write_descriptor_set(
         &self,
         set: vk::DescriptorSet,
