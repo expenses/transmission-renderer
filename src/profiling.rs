@@ -1,20 +1,11 @@
 use ash::vk;
 use std::sync::atomic::{AtomicU16, Ordering};
 
-struct TimestampBuffer<const N: usize> {
-    timestamps: [i64; N],
-    len: AtomicU16,
-}
+const POOL_SIZE: u32 = 4096;
 
-impl<const N: usize> TimestampBuffer<N> {
-    fn emit(&self) {
-        for i in 0..self.len.load(Ordering::Relaxed) as usize {
-            tracy_client::emit_gpu_time(self.timestamps[i], 0, i as u16);
-        }
-    }
-
-    fn next_id(&self) -> u16 {
-        self.len.fetch_add(1, Ordering::Relaxed)
+fn emit(timestamps: &[i64]) {
+    for (i, timestamp) in timestamps.iter().enumerate() {
+        tracy_client::emit_gpu_time(*timestamp, 0, i as u16);
     }
 }
 
@@ -28,7 +19,7 @@ impl QueryPool {
             init_resources.device.create_query_pool(
                 &vk::QueryPoolCreateInfo::builder()
                     .query_type(vk::QueryType::TIMESTAMP)
-                    .query_count(2048),
+                    .query_count(POOL_SIZE),
                 None,
             )
         }?;
@@ -38,22 +29,9 @@ impl QueryPool {
                 init_resources.command_buffer,
                 pool,
                 0,
-                2048,
+                POOL_SIZE,
             );
-        }
 
-        vk_sync::cmd::pipeline_barrier(
-            init_resources.device,
-            init_resources.command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::HostWrite],
-                next_accesses: &[vk_sync::AccessType::HostWrite],
-            }),
-            &[],
-            &[],
-        );
-
-        unsafe {
             init_resources.device.cmd_write_timestamp(
                 init_resources.command_buffer,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -91,70 +69,61 @@ impl QueryPool {
         );
 
         Ok(ProfilingContext {
-            buffer: TimestampBuffer {
-                timestamps: [0; 4096],
-                // As it contains the initial timestamp.
-                len: AtomicU16::new(1),
-            },
+            num_written_timestamps: Default::default(),
             pool: self.pool,
-            can_reset: true,
+            // As it contains the initial timestamp.
+            timestamps_to_reset: AtomicU16::new(1),
         })
     }
 }
 
 pub struct ProfilingContext {
-    buffer: TimestampBuffer<4096>,
+    num_written_timestamps: AtomicU16,
     pool: vk::QueryPool,
-    can_reset: bool,
+    timestamps_to_reset: AtomicU16,
 }
 
 impl ProfilingContext {
     /// Must be called before using for the first time and between collecting and recording zones. Ideally you call this immediately after starting a command buffer each frame.
     pub fn reset(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
-        if !self.can_reset {
+        let timestamps_to_reset = self.timestamps_to_reset.load(Ordering::Relaxed);
+
+        if timestamps_to_reset == 0 {
             return;
         }
 
-        let len = self.buffer.len.swap(0, Ordering::Relaxed) as u32;
-
         unsafe {
-            device.cmd_reset_query_pool(command_buffer, self.pool, 0, len);
+            device.cmd_reset_query_pool(command_buffer, self.pool, 0, timestamps_to_reset as u32);
         }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::HostWrite],
-                next_accesses: &[vk_sync::AccessType::HostWrite],
-            }),
-            &[],
-            &[],
-        );
     }
 
     // Must be called once per frame outside of a command buffer. Ideally as the last thing per frame.
-    pub fn collect(&mut self, device: &ash::Device) -> anyhow::Result<()> {
-        let len = self.buffer.len.load(Ordering::Relaxed);
+    pub fn collect(&self, device: &ash::Device) -> anyhow::Result<()> {
+        let num_timestamps = self.num_written_timestamps.load(Ordering::Acquire);
+
+        let mut buffer = [0; POOL_SIZE as usize];
+        let timestamps = &mut buffer[..num_timestamps as usize];
 
         let res = unsafe {
             device.get_query_pool_results(
                 self.pool,
                 0,
-                len as u32,
-                &mut self.buffer.timestamps[..len as usize],
+                num_timestamps as u32,
+                timestamps,
                 vk::QueryResultFlags::WAIT | vk::QueryResultFlags::TYPE_64,
             )
         };
 
         // Even though we're setting the WAIT flag, get_query_pool_results still seems
         // to sometimes return NOT_READY occasionally. In this case we just ignore it.
-        self.can_reset = if res.is_ok() {
-            self.buffer.emit();
-            true
+        if res.is_ok() {
+            emit(timestamps);
+
+            self.num_written_timestamps.store(0, Ordering::Release);
+            self.timestamps_to_reset.store(num_timestamps, Ordering::Relaxed);
         } else {
             println!("vkGetQueryResults just returned NOT_READY illegally");
-            false
+            self.timestamps_to_reset.store(0, Ordering::Relaxed);
         };
 
         Ok(())
@@ -217,8 +186,8 @@ impl ProfilingZone {
         command_buffer: vk::CommandBuffer,
         context: &ProfilingContext,
     ) -> Self {
-        let start_query_id = context.buffer.next_id();
-        let end_query_id = context.buffer.next_id();
+        let start_query_id = context.num_written_timestamps.fetch_add(1, Ordering::Relaxed);
+        let end_query_id = context.num_written_timestamps.fetch_add(1, Ordering::Relaxed);
 
         unsafe {
             device.cmd_write_timestamp(

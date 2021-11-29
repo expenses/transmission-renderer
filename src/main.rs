@@ -38,7 +38,7 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
     )
 }
 
-pub const MAX_IMAGES: u32 = 195;
+pub const MAX_IMAGES: u32 = 193;
 pub const NEAR_Z: f32 = 0.01;
 
 #[derive(StructOpt)]
@@ -189,23 +189,25 @@ fn main() -> anyhow::Result<()> {
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
-    let (command_buffer, command_pool) = {
-        let command_pool = unsafe {
-            device.create_command_pool(
-                &vk::CommandPoolCreateInfo::builder().queue_family_index(graphics_queue_family),
-                None,
-            )
-        }?;
+    ash_abstractions::set_object_name(&device, &debug_utils_loader, queue, "graphics queue")?;
 
-        let cmd_buf_allocate_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(command_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
+    let command_pool = unsafe {
+        device.create_command_pool(
+            &vk::CommandPoolCreateInfo::builder().queue_family_index(graphics_queue_family),
+            None,
+        )
+    }?;
 
-        let command_buffer = unsafe { device.allocate_command_buffers(&cmd_buf_allocate_info) }?[0];
+    let command_buffers = unsafe {
+        device.allocate_command_buffers(
+            &vk::CommandBufferAllocateInfo::builder()
+                .command_pool(command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(1),
+        )
+    }?;
 
-        (command_buffer, command_pool)
-    };
+    let command_buffer = command_buffers[0];
 
     let mut allocator =
         gpu_allocator::vulkan::Allocator::new(&gpu_allocator::vulkan::AllocatorCreateDesc {
@@ -388,23 +390,33 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let lights_buffer = ash_abstractions::Buffer::new(
+    let num_froxels = 1024;
+
+    let light_buffers = LightBuffers {
+        lights: ash_abstractions::Buffer::new(
         unsafe {
             cast_slice(&[
-                PointLight {
-                    position: Vec3::new(0.0, 0.8, 0.0).into(),
-                    colour_and_intensity: Vec4::new(1.0, 0.0, 0.0, 5.0),
-                },
-                PointLight {
-                    position: Vec3::new(8.0, 0.8, 0.0).into(),
-                    colour_and_intensity: Vec4::new(0.0, 0.0, 1.0, 10.0),
-                },
+                    PointLight::new(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
+                    PointLight::new(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
             ])
         },
         "lights",
         vk::BufferUsageFlags::STORAGE_BUFFER,
         &mut init_resources,
-    )?;
+        )?,
+        froxel_light_counts: ash_abstractions::Buffer::new_of_size(
+            4 * num_froxels,
+            "froxel light counts",
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            &mut init_resources
+        )?,
+        froxel_light_indices: ash_abstractions::Buffer::new_of_size(
+            4 * num_froxels * shared_structs::MAX_LIGHTS_PER_FROXEL as u64,
+            "froxel light indices",
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            &mut init_resources
+        )?,
+    };
 
     let tonemapping_params = colstodian::tonemap::BakedLottesTonemapperParams::from(
         colstodian::tonemap::LottesTonemapperParams {
@@ -567,30 +579,25 @@ fn main() -> anyhow::Result<()> {
     unsafe {
         device.update_descriptor_sets(
             &[
+                *image_manager.write_descriptor_set(descriptor_sets.main, 0),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&buffer_info(&lights_buffer)),
-                *image_manager.write_descriptor_set(descriptor_sets.main, 1),
-                *vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_sets.main)
-                    .dst_binding(2)
+                    .dst_binding(1)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(sampler)]),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(3)
+                    .dst_binding(2)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&buffer_info(&model_buffers.materials)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(4)
+                    .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&buffer_info(&sun_uniform_buffer)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.main)
-                    .dst_binding(5)
+                    .dst_binding(4)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(clamp_sampler)]),
                 // Instance buffer
@@ -636,6 +643,22 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(6)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&buffer_info(&draw_buffers.transmission_alpha_clip.buffer)),
+                // lights
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.lights)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&light_buffers.lights)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.lights)
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&light_buffers.froxel_light_counts)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.lights)
+                    .dst_binding(2)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&light_buffers.froxel_light_indices)),
             ],
             &[],
         )
@@ -646,8 +669,16 @@ fn main() -> anyhow::Result<()> {
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
 
-    let present_semaphore = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let render_semaphore = unsafe { device.create_semaphore(&semaphore_info, None)? };
+    let create_named_semaphore = |name| {
+        let semaphore = unsafe { device.create_semaphore(&semaphore_info, None) }?;
+
+        ash_abstractions::set_object_name(&device, &debug_utils_loader, semaphore, name)?;
+
+        Ok::<_, anyhow::Error>(semaphore)
+    };
+
+    let present_semaphore = create_named_semaphore("present semaphore")?;
+    let render_semaphore = create_named_semaphore("render semaphore")?;
     let render_fence = unsafe { device.create_fence(&fence_info, None)? };
 
     let mut cursor_grab = false;
@@ -1010,7 +1041,7 @@ fn main() -> anyhow::Result<()> {
 
                     {
                         depthbuffer.cleanup(&device, &mut allocator)?;
-                        lights_buffer.cleanup(&device, &mut allocator)?;
+                        light_buffers.lights.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         sun_uniform_buffer.cleanup(&device, &mut allocator)?;
                         draw_buffers.cleanup(&device, &mut allocator)?;
@@ -1030,6 +1061,12 @@ fn main() -> anyhow::Result<()> {
             log::error!("Error: {}", loop_closure);
         }
     });
+}
+
+struct LightBuffers {
+    lights: ash_abstractions::Buffer,
+    froxel_light_counts: ash_abstractions::Buffer,
+    froxel_light_indices: ash_abstractions::Buffer,
 }
 
 struct RecordParams<'a> {
@@ -1314,7 +1351,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         vk::PipelineBindPoint::GRAPHICS,
         pipelines.pipeline_layout,
         0,
-        &[descriptor_sets.main, descriptor_sets.instance_buffer],
+        &[descriptor_sets.main, descriptor_sets.instance_buffer, descriptor_sets.lights],
         &[],
     );
 
@@ -1490,6 +1527,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         &[
             descriptor_sets.main,
             descriptor_sets.instance_buffer,
+            descriptor_sets.lights,
             descriptor_sets.opaque_sampled_hdr_framebuffer,
         ],
         &[],

@@ -37,20 +37,18 @@ pub fn evaluate_lights_transmission(
         let (direction, attenuation) =
             light_direction_and_attenuation(position, light.position.into());
 
-        let light_colour = light.colour_and_intensity.truncate();
-        let intensity = light.colour_and_intensity.w;
+        let light_emission = light.colour_emission_and_falloff_distance.truncate();
 
         sum = sum
             + basic_brdf(BasicBrdfParams {
                 light: Light(direction),
-                light_intensity: light_colour * intensity * attenuation,
+                light_intensity: light_emission * attenuation,
                 normal,
                 view,
                 material_params,
             });
 
-        transmission += light_colour
-            * intensity
+        transmission += light_emission
             * attenuation
             * glam_pbr::transmission_btdf(material_params, normal, view, Light(direction));
 
@@ -85,13 +83,12 @@ pub fn evaluate_lights(
         let (direction, attenuation) =
             light_direction_and_attenuation(position, light.position.into());
 
-        let light_colour = light.colour_and_intensity.truncate();
-        let intensity = light.colour_and_intensity.w;
+        let light_emission = light.colour_emission_and_falloff_distance.truncate();
 
         sum = sum
             + basic_brdf(BasicBrdfParams {
                 light: Light(direction),
-                light_intensity: light_colour * intensity * attenuation,
+                light_intensity: light_emission * attenuation,
                 normal,
                 view,
                 material_params,

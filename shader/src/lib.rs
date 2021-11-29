@@ -19,7 +19,7 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    SunUniform, Similarity,
+    SunUniform, Similarity, MAX_LIGHTS_PER_FROXEL,
 };
 use spirv_std::{
     self as _,
@@ -37,13 +37,13 @@ pub fn fragment_transmission(
     #[spirv(flat)] material_id: u32,
     #[spirv(flat)] model_scale: f32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
-    #[spirv(descriptor_set = 0, binding = 5)] clamp_sampler: &Sampler,
-    #[spirv(descriptor_set = 2, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     output: &mut Vec4,
 ) {
     let material = index(materials, material_id);
@@ -139,11 +139,11 @@ pub fn fragment(
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
-    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 4, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
 ) {
@@ -204,9 +204,9 @@ impl<'a> TextureSampler<'a> {
 pub fn depth_pre_pass_alpha_clip(
     uv: Vec2,
     #[spirv(flat)] material_id: u32,
-    #[spirv(descriptor_set = 0, binding = 1)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
 ) {
     let material = index(materials, material_id);
 
@@ -406,7 +406,7 @@ pub fn demultiplex_draws(
 ) {
     let draw_id = id.x;
 
-    if draw_id as usize > instance_counts.len() {
+    if draw_id as usize >= instance_counts.len() {
         return;
     }
 
@@ -436,6 +436,31 @@ pub fn demultiplex_draws(
         2 => *index_mut(transmission_draws, non_zero_draw_id) = draw_command,
         _ => *index_mut(transmission_alpha_clip_draws, non_zero_draw_id) = draw_command,
     };
+}
+
+#[spirv(compute(threads(8, 8)))]
+pub fn assign_lights_to_froxels(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] froxel_light_counts: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] froxel_light_indices: &mut [u32],
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let froxel_id = id.x;
+    let light_id = id.y;
+
+    if froxel_id as usize >= froxel_light_counts.len() {
+        return;
+    }
+
+    if light_id as usize >= point_lights.len() {
+        return;
+    }
+
+    let light_offset = atomic_i_increment(index_mut(froxel_light_counts, froxel_id));
+
+    let global_light_index = froxel_id * MAX_LIGHTS_PER_FROXEL + light_offset;
+
+    *index_mut(froxel_light_indices, global_light_index) = light_id;
 }
 
 /*
@@ -475,7 +500,7 @@ pub fn fullscreen_tri(
 #[spirv(fragment)]
 pub fn fragment_tonemap(
     uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 1, binding = 0)] texture: &Image!(2D, type=f32, sampled),
     #[spirv(push_constant)] params: &BakedLottesTonemapperParams,
     output: &mut Vec4,
