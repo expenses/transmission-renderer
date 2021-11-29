@@ -687,7 +687,7 @@ fn main() -> anyhow::Result<()> {
     let mut screen_center =
         winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
 
-    let mut profiling_ctx =
+    let profiling_ctx =
         query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
 
     let mut command_graph = command_graph::CommandGraph::new(&device, 16, graphics_queue_family)?;
