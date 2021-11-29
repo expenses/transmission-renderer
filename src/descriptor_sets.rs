@@ -11,36 +11,48 @@ pub struct DescriptorSetLayouts {
 
 impl DescriptorSetLayouts {
     pub fn new(device: &ash::Device) -> anyhow::Result<Self> {
+        let flags = &[
+            vk::DescriptorBindingFlags::PARTIALLY_BOUND,
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
+        ];
+        let mut bindless_flags =
+            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(flags);
+
         Ok(Self {
             main: unsafe {
                 device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(MAX_IMAGES)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(1)
-                            .descriptor_type(vk::DescriptorType::SAMPLER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(2)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(3)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(4)
-                            .descriptor_type(vk::DescriptorType::SAMPLER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                    ]),
+                    &*vk::DescriptorSetLayoutCreateInfo::builder()
+                        .bindings(&[
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(0)
+                                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                                .descriptor_count(MAX_IMAGES)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(1)
+                                .descriptor_type(vk::DescriptorType::SAMPLER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(2)
+                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(3)
+                                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(4)
+                                .descriptor_type(vk::DescriptorType::SAMPLER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                        ])
+                        .push_next(&mut bindless_flags),
                     None,
                 )?
             },
