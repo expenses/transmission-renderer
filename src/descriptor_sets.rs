@@ -177,13 +177,13 @@ impl DescriptorSets {
                             .descriptor_count(2 + 8 + 3),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                            .descriptor_count(2),
+                            .descriptor_count(3),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(MAX_IMAGES),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLER)
-                            .descriptor_count(2),
+                            .descriptor_count(3),
                     ])
                     .max_sets(6),
                 None,
