@@ -19,13 +19,14 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    SunUniform, Similarity, MAX_LIGHTS_PER_FROXEL,
+    Similarity, SunUniform, MAX_LIGHTS_PER_FROXEL,
 };
 use spirv_std::{
     self as _,
+    arch::IndexUnchecked,
     glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
-    Image, RuntimeArray, Sampler, num_traits::Float,
-    arch::IndexUnchecked
+    num_traits::Float,
+    Image, RuntimeArray, Sampler,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
