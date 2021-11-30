@@ -9,6 +9,7 @@ use structopt::StructOpt;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
+use std::f32::consts::PI;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
 use shared_structs::{Instance, PointLight, PushConstants, Similarity};
@@ -464,8 +465,14 @@ fn main() -> anyhow::Result<()> {
 
     let num_tiles = UVec2::new(12, 8);
 
+    let mut sun_velocity = Vec2::ZERO;
+    let mut sun = Sun {
+        pitch: 1.1,
+        yaw: 4.8,
+    };
+
     let mut uniforms = shared_structs::Uniforms {
-        sun_dir: Vec3::new(1.0, 40.0, 1.0).normalize().into(),
+        sun_dir: sun.as_normal().into(),
         sun_intensity: Vec3::splat(3.0).into(),
         ggx_lut_texture_index: ggx_lut_id,
         num_tiles,
@@ -596,13 +603,23 @@ fn main() -> anyhow::Result<()> {
                 acceleration_structure_loader
                     .cmd_build_acceleration_structures(init_resources.command_buffer, &build_geometry_infos, &build_ranges);
             }
+
+            vk_sync::cmd::pipeline_barrier(
+                &device,
+                init_resources.command_buffer,
+                Some(vk_sync::GlobalBarrier {
+                    previous_accesses: &[vk_sync::AccessType::AccelerationStructureBuildWrite],
+                    next_accesses: &[vk_sync::AccessType::AccelerationStructureBuildRead],
+                }),
+                &[],
+                &[],
+            );
         }
 
         let acceleration_structure_instances = model_staging_buffers.instances.iter().filter(|instance| {
             let primitive = &model_staging_buffers.primitives[instance.primitive_id as usize];
             primitive.draw_buffer_index < 2
         }).map(|instance| {
-            //dbg!(instance.primitive_id);
             vk::AccelerationStructureInstanceKHR {
                 transform: vk::TransformMatrixKHR {
                     matrix: transpose_matrix_for_acceleration_structure_instance(instance.transform.unpack().as_mat4()),
@@ -944,6 +961,10 @@ fn main() -> anyhow::Result<()> {
                             VirtualKeyCode::S => keyboard_state.backwards = is_pressed,
                             VirtualKeyCode::A => keyboard_state.left = is_pressed,
                             VirtualKeyCode::D => keyboard_state.right = is_pressed,
+                            VirtualKeyCode::Up => keyboard_state.sun_up = is_pressed,
+                            VirtualKeyCode::Right => keyboard_state.sun_cw = is_pressed,
+                            VirtualKeyCode::Left => keyboard_state.sun_ccw = is_pressed,
+                            VirtualKeyCode::Down => keyboard_state.sun_down = is_pressed,
                             VirtualKeyCode::F11 => {
                                 if is_pressed {
                                     if window.fullscreen().is_some() {
@@ -994,8 +1015,6 @@ fn main() -> anyhow::Result<()> {
                         uniforms.tile_size_in_pixels =
                             Vec2::new(extent.width as f32, extent.height as f32)
                                 / num_tiles.as_vec2();
-
-                        uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
 
                         perspective_matrix = perspective_infinite_z_vk(
                             59.0_f32.to_radians(),
@@ -1053,7 +1072,7 @@ fn main() -> anyhow::Result<()> {
                             extent.height,
                             1,
                             "hdr framebuffer",
-                            vk::ImageUsageFlags::TRANSFER_SRC,
+                            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::STORAGE,
                             &mut init_resources,
                         )?;
 
@@ -1176,6 +1195,41 @@ fn main() -> anyhow::Result<()> {
                         perspective_matrix * view_matrix
                     };
                     push_constants.view_position = camera.final_transform.position.into();
+
+                    {
+                        let acceleration = 0.002;
+                        let max_velocity = 0.05;
+
+                        if keyboard_state.sun_up {
+                            sun_velocity.y += acceleration;
+                        }
+
+                        if keyboard_state.sun_down {
+                            sun_velocity.y -= acceleration;
+                        }
+
+                        if keyboard_state.sun_cw {
+                            sun_velocity.x += acceleration;
+                        }
+
+                        if keyboard_state.sun_ccw {
+                            sun_velocity.x -= acceleration;
+                        }
+
+                        let magnitude = sun_velocity.length();
+                        if magnitude > max_velocity {
+                            let clamped_magnitude = magnitude.min(max_velocity);
+                            sun_velocity *= clamped_magnitude / magnitude;
+                        }
+
+                        sun.yaw -= sun_velocity.x;
+                        sun.pitch = (sun.pitch + sun_velocity.y).min(PI / 2.0).max(0.0);
+
+                        sun_velocity *= 0.95;
+                    }
+
+                    uniforms.sun_dir = sun.as_normal().into();
+                    uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
 
                     acceleration_structure_debugging_uniforms.view_inverse = view_matrix.inverse();
                     acceleration_structure_debugging_uniforms.proj_inverse = perspective_matrix.inverse();
@@ -2340,6 +2394,10 @@ struct KeyboardState {
     right: bool,
     backwards: bool,
     left: bool,
+    sun_up: bool,
+    sun_cw: bool,
+    sun_ccw: bool,
+    sun_down: bool,
 }
 
 const fn dispatch_count(num: u32, group_size: u32) -> u32 {
@@ -2443,4 +2501,20 @@ fn end_init_resources(init_resources: ash_abstractions::InitResources, queue: vk
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct Sun {
+    pitch: f32,
+    yaw: f32,
+}
+
+impl Sun {
+    fn as_normal(&self) -> Vec3 {
+        Vec3::new(
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+            self.pitch.cos() * self.yaw.cos(),
+        )
+    }
 }

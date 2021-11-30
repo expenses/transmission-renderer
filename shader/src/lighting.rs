@@ -113,7 +113,9 @@ pub fn evaluate_lights(
     spirv_std::ray_query!(let mut shadow_ray);
 
     #[cfg(target_feature = "RayQueryKHR")]
-    let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, uniforms.sun_dir.into(), 10_000.0);
+    let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, uniforms.sun_dir.into(), 10_000.0)
+        // todo: ambient lighting via probes or idk!
+        .max(0.1);
 
     #[cfg(not(target_feature = "RayQueryKHR"))]
     let factor = 1.0;
