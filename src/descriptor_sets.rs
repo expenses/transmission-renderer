@@ -7,6 +7,7 @@ pub struct DescriptorSetLayouts {
     pub hdr_framebuffer: vk::DescriptorSetLayout,
     pub frustum_culling: vk::DescriptorSetLayout,
     pub lights: vk::DescriptorSetLayout,
+    pub acceleration_structure_debugging: vk::DescriptorSetLayout,
 }
 
 impl DescriptorSetLayouts {
@@ -152,6 +153,25 @@ impl DescriptorSetLayouts {
                     None,
                 )?
             },
+            acceleration_structure_debugging: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                            .descriptor_count(1)
+                            .stage_flags(
+                                vk::ShaderStageFlags::COMPUTE,
+                            ),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(1)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                    ]),
+                    None,
+                )?
+            }
         })
     }
 }
@@ -163,6 +183,7 @@ pub struct DescriptorSets {
     pub opaque_sampled_hdr_framebuffer: vk::DescriptorSet,
     pub frustum_culling: vk::DescriptorSet,
     pub lights: vk::DescriptorSet,
+    pub acceleration_structure_debugging: vk::DescriptorSet,
     _descriptor_pool: vk::DescriptorPool,
 }
 
@@ -177,15 +198,18 @@ impl DescriptorSets {
                             .descriptor_count(2 + 8 + 3),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                            .descriptor_count(3),
+                            .descriptor_count(3 + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(MAX_IMAGES),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLER)
                             .descriptor_count(3),
+                        *vk::DescriptorPoolSize::builder()
+                            .ty(vk::DescriptorType::STORAGE_IMAGE)
+                            .descriptor_count(1),
                     ])
-                    .max_sets(6),
+                    .max_sets(7),
                 None,
             )
         }?;
@@ -200,6 +224,7 @@ impl DescriptorSets {
                         layouts.hdr_framebuffer,
                         layouts.frustum_culling,
                         layouts.lights,
+                        layouts.acceleration_structure_debugging,
                     ])
                     .descriptor_pool(descriptor_pool),
             )
@@ -212,6 +237,7 @@ impl DescriptorSets {
             opaque_sampled_hdr_framebuffer: descriptor_sets[3],
             frustum_culling: descriptor_sets[4],
             lights: descriptor_sets[5],
+            acceleration_structure_debugging: descriptor_sets[6],
             _descriptor_pool: descriptor_pool,
         })
     }
@@ -239,6 +265,13 @@ impl DescriptorSets {
                         .image_info(&[*vk::DescriptorImageInfo::builder()
                             .image_view(opaque_sampled_hdr_framebuffer.view)
                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(self.acceleration_structure_debugging)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(hdr_framebuffer.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
                 ],
                 &[],
             );

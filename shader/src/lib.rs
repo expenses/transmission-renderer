@@ -19,13 +19,14 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    SunUniform, Similarity, MAX_LIGHTS_PER_FROXEL,
+    Uniforms, Similarity, MAX_LIGHTS_PER_FROXEL, AccelerationStructureDebuggingUniforms
 };
 use spirv_std::{
     self as _,
     glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
     Image, RuntimeArray, Sampler, num_traits::Float,
-    arch::IndexUnchecked
+    arch::IndexUnchecked,
+    ray_tracing::AccelerationStructure
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -41,7 +42,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 3, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
@@ -78,13 +79,20 @@ pub fn fragment_transmission(
 
     let emission = get_emission(material, &texture_sampler);
 
+    #[cfg(target_feature = "RayQueryKHR")]
+    let acceleration_structure = unsafe {
+        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
+    };
+
     let (result, mut transmission) = evaluate_lights_transmission(
         material_params,
         view,
         position,
         normal,
         point_lights,
-        sun_uniform,
+        uniforms,
+        #[cfg(target_feature = "RayQueryKHR")]
+        &acceleration_structure,
     );
 
     let mut thickness = material.thickness_factor;
@@ -96,7 +104,7 @@ pub fn fragment_transmission(
     let ggx_lut_sampler = |normal_dot_view: f32, perceptual_roughness: PerceptualRoughness| {
         let uv = Vec2::new(normal_dot_view, perceptual_roughness.0);
 
-        let texture = unsafe { textures.index(push_constants.ggx_lut_texture_index as usize) };
+        let texture = unsafe { textures.index(uniforms.ggx_lut_texture_index as usize) };
         let sample: Vec4 = texture.sample(*clamp_sampler, uv);
 
         sample.xy()
@@ -143,7 +151,7 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 3, uniform)] sun_uniform: &SunUniform,
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
@@ -171,13 +179,20 @@ pub fn fragment(
 
     let emission = get_emission(material, &texture_sampler);
 
+    #[cfg(target_feature = "RayQueryKHR")]
+    let acceleration_structure = unsafe {
+        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
+    };
+
     let result = evaluate_lights(
         material_params,
         view,
         position,
         normal,
         point_lights,
-        sun_uniform,
+        uniforms,
+        #[cfg(target_feature = "RayQueryKHR")]
+        &acceleration_structure,
     );
 
     let output = (result.diffuse + result.specular + emission).extend(1.0);
@@ -201,6 +216,7 @@ impl<'a> TextureSampler<'a> {
     }
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(fragment)]
 pub fn depth_pre_pass_alpha_clip(
     uv: Vec2,
@@ -228,6 +244,7 @@ pub fn depth_pre_pass_alpha_clip(
     }
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(vertex)]
 pub fn depth_pre_pass_vertex_alpha_clip(
     position: Vec3,
@@ -249,6 +266,7 @@ pub fn depth_pre_pass_vertex_alpha_clip(
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(vertex)]
 pub fn depth_pre_pass_instanced(
     position: Vec3,
@@ -264,6 +282,7 @@ pub fn depth_pre_pass_instanced(
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(vertex)]
 pub fn vertex_instanced(
     position: Vec3,
@@ -291,6 +310,7 @@ pub fn vertex_instanced(
     *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(vertex)]
 pub fn vertex_instanced_with_scale(
     position: Vec3,
@@ -338,6 +358,7 @@ mod vk {
     }
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(compute(threads(64)))]
 pub fn frustum_culling(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] primitives: &[PrimitiveInfo],
@@ -394,6 +415,7 @@ fn cull(
 
 const NUM_DRAW_BUFFERS: usize = 4;
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(compute(threads(64)))]
 pub fn demultiplex_draws(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] primitives: &[PrimitiveInfo],
@@ -439,6 +461,7 @@ pub fn demultiplex_draws(
     };
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(compute(threads(8, 8)))]
 pub fn assign_lights_to_froxels(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
@@ -486,6 +509,7 @@ fn debug_colour_for_id(id: u32) -> Vec3 {
 }
 */
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(vertex)]
 pub fn fullscreen_tri(
     #[spirv(vertex_index)] vert_idx: i32,
@@ -498,6 +522,7 @@ pub fn fullscreen_tri(
     *builtin_pos = Vec4::new(pos.x, pos.y, 0.0, 1.0);
 }
 
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(fragment)]
 pub fn fragment_tonemap(
     uv: Vec2,
@@ -511,4 +536,62 @@ pub fn fragment_tonemap(
     *output = LottesTonemapper
         .tonemap(sample.truncate(), *params)
         .extend(1.0);
+}
+
+#[cfg(target_feature = "RayQueryKHR")]
+#[spirv(compute(threads(8, 8)))]
+pub fn acceleration_structure_debugging(
+    #[spirv(global_invocation_id)] id: UVec3,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(descriptor_set = 0, binding = 0)] output: &Image!(2D, format=rgba16f, sampled=false),
+    #[spirv(descriptor_set = 0, binding = 1, uniform)] uniforms: &AccelerationStructureDebuggingUniforms,
+) {
+    let id_xy = id.truncate();
+
+    let pixel_center = id_xy.as_vec2() + 0.5;
+
+    let texture_coordinates = pixel_center / uniforms.size.as_vec2();
+
+    let render_coordinates = texture_coordinates * 2.0 - 1.0;
+
+    // Transform [0, 0, 0] in view-space into world space
+    let origin = (uniforms.view_inverse * Vec4::new(0.0, 0.0, 0.0, 1.0)).truncate();
+    // Transform the render coordinates into project-y space
+    let target =
+        uniforms.proj_inverse * Vec4::new(render_coordinates.x, render_coordinates.y, 1.0, 1.0);
+    let local_direction_vector = target.truncate().normalize();
+    // Rotate the location direction vector into a global direction vector.
+    let direction = (uniforms.view_inverse * local_direction_vector.extend(0.0)).truncate();
+
+    let acceleration_structure = unsafe {
+        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
+    };
+
+    use spirv_std::ray_tracing::{AccelerationStructure, RayFlags, RayQuery, CommittedIntersection};
+
+    spirv_std::ray_query!(let mut ray);
+
+    unsafe {
+        ray.initialize(
+            &acceleration_structure,
+            RayFlags::OPAQUE,
+            0xff,
+            origin,
+            0.01,
+            direction,
+            1000.0
+        );
+
+        while ray.proceed() {}
+
+        let colour = match ray.get_committed_intersection_type() {
+            CommittedIntersection::None => Vec3::ZERO,
+            _ => {
+                let barycentrics: Vec2 = ray.get_committed_intersection_barycentrics();
+                Vec3::new(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y)
+            }
+        };
+
+        output.write(id.truncate(), colour);
+    };
 }

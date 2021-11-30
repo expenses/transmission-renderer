@@ -69,7 +69,7 @@ dependencies = [
 [[package]]
 name = "ash-opinionated-abstractions"
 version = "0.1.0"
-source = "git+https://github.com/expenses/ash-opinionated-abstractions#2f524e70a743d47a716b35e6dadc4873df618846"
+source = "git+https://github.com/expenses/ash-opinionated-abstractions#c27d43aa63251f7cac6eb2471fa75e72eea95c56"
 dependencies = [
  "anyhow",
  "ash",

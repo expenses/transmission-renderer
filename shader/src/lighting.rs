@@ -3,10 +3,11 @@ use glam_pbr::{
     basic_brdf, light_direction_and_attenuation, BasicBrdfParams, BrdfResult, IndexOfRefraction,
     Light, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, PointLight, SunUniform};
+use shared_structs::{MaterialInfo, PointLight, Uniforms};
 use spirv_std::{
     glam::{Mat3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
+    ray_tracing::{AccelerationStructure, RayFlags, RayQuery, CommittedIntersection},
 };
 
 pub fn evaluate_lights_transmission(
@@ -15,18 +16,31 @@ pub fn evaluate_lights_transmission(
     position: Vec3,
     normal: Normal,
     point_lights: &[PointLight],
-    sun_uniform: &SunUniform,
+    uniforms: &Uniforms,
+    #[cfg(target_feature = "RayQueryKHR")]
+    acceleration_structure: &AccelerationStructure,
 ) -> (BrdfResult, Vec3) {
+    #[cfg(target_feature = "RayQueryKHR")]
+    spirv_std::ray_query!(let mut shadow_ray);
+
+    #[cfg(target_feature = "RayQueryKHR")]
+    let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, uniforms.sun_dir.into(), 10_000.0);
+
+    #[cfg(not(target_feature = "RayQueryKHR"))]
+    let factor = 1.0;
+
+    let sun_intensity = Vec3::from(uniforms.sun_intensity) * factor;
+
     let mut sum = basic_brdf(BasicBrdfParams {
-        light: Light(sun_uniform.dir.into()),
-        light_intensity: sun_uniform.intensity,
+        light: Light(uniforms.sun_dir.into()),
+        light_intensity: sun_intensity,
         normal,
         view,
         material_params,
     });
 
-    let mut transmission = sun_uniform.intensity
-        * glam_pbr::transmission_btdf(material_params, normal, view, Light(sun_uniform.dir.into()));
+    let mut transmission = sun_intensity
+        * glam_pbr::transmission_btdf(material_params, normal, view, Light(uniforms.sun_dir.into()));
 
     let num_lights = point_lights.len() as u32;
     let mut i = 0;
@@ -34,10 +48,16 @@ pub fn evaluate_lights_transmission(
     while i < num_lights {
         let light = index(point_lights, i);
 
-        let (direction, attenuation) =
+        let (direction, distance, attenuation) =
             light_direction_and_attenuation(position, light.position.into());
 
-        let light_emission = light.colour_emission_and_falloff_distance.truncate();
+        #[cfg(target_feature = "RayQueryKHR")]
+        let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, direction, distance);
+
+        #[cfg(not(target_feature = "RayQueryKHR"))]
+        let factor = 1.0;
+
+        let light_emission = light.colour_emission_and_falloff_distance.truncate() * factor;
 
         sum = sum
             + basic_brdf(BasicBrdfParams {
@@ -58,17 +78,49 @@ pub fn evaluate_lights_transmission(
     (sum, transmission)
 }
 
+fn trace_shadow_ray(ray: &mut RayQuery, acceleration_structure: &AccelerationStructure, origin: Vec3, direction: Vec3, max_t: f32) -> f32 {
+    unsafe {
+        ray.initialize(
+            acceleration_structure,
+            RayFlags::OPAQUE,
+            0xff,
+            origin,
+            0.001,
+            direction,
+            max_t
+        );
+
+        while ray.proceed() {}
+
+        match ray.get_committed_intersection_type() {
+            CommittedIntersection::None => 1.0,
+            _ => 0.0
+        }
+    }
+}
+
 pub fn evaluate_lights(
     material_params: MaterialParams,
     view: View,
     position: Vec3,
     normal: Normal,
     point_lights: &[PointLight],
-    sun_uniform: &SunUniform,
+    uniforms: &Uniforms,
+    #[cfg(target_feature = "RayQueryKHR")]
+    acceleration_structure: &AccelerationStructure,
 ) -> BrdfResult {
+    #[cfg(target_feature = "RayQueryKHR")]
+    spirv_std::ray_query!(let mut shadow_ray);
+
+    #[cfg(target_feature = "RayQueryKHR")]
+    let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, uniforms.sun_dir.into(), 10_000.0);
+
+    #[cfg(not(target_feature = "RayQueryKHR"))]
+    let factor = 1.0;
+
     let mut sum = basic_brdf(BasicBrdfParams {
-        light: Light(sun_uniform.dir.into()),
-        light_intensity: sun_uniform.intensity,
+        light: Light(uniforms.sun_dir.into()),
+        light_intensity: Vec3::from(uniforms.sun_intensity) * factor,
         normal,
         view,
         material_params,
@@ -80,10 +132,16 @@ pub fn evaluate_lights(
     while i < num_lights {
         let light = index(point_lights, i);
 
-        let (direction, attenuation) =
+        let (direction, distance, attenuation) =
             light_direction_and_attenuation(position, light.position.into());
 
-        let light_emission = light.colour_emission_and_falloff_distance.truncate();
+        #[cfg(target_feature = "RayQueryKHR")]
+        let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, direction, distance);
+
+        #[cfg(not(target_feature = "RayQueryKHR"))]
+        let factor = 1.0;
+
+        let light_emission = light.colour_emission_and_falloff_distance.truncate() * factor;
 
         sum = sum
             + basic_brdf(BasicBrdfParams {

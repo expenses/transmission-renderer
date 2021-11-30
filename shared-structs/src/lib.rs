@@ -1,27 +1,33 @@
 #![no_std]
 
 use core::ops::Mul;
-use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
 #[cfg(target_arch = "spirv")]
 use num_traits::Float;
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct PushConstants {
     pub proj_view: Mat4,
     pub view_position: Vec3A,
+    pub framebuffer_size: UVec2,
+    pub acceleration_structure_address: u64,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Uniforms {
+    pub sun_dir: Vec3A,
+    pub sun_intensity: Vec3A,
     pub tile_size_in_pixels: Vec2,
     pub num_tiles: UVec2,
-    pub framebuffer_size: UVec2,
     pub debug_froxels: u32,
     pub ggx_lut_texture_index: u32,
 }
 
-pub struct SunUniform {
-    pub dir: Vec3A,
-    pub intensity: Vec3,
-}
-
+#[repr(C)]
 pub struct PointLight {
     pub position: Vec3A,
     pub colour_emission_and_falloff_distance: Vec4,
@@ -43,6 +49,7 @@ impl PointLight {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
 pub struct Textures {
     pub diffuse: i32,
     pub metallic_roughness: i32,
@@ -56,6 +63,7 @@ pub struct Textures {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
 pub struct MaterialInfo {
     pub textures: Textures,
     pub metallic_factor: f32,
@@ -76,6 +84,7 @@ pub struct MaterialInfo {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct PackedSimilarity {
     pub translation_and_scale: Vec4,
     pub rotation: Quat,
@@ -93,6 +102,7 @@ impl PackedSimilarity {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Similarity {
     pub translation: Vec3,
     pub scale: f32,
@@ -111,6 +121,10 @@ impl Similarity {
             translation_and_scale: self.translation.extend(self.scale),
             rotation: self.rotation,
         }
+    }
+
+    pub fn as_mat4(self) -> Mat4 {
+        Mat4::from_translation(self.translation) * Mat4::from_mat3(Mat3::from_quat(self.rotation)) * Mat4::from_scale(Vec3::splat(self.scale))
     }
 }
 
@@ -143,6 +157,7 @@ impl Mul<Vec3> for Similarity {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Instance {
     pub transform: PackedSimilarity,
     pub primitive_id: u32,
@@ -151,6 +166,7 @@ pub struct Instance {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct PrimitiveInfo {
     pub packed_bounding_sphere: Vec4,
     pub draw_buffer_index: u32,
@@ -161,6 +177,7 @@ pub struct PrimitiveInfo {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct CullingPushConstants {
     pub view: Mat4,
     // As the frustum planes are symmetrical, we only need some of the data:
@@ -170,9 +187,19 @@ pub struct CullingPushConstants {
     pub z_near: f32,
 }
 
+#[repr(C)]
 pub struct Frustum {
     planes: [Vec4; 4],
     z_slice: Vec2,
 }
 
 pub const MAX_LIGHTS_PER_FROXEL: u32 = 128;
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct AccelerationStructureDebuggingUniforms {
+    pub view_inverse: Mat4,
+    pub proj_inverse: Mat4,
+    pub size: UVec2,
+}

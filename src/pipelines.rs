@@ -3,6 +3,13 @@ use crate::render_passes::RenderPasses;
 use ash::vk;
 use c_str_macro::c_str;
 use glam::{Vec2, Vec3};
+use std::path::{Path, PathBuf};
+
+fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
+    let mut path = parent.join(name);
+    path.set_extension("spv");
+    Ok(std::fs::read(&path)?)
+}
 
 pub struct Pipelines {
     pub normal: vk::Pipeline,
@@ -14,10 +21,12 @@ pub struct Pipelines {
     pub tonemap: vk::Pipeline,
     pub frustum_culling: vk::Pipeline,
     pub demultiplex_draws: vk::Pipeline,
+    pub acceleration_structure_debugging: Option<vk::Pipeline>,
     pub pipeline_layout: vk::PipelineLayout,
     pub tonemap_pipeline_layout: vk::PipelineLayout,
     pub transmission_pipeline_layout: vk::PipelineLayout,
     pub frustum_culling_pipeline_layout: vk::PipelineLayout,
+    pub acceleration_structure_debugging_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -26,65 +35,106 @@ impl Pipelines {
         render_passes: &RenderPasses,
         descriptor_set_layouts: &DescriptorSetLayouts,
         pipeline_cache: vk::PipelineCache,
+        enable_ray_tracing: bool,
     ) -> anyhow::Result<Self> {
         let _span = tracy_client::span!("Pipelines::new");
 
-        let module = ash_abstractions::load_shader_module(include_bytes!("../shader.spv"), device)?;
+        let normal = &PathBuf::from("compiled-shaders/normal");
+        let ray_tracing = &PathBuf::from("compiled-shaders/ray-tracing");
 
-        let fragment_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(c_str!("fragment"));
+        let maybe_ray_tracing = if enable_ray_tracing {
+            ray_tracing
+        } else {
+            normal
+        };
 
-        let fragment_transmission_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(c_str!("fragment_transmission"));
+        let fragment_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(maybe_ray_tracing, "fragment")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("fragment")
+        )?;
 
-        let vertex_instanced_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .name(c_str!("vertex_instanced"));
+        let fragment_transmission_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(maybe_ray_tracing, "fragment_transmission")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("fragment_transmission")
+        )?;
 
-        let vertex_instanced_with_scale_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .name(c_str!("vertex_instanced_with_scale"));
+        let vertex_instanced_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "vertex_instanced")?,
+            vk::ShaderStageFlags::VERTEX,
+            device,
+            c_str!("vertex_instanced")
+        )?;
 
-        let vertex_depth_pre_pass_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .name(c_str!("depth_pre_pass_instanced"));
+        let vertex_instanced_with_scale_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "vertex_instanced_with_scale")?,
+            vk::ShaderStageFlags::VERTEX,
+            device,
+            c_str!("vertex_instanced_with_scale")
+        )?;
 
-        let vertex_depth_pre_pass_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .name(c_str!("depth_pre_pass_vertex_alpha_clip"));
+        let vertex_depth_pre_pass_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "depth_pre_pass_instanced")?,
+            vk::ShaderStageFlags::VERTEX,
+            device,
+            c_str!("depth_pre_pass_instanced")
+        )?;
 
-        let fragment_depth_pre_pass_alpha_clip_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(c_str!("depth_pre_pass_alpha_clip"));
+        let vertex_depth_pre_pass_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
+            vk::ShaderStageFlags::VERTEX,
+            device,
+            c_str!("depth_pre_pass_vertex_alpha_clip")
+        )?;
 
-        let fullscreen_tri_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .name(c_str!("fullscreen_tri"));
+        let fragment_depth_pre_pass_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "depth_pre_pass_alpha_clip")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("depth_pre_pass_alpha_clip")
+        )?;
 
-        let fragment_tonemap_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .name(c_str!("fragment_tonemap"));
+        let fullscreen_tri_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "fullscreen_tri")?,
+            vk::ShaderStageFlags::VERTEX,
+            device,
+            c_str!("fullscreen_tri")
+        )?;
 
-        let frustum_culling_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::COMPUTE)
-            .name(c_str!("frustum_culling"));
+        let fragment_tonemap_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "fragment_tonemap")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("fragment_tonemap")
+        )?;
 
-        let demultiplex_draws_stage = vk::PipelineShaderStageCreateInfo::builder()
-            .module(module)
-            .stage(vk::ShaderStageFlags::COMPUTE)
-            .name(c_str!("demultiplex_draws"));
+        let frustum_culling_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "frustum_culling")?,
+            vk::ShaderStageFlags::COMPUTE,
+            device,
+            c_str!("frustum_culling")
+        )?;
+
+        let demultiplex_draws_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "demultiplex_draws")?,
+            vk::ShaderStageFlags::COMPUTE,
+            device,
+            c_str!("demultiplex_draws")
+        )?;
+
+        let acceleration_structure_debugging_stage = if enable_ray_tracing {
+            Some(ash_abstractions::load_shader_module_as_stage(
+                &read_shader(ray_tracing, "acceleration_structure_debugging")?,
+                vk::ShaderStageFlags::COMPUTE,
+                device,
+                c_str!("acceleration_structure_debugging")
+            )?)
+        } else {
+            None
+        };
 
         let pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -144,6 +194,19 @@ impl Pipelines {
                             std::mem::size_of::<colstodian::tonemap::BakedLottesTonemapperParams>()
                                 as u32,
                         )]),
+                None,
+            )
+        }?;
+
+        let acceleration_structure_debugging_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[
+                        descriptor_set_layouts.acceleration_structure_debugging,
+                    ])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
                 None,
             )
         }?;
@@ -340,14 +403,6 @@ impl Pipelines {
                 2,
             );
 
-        let frustum_culling_desc = vk::ComputePipelineCreateInfo::builder()
-            .stage(*frustum_culling_stage)
-            .layout(frustum_culling_pipeline_layout);
-
-        let demultiplex_draws_desc = vk::ComputePipelineCreateInfo::builder()
-            .stage(*demultiplex_draws_stage)
-            .layout(frustum_culling_pipeline_layout);
-
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
@@ -365,10 +420,27 @@ impl Pipelines {
         }
         .map_err(|(_, err)| err)?;
 
+        let mut compute_pipeline_stages = vec![
+            *vk::ComputePipelineCreateInfo::builder()
+            .stage(*frustum_culling_stage)
+            .layout(frustum_culling_pipeline_layout),
+            *vk::ComputePipelineCreateInfo::builder()
+            .stage(*demultiplex_draws_stage)
+            .layout(frustum_culling_pipeline_layout),
+        ];
+
+        if let Some(stage) = acceleration_structure_debugging_stage.as_ref() {
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(**stage)
+                    .layout(acceleration_structure_debugging_layout)
+            );
+        }
+
         let compute_pipelines = unsafe {
             device.create_compute_pipelines(
                 pipeline_cache,
-                &[*frustum_culling_desc, *demultiplex_draws_desc],
+                &compute_pipeline_stages,
                 None,
             )
         }
@@ -384,10 +456,16 @@ impl Pipelines {
             tonemap: pipelines[6],
             frustum_culling: compute_pipelines[0],
             demultiplex_draws: compute_pipelines[1],
+            acceleration_structure_debugging: if acceleration_structure_debugging_stage.is_some() {
+                Some(compute_pipelines[2])
+            } else {
+                None
+            },
             pipeline_layout,
             tonemap_pipeline_layout,
             transmission_pipeline_layout,
             frustum_culling_pipeline_layout,
+            acceleration_structure_debugging_layout,
         })
     }
 }
