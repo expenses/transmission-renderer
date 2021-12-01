@@ -43,7 +43,7 @@ impl PointLight {
 
         Self {
             position: position.into(),
-            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1)
+            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1),
         }
     }
 }
@@ -124,7 +124,9 @@ impl Similarity {
     }
 
     pub fn as_mat4(self) -> Mat4 {
-        Mat4::from_translation(self.translation) * Mat4::from_mat3(Mat3::from_quat(self.rotation)) * Mat4::from_scale(Vec3::splat(self.scale))
+        Mat4::from_translation(self.translation)
+            * Mat4::from_mat3(Mat3::from_quat(self.rotation))
+            * Mat4::from_scale(Vec3::splat(self.scale))
     }
 }
 

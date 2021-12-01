@@ -7,7 +7,7 @@ use shared_structs::{MaterialInfo, PointLight, Uniforms};
 use spirv_std::{
     glam::{Mat3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
-    ray_tracing::{AccelerationStructure, RayFlags, RayQuery, CommittedIntersection},
+    ray_tracing::{AccelerationStructure, CommittedIntersection, RayFlags, RayQuery},
 };
 
 pub fn evaluate_lights_transmission(
@@ -17,14 +17,19 @@ pub fn evaluate_lights_transmission(
     normal: Normal,
     point_lights: &[PointLight],
     uniforms: &Uniforms,
-    #[cfg(target_feature = "RayQueryKHR")]
-    acceleration_structure: &AccelerationStructure,
+    #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
 ) -> (BrdfResult, Vec3) {
     #[cfg(target_feature = "RayQueryKHR")]
     spirv_std::ray_query!(let mut shadow_ray);
 
     #[cfg(target_feature = "RayQueryKHR")]
-    let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, uniforms.sun_dir.into(), 10_000.0);
+    let factor = trace_shadow_ray(
+        shadow_ray,
+        acceleration_structure,
+        position,
+        uniforms.sun_dir.into(),
+        10_000.0,
+    );
 
     #[cfg(not(target_feature = "RayQueryKHR"))]
     let factor = 1.0;
@@ -40,7 +45,12 @@ pub fn evaluate_lights_transmission(
     });
 
     let mut transmission = sun_intensity
-        * glam_pbr::transmission_btdf(material_params, normal, view, Light(uniforms.sun_dir.into()));
+        * glam_pbr::transmission_btdf(
+            material_params,
+            normal,
+            view,
+            Light(uniforms.sun_dir.into()),
+        );
 
     let num_lights = point_lights.len() as u32;
     let mut i = 0;
@@ -52,7 +62,13 @@ pub fn evaluate_lights_transmission(
             light_direction_and_attenuation(position, light.position.into());
 
         #[cfg(target_feature = "RayQueryKHR")]
-        let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, direction, distance);
+        let factor = trace_shadow_ray(
+            shadow_ray,
+            acceleration_structure,
+            position,
+            direction,
+            distance,
+        );
 
         #[cfg(not(target_feature = "RayQueryKHR"))]
         let factor = 1.0;
@@ -78,7 +94,13 @@ pub fn evaluate_lights_transmission(
     (sum, transmission)
 }
 
-fn trace_shadow_ray(ray: &mut RayQuery, acceleration_structure: &AccelerationStructure, origin: Vec3, direction: Vec3, max_t: f32) -> f32 {
+fn trace_shadow_ray(
+    ray: &mut RayQuery,
+    acceleration_structure: &AccelerationStructure,
+    origin: Vec3,
+    direction: Vec3,
+    max_t: f32,
+) -> f32 {
     unsafe {
         ray.initialize(
             acceleration_structure,
@@ -87,14 +109,14 @@ fn trace_shadow_ray(ray: &mut RayQuery, acceleration_structure: &AccelerationStr
             origin,
             0.001,
             direction,
-            max_t
+            max_t,
         );
 
         while ray.proceed() {}
 
         match ray.get_committed_intersection_type() {
             CommittedIntersection::None => 1.0,
-            _ => 0.0
+            _ => 0.0,
         }
     }
 }
@@ -106,16 +128,21 @@ pub fn evaluate_lights(
     normal: Normal,
     point_lights: &[PointLight],
     uniforms: &Uniforms,
-    #[cfg(target_feature = "RayQueryKHR")]
-    acceleration_structure: &AccelerationStructure,
+    #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
 ) -> BrdfResult {
     #[cfg(target_feature = "RayQueryKHR")]
     spirv_std::ray_query!(let mut shadow_ray);
 
     #[cfg(target_feature = "RayQueryKHR")]
-    let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, uniforms.sun_dir.into(), 10_000.0)
-        // todo: ambient lighting via probes or idk!
-        .max(0.1);
+    let factor = trace_shadow_ray(
+        shadow_ray,
+        acceleration_structure,
+        position,
+        uniforms.sun_dir.into(),
+        10_000.0,
+    )
+    // todo: ambient lighting via probes or idk!
+    .max(0.1);
 
     #[cfg(not(target_feature = "RayQueryKHR"))]
     let factor = 1.0;
@@ -138,7 +165,13 @@ pub fn evaluate_lights(
             light_direction_and_attenuation(position, light.position.into());
 
         #[cfg(target_feature = "RayQueryKHR")]
-        let factor = trace_shadow_ray(shadow_ray, acceleration_structure, position, direction, distance);
+        let factor = trace_shadow_ray(
+            shadow_ray,
+            acceleration_structure,
+            position,
+            direction,
+            distance,
+        );
 
         #[cfg(not(target_feature = "RayQueryKHR"))]
         let factor = 1.0;

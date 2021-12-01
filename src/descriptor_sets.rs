@@ -160,10 +160,8 @@ impl DescriptorSetLayouts {
                             .binding(0)
                             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                             .descriptor_count(1)
-                            .stage_flags(
-                                vk::ShaderStageFlags::COMPUTE,
-                            ),
-                            *vk::DescriptorSetLayoutBinding::builder()
+                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                        *vk::DescriptorSetLayoutBinding::builder()
                             .binding(1)
                             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                             .descriptor_count(1)
@@ -171,7 +169,7 @@ impl DescriptorSetLayouts {
                     ]),
                     None,
                 )?
-            }
+            },
         })
     }
 }

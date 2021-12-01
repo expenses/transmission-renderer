@@ -59,70 +59,71 @@ impl Pipelines {
             &read_shader(maybe_ray_tracing, "fragment_transmission")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("fragment_transmission")
+            c_str!("fragment_transmission"),
         )?;
 
         let vertex_instanced_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "vertex_instanced")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("vertex_instanced")
+            c_str!("vertex_instanced"),
         )?;
 
         let vertex_instanced_with_scale_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "vertex_instanced_with_scale")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("vertex_instanced_with_scale")
+            c_str!("vertex_instanced_with_scale"),
         )?;
 
         let vertex_depth_pre_pass_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "depth_pre_pass_instanced")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("depth_pre_pass_instanced")
+            c_str!("depth_pre_pass_instanced"),
         )?;
 
         let vertex_depth_pre_pass_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("depth_pre_pass_vertex_alpha_clip")
+            c_str!("depth_pre_pass_vertex_alpha_clip"),
         )?;
 
-        let fragment_depth_pre_pass_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(normal, "depth_pre_pass_alpha_clip")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("depth_pre_pass_alpha_clip")
-        )?;
+        let fragment_depth_pre_pass_alpha_clip_stage =
+            ash_abstractions::load_shader_module_as_stage(
+                &read_shader(normal, "depth_pre_pass_alpha_clip")?,
+                vk::ShaderStageFlags::FRAGMENT,
+                device,
+                c_str!("depth_pre_pass_alpha_clip"),
+            )?;
 
         let fullscreen_tri_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "fullscreen_tri")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("fullscreen_tri")
+            c_str!("fullscreen_tri"),
         )?;
 
         let fragment_tonemap_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "fragment_tonemap")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("fragment_tonemap")
+            c_str!("fragment_tonemap"),
         )?;
 
         let frustum_culling_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "frustum_culling")?,
             vk::ShaderStageFlags::COMPUTE,
             device,
-            c_str!("frustum_culling")
+            c_str!("frustum_culling"),
         )?;
 
         let demultiplex_draws_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "demultiplex_draws")?,
             vk::ShaderStageFlags::COMPUTE,
             device,
-            c_str!("demultiplex_draws")
+            c_str!("demultiplex_draws"),
         )?;
 
         let acceleration_structure_debugging_stage = if enable_ray_tracing {
@@ -130,7 +131,7 @@ impl Pipelines {
                 &read_shader(ray_tracing, "acceleration_structure_debugging")?,
                 vk::ShaderStageFlags::COMPUTE,
                 device,
-                c_str!("acceleration_structure_debugging")
+                c_str!("acceleration_structure_debugging"),
             )?)
         } else {
             None
@@ -201,9 +202,7 @@ impl Pipelines {
         let acceleration_structure_debugging_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[
-                        descriptor_set_layouts.acceleration_structure_debugging,
-                    ])
+                    .set_layouts(&[descriptor_set_layouts.acceleration_structure_debugging])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
@@ -422,27 +421,23 @@ impl Pipelines {
 
         let mut compute_pipeline_stages = vec![
             *vk::ComputePipelineCreateInfo::builder()
-            .stage(*frustum_culling_stage)
-            .layout(frustum_culling_pipeline_layout),
+                .stage(*frustum_culling_stage)
+                .layout(frustum_culling_pipeline_layout),
             *vk::ComputePipelineCreateInfo::builder()
-            .stage(*demultiplex_draws_stage)
-            .layout(frustum_culling_pipeline_layout),
+                .stage(*demultiplex_draws_stage)
+                .layout(frustum_culling_pipeline_layout),
         ];
 
         if let Some(stage) = acceleration_structure_debugging_stage.as_ref() {
             compute_pipeline_stages.push(
                 *vk::ComputePipelineCreateInfo::builder()
                     .stage(**stage)
-                    .layout(acceleration_structure_debugging_layout)
+                    .layout(acceleration_structure_debugging_layout),
             );
         }
 
         let compute_pipelines = unsafe {
-            device.create_compute_pipelines(
-                pipeline_cache,
-                &compute_pipeline_stages,
-                None,
-            )
+            device.create_compute_pipelines(pipeline_cache, &compute_pipeline_stages, None)
         }
         .map_err(|(_, err)| err)?;
 

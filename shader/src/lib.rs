@@ -18,15 +18,16 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
-    CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    Uniforms, Similarity, MAX_LIGHTS_PER_FROXEL, AccelerationStructureDebuggingUniforms
+    AccelerationStructureDebuggingUniforms, CullingPushConstants, Instance, MaterialInfo,
+    PointLight, PrimitiveInfo, PushConstants, Similarity, Uniforms, MAX_LIGHTS_PER_FROXEL,
 };
 use spirv_std::{
     self as _,
-    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
-    Image, RuntimeArray, Sampler, num_traits::Float,
     arch::IndexUnchecked,
-    ray_tracing::AccelerationStructure
+    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    num_traits::Float,
+    ray_tracing::AccelerationStructure,
+    Image, RuntimeArray, Sampler,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -567,7 +568,9 @@ pub fn acceleration_structure_debugging(
         AccelerationStructure::from_vec(push_constants.acceleration_structure_address)
     };
 
-    use spirv_std::ray_tracing::{AccelerationStructure, RayFlags, RayQuery, CommittedIntersection};
+    use spirv_std::ray_tracing::{
+        AccelerationStructure, CommittedIntersection, RayFlags, RayQuery,
+    };
 
     spirv_std::ray_query!(let mut ray);
 
@@ -579,7 +582,7 @@ pub fn acceleration_structure_debugging(
             origin,
             0.01,
             direction,
-            1000.0
+            1000.0,
         );
 
         while ray.proceed() {}
@@ -588,7 +591,11 @@ pub fn acceleration_structure_debugging(
             CommittedIntersection::None => Vec3::ZERO,
             _ => {
                 let barycentrics: Vec2 = ray.get_committed_intersection_barycentrics();
-                Vec3::new(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y)
+                Vec3::new(
+                    1.0 - barycentrics.x - barycentrics.y,
+                    barycentrics.x,
+                    barycentrics.y,
+                )
             }
         };
 
