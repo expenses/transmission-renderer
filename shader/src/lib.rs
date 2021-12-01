@@ -18,15 +18,16 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
-    CullingPushConstants, Instance, MaterialInfo, PointLight, PrimitiveInfo, PushConstants,
-    Uniforms, Similarity, MAX_LIGHTS_PER_FROXEL, AccelerationStructureDebuggingUniforms
+    AccelerationStructureDebuggingUniforms, CullingPushConstants, Instance, MaterialInfo,
+    PointLight, PrimitiveInfo, PushConstants, Similarity, Uniforms, MAX_LIGHTS_PER_FROXEL,
 };
 use spirv_std::{
     self as _,
-    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
-    Image, RuntimeArray, Sampler, num_traits::Float,
     arch::IndexUnchecked,
-    ray_tracing::AccelerationStructure
+    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    num_traits::Float,
+    ray_tracing::AccelerationStructure,
+    Image, RuntimeArray, Sampler,
 };
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
@@ -80,9 +81,8 @@ pub fn fragment_transmission(
     let emission = get_emission(material, &texture_sampler);
 
     #[cfg(target_feature = "RayQueryKHR")]
-    let acceleration_structure = unsafe {
-        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
-    };
+    let acceleration_structure =
+        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
 
     let (result, mut transmission) = evaluate_lights_transmission(
         material_params,
@@ -180,9 +180,8 @@ pub fn fragment(
     let emission = get_emission(material, &texture_sampler);
 
     #[cfg(target_feature = "RayQueryKHR")]
-    let acceleration_structure = unsafe {
-        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
-    };
+    let acceleration_structure =
+        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
 
     let result = evaluate_lights(
         material_params,
@@ -563,11 +562,12 @@ pub fn acceleration_structure_debugging(
     // Rotate the location direction vector into a global direction vector.
     let direction = (uniforms.view_inverse * local_direction_vector.extend(0.0)).truncate();
 
-    let acceleration_structure = unsafe {
-        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
-    };
+    let acceleration_structure =
+        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
 
-    use spirv_std::ray_tracing::{AccelerationStructure, RayFlags, RayQuery, CommittedIntersection};
+    use spirv_std::ray_tracing::{
+        AccelerationStructure, CommittedIntersection, RayFlags, RayQuery,
+    };
 
     spirv_std::ray_query!(let mut ray);
 
@@ -579,7 +579,7 @@ pub fn acceleration_structure_debugging(
             origin,
             0.01,
             direction,
-            1000.0
+            1000.0,
         );
 
         while ray.proceed() {}
@@ -588,7 +588,11 @@ pub fn acceleration_structure_debugging(
             CommittedIntersection::None => Vec3::ZERO,
             _ => {
                 let barycentrics: Vec2 = ray.get_committed_intersection_barycentrics();
-                Vec3::new(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y)
+                Vec3::new(
+                    1.0 - barycentrics.x - barycentrics.y,
+                    barycentrics.x,
+                    barycentrics.y,
+                )
             }
         };
 

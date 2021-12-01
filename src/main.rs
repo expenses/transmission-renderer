@@ -1,25 +1,34 @@
 #![allow(clippy::float_cmp)]
 
 use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
-use ash::extensions::khr::{Surface as SurfaceLoader, Swapchain as SwapchainLoader, AccelerationStructure as AccelerationStructureLoader, DeferredHostOperations as DeferredHostOperationsLoader};
+use ash::extensions::khr::{
+    AccelerationStructure as AccelerationStructureLoader,
+    DeferredHostOperations as DeferredHostOperationsLoader, Surface as SurfaceLoader,
+    Swapchain as SwapchainLoader,
+};
 use ash::vk;
 use ash_abstractions::CStrList;
+use std::f32::consts::PI;
 use std::ffi::CStr;
 use structopt::StructOpt;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
-use std::f32::consts::PI;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
 use shared_structs::{Instance, PointLight, PushConstants, Similarity};
 
+mod acceleration_structures;
 mod descriptor_sets;
 mod model_loading;
 mod pipelines;
 mod profiling;
 mod render_passes;
 
+use acceleration_structures::{
+    build_acceleration_structures_from_primitives,
+    build_top_level_acceleration_structure_from_instances,
+};
 use descriptor_sets::{DescriptorSetLayouts, DescriptorSets};
 use model_loading::{load_gltf, ImageManager};
 use pipelines::Pipelines;
@@ -108,7 +117,12 @@ fn main() -> anyhow::Result<()> {
     let mut extensions = vec![SwapchainLoader::name()];
 
     if opt.ray_tracing {
-        extensions.extend_from_slice(&[DeferredHostOperationsLoader::name(), AccelerationStructureLoader::name(), vk::KhrRayQueryFn::name(), vk::KhrShaderNonSemanticInfoFn::name()]);
+        extensions.extend_from_slice(&[
+            DeferredHostOperationsLoader::name(),
+            AccelerationStructureLoader::name(),
+            vk::KhrRayQueryFn::name(),
+            vk::KhrShaderNonSemanticInfoFn::name(),
+        ]);
     }
 
     let device_extensions = CStrList::new(extensions);
@@ -170,11 +184,12 @@ fn main() -> anyhow::Result<()> {
             .descriptor_binding_partially_bound(true)
             .buffer_device_address(true);
 
-        let mut ray_query_features = vk::PhysicalDeviceRayQueryFeaturesKHR::builder()
-            .ray_query(true);
+        let mut ray_query_features =
+            vk::PhysicalDeviceRayQueryFeaturesKHR::builder().ray_query(true);
 
-        let mut acceleration_structure_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder()
-            .acceleration_structure(true);
+        let mut acceleration_structure_features =
+            vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder()
+                .acceleration_structure(true);
 
         let mut device_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_info)
@@ -184,7 +199,9 @@ fn main() -> anyhow::Result<()> {
             .push_next(&mut vulkan_1_2_features);
 
         if opt.ray_tracing {
-            device_info = device_info.push_next(&mut ray_query_features).push_next(&mut acceleration_structure_features);
+            device_info = device_info
+                .push_next(&mut ray_query_features)
+                .push_next(&mut acceleration_structure_features);
         }
 
         unsafe { instance.create_device(physical_device, &device_info, None) }?
@@ -201,7 +218,7 @@ fn main() -> anyhow::Result<()> {
         &render_passes,
         &descriptor_set_layouts,
         pipeline_cache,
-        opt.ray_tracing
+        opt.ray_tracing,
     )?;
 
     let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts)?;
@@ -482,238 +499,115 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut uniforms_buffer = ash_abstractions::Buffer::new(
-        unsafe {
-            bytes_of(&uniforms)
-        },
+        unsafe { bytes_of(&uniforms) },
         "uniforms buffer",
         vk::BufferUsageFlags::UNIFORM_BUFFER,
         &mut init_resources,
     )?;
 
-    let mut acceleration_structure_debugging_uniforms = shared_structs::AccelerationStructureDebuggingUniforms {
-        proj_inverse: Mat4::IDENTITY,
-        view_inverse: Mat4::IDENTITY,
-        size: UVec2::ZERO
-    };
+    let mut acceleration_structure_debugging_uniforms =
+        shared_structs::AccelerationStructureDebuggingUniforms {
+            proj_inverse: Mat4::IDENTITY,
+            view_inverse: Mat4::IDENTITY,
+            size: UVec2::ZERO,
+        };
 
     let mut acceleration_structure_debugging_uniforms_buffer = ash_abstractions::Buffer::new(
-        unsafe {
-            bytes_of(&acceleration_structure_debugging_uniforms)
-        },
+        unsafe { bytes_of(&acceleration_structure_debugging_uniforms) },
         "acceleration structure debugging uniforms buffer",
         vk::BufferUsageFlags::UNIFORM_BUFFER,
         &mut init_resources,
     )?;
 
-    let mut acceleration_structures = Vec::new();
-
-    let top_level_acceleration_structure = if opt.ray_tracing {
+    let (top_level_acceleration_structure, acceleration_structures) = if opt.ray_tracing {
         let acceleration_structure_loader = AccelerationStructureLoader::new(&instance, &device);
 
         let acceleration_structure_properties = {
-            let mut acceleration_structure_properties = vk::PhysicalDeviceAccelerationStructurePropertiesKHR::default();
+            let mut acceleration_structure_properties =
+                vk::PhysicalDeviceAccelerationStructurePropertiesKHR::default();
 
             let mut device_properties_2 = vk::PhysicalDeviceProperties2::builder()
                 .push_next(&mut acceleration_structure_properties);
 
-            unsafe { instance.get_physical_device_properties2(physical_device, &mut device_properties_2) }
+            unsafe {
+                instance.get_physical_device_properties2(physical_device, &mut device_properties_2)
+            }
 
             acceleration_structure_properties
         };
 
-        {
-            let triangles_data = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
-                .vertex_format(vk::Format::R32G32B32_SFLOAT)
-                .vertex_data(vk::DeviceOrHostAddressConstKHR {
-                    device_address: model_buffers.position.device_address(&device),
-                })
-                .vertex_stride(std::mem::size_of::<Vec3>() as u64)
-                .max_vertex(model_staging_buffers.position.len() as u32)
-                .index_type(vk::IndexType::UINT32)
-                .index_data(vk::DeviceOrHostAddressConstKHR {
-                    device_address: model_buffers.index.device_address(&device),
-                });
+        let acceleration_structures = build_acceleration_structures_from_primitives(
+            &model_buffers,
+            &model_staging_buffers,
+            &acceleration_structure_properties,
+            &acceleration_structure_loader,
+            &mut init_resources,
+            &mut buffers_to_cleanup,
+        )?;
 
-            let geometry = vk::AccelerationStructureGeometryKHR::builder()
-                .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
-                .geometry(vk::AccelerationStructureGeometryDataKHR { triangles: *triangles_data })
-                .flags(vk::GeometryFlagsKHR::OPAQUE);
+        vk_sync::cmd::pipeline_barrier(
+            &device,
+            init_resources.command_buffer,
+            Some(vk_sync::GlobalBarrier {
+                previous_accesses: &[vk_sync::AccessType::AccelerationStructureBuildWrite],
+                next_accesses: &[vk_sync::AccessType::AccelerationStructureBuildRead],
+            }),
+            &[],
+            &[],
+        );
 
-            let geometries = &[*geometry];
-
-            let geometry_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
-                .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
-                .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-                .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
-                .geometries(geometries)
-                .build();
-
-            let mut build_geometry_infos = Vec::new();
-            let mut build_flat_ranges = Vec::new();
-
-            for (i, primitive) in model_staging_buffers.primitives.iter().enumerate() {
-                let primitive_count = primitive.index_count / 3;
-
-                // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkAccelerationStructureBuildRangeInfoKHR.html#_description
-                let range = vk::AccelerationStructureBuildRangeInfoKHR::builder()
-                    .primitive_count(primitive_count)
-                    .primitive_offset(primitive.first_index * 4);
-
-                let build_sizes = unsafe {
-                    acceleration_structure_loader.get_acceleration_structure_build_sizes(
-                        vk::AccelerationStructureBuildTypeKHR::DEVICE,
-                        &geometry_info,
-                        &[primitive_count],
-                    )
-                };
-
-                let scratch_buffer = ash_abstractions::Buffer::new_of_size_with_alignment(
-                    build_sizes.build_scratch_size,
-                    &format!("Scratch buffer for primitive {}", i),
-                    vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    acceleration_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64,
-                    &mut init_resources
-                )?;
-
-                let acceleration_structure = AccelerationStructure::new(build_sizes.acceleration_structure_size,
-                    &format!("Acceleration structure for primitive {}", i),
-                    vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
-                    &acceleration_structure_loader,
-                    &mut init_resources
-                )?;
-
-                let mut complete_geometry_info = geometry_info;
-                complete_geometry_info.dst_acceleration_structure = acceleration_structure.object;
-                complete_geometry_info.scratch_data = vk::DeviceOrHostAddressKHR {
-                    device_address: scratch_buffer.device_address(&device),
-                };
-
-                build_geometry_infos.push(complete_geometry_info);
-                build_flat_ranges.push(*range);
-                acceleration_structures.push(acceleration_structure);
-
-                buffers_to_cleanup.push(scratch_buffer);
-            }
-
-            let build_ranges: Vec<_> = (0 .. build_flat_ranges.len()).map(|i| &build_flat_ranges[i..i+1]).collect();
-
-            assert_eq!(build_ranges.len(), build_geometry_infos.len());
-
-            unsafe {
-                acceleration_structure_loader
-                    .cmd_build_acceleration_structures(init_resources.command_buffer, &build_geometry_infos, &build_ranges);
-            }
-
-            vk_sync::cmd::pipeline_barrier(
-                &device,
-                init_resources.command_buffer,
-                Some(vk_sync::GlobalBarrier {
-                    previous_accesses: &[vk_sync::AccessType::AccelerationStructureBuildWrite],
-                    next_accesses: &[vk_sync::AccessType::AccelerationStructureBuildRead],
-                }),
-                &[],
-                &[],
-            );
-        }
-
-        let acceleration_structure_instances = model_staging_buffers.instances.iter().filter(|instance| {
-            let primitive = &model_staging_buffers.primitives[instance.primitive_id as usize];
-            primitive.draw_buffer_index < 2
-        }).map(|instance| {
-            vk::AccelerationStructureInstanceKHR {
+        let acceleration_structure_instances = model_staging_buffers
+            .instances
+            .iter()
+            .filter(|instance| {
+                let primitive = &model_staging_buffers.primitives[instance.primitive_id as usize];
+                primitive.draw_buffer_index < 2
+            })
+            .map(|instance| vk::AccelerationStructureInstanceKHR {
                 transform: vk::TransformMatrixKHR {
-                    matrix: transpose_matrix_for_acceleration_structure_instance(instance.transform.unpack().as_mat4()),
+                    matrix: transpose_matrix_for_acceleration_structure_instance(
+                        instance.transform.unpack().as_mat4(),
+                    ),
                 },
                 instance_custom_index_and_mask: Packed24_8::new(0, 0xff).0,
                 instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
                 acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
-                    device_handle: acceleration_structures[instance.primitive_id as usize].buffer.device_address(&device)
-                }
-            }
-        }).collect::<Vec<_>>();
+                    device_handle: acceleration_structures[instance.primitive_id as usize]
+                        .buffer
+                        .device_address(&device),
+                },
+            })
+            .collect::<Vec<_>>();
 
         let acceleration_structure_instances_buffer = ash_abstractions::Buffer::new_with_alignment(
             unsafe { cast_slice(&acceleration_structure_instances) },
             "acceleration structure instances",
             vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-            | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             // Must be aligned to 16 bytes:
             // https://vulkan.lunarg.com/doc/view/1.2.198.0/windows/1.2-extensions/vkspec.html#VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-03715
             16,
-            &mut init_resources
+            &mut init_resources,
         )?;
 
-        let num_instances = acceleration_structure_instances.len() as u32;
+        let top_level_acceleration_structure =
+            build_top_level_acceleration_structure_from_instances(
+                &acceleration_structure_instances_buffer,
+                acceleration_structure_instances.len() as u32,
+                &acceleration_structure_properties,
+                &acceleration_structure_loader,
+                &mut init_resources,
+                &mut buffers_to_cleanup,
+            )?;
 
-        let instances_data = vk::AccelerationStructureGeometryInstancesDataKHR::builder()
-            .data(vk::DeviceOrHostAddressConstKHR {
-                device_address: acceleration_structure_instances_buffer.device_address(&device),
-            });
-
-        let geometry = vk::AccelerationStructureGeometryKHR::builder()
-            .geometry_type(vk::GeometryTypeKHR::INSTANCES)
-            .geometry(vk::AccelerationStructureGeometryDataKHR { instances: *instances_data })
-            .flags(vk::GeometryFlagsKHR::OPAQUE);
-
-        let range = *vk::AccelerationStructureBuildRangeInfoKHR::builder()
-            .primitive_count(num_instances);
-
-        let geometries = &[*geometry];
-
-        let mut geometry_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
-            .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
-            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-            .flags(
-                vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE
-            )
-            .geometries(geometries);
-
-        let build_sizes = unsafe {
-            acceleration_structure_loader.get_acceleration_structure_build_sizes(
-                vk::AccelerationStructureBuildTypeKHR::DEVICE,
-                &geometry_info,
-                &[num_instances],
-            )
-        };
-
-        let scratch_buffer = ash_abstractions::Buffer::new_of_size_with_alignment(
-            build_sizes.build_scratch_size,
-            "Scratch buffer for the instances",
-            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            acceleration_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64,
-            &mut init_resources
-        )?;
-
-        let top_level_acceleration_structure = AccelerationStructure::new(build_sizes.acceleration_structure_size,
-            "Acceleration structure for instances",
-            vk::AccelerationStructureTypeKHR::TOP_LEVEL,
-            &acceleration_structure_loader,
-            &mut init_resources
-        )?;
-
-        geometry_info = geometry_info.dst_acceleration_structure(top_level_acceleration_structure.object).scratch_data(vk::DeviceOrHostAddressKHR {
-            device_address: scratch_buffer.device_address(&device),
-        });
-        let geometry_info = *geometry_info;
-
-        let range = &[range][..];
-        let range =  &[range][..];
-        //dbg!(&range);
-        let geometry_infos = &[geometry_info];
-
-        //dbg!(&geometry_info);
-
-        unsafe {
-            acceleration_structure_loader
-                .cmd_build_acceleration_structures(init_resources.command_buffer, geometry_infos, range);
-        }
-
-        buffers_to_cleanup.push(scratch_buffer);
         buffers_to_cleanup.push(acceleration_structure_instances_buffer);
 
-        Some(top_level_acceleration_structure)
+        (
+            Some(top_level_acceleration_structure),
+            acceleration_structures,
+        )
     } else {
-        None
+        (None, Vec::new())
     };
 
     {
@@ -730,7 +624,10 @@ fn main() -> anyhow::Result<()> {
         proj_view: Default::default(),
         view_position: Default::default(),
         framebuffer_size: UVec2::new(extent.width, extent.height),
-        acceleration_structure_address: top_level_acceleration_structure.as_ref().map(|a| a.buffer.device_address(&device)).unwrap_or(0),
+        acceleration_structure_address: top_level_acceleration_structure
+            .as_ref()
+            .map(|a| a.buffer.device_address(&device))
+            .unwrap_or(0),
     };
 
     // Swapchain
@@ -903,7 +800,9 @@ fn main() -> anyhow::Result<()> {
                     .dst_set(descriptor_sets.acceleration_structure_debugging)
                     .dst_binding(1)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(&buffer_info(&acceleration_structure_debugging_uniforms_buffer)),
+                    .buffer_info(&buffer_info(
+                        &acceleration_structure_debugging_uniforms_buffer,
+                    )),
             ],
             &[],
         )
@@ -985,7 +884,7 @@ fn main() -> anyhow::Result<()> {
                                     window.set_cursor_visible(!cursor_grab);
                                     window.set_cursor_grab(cursor_grab)?;
                                 }
-                            },
+                            }
                             VirtualKeyCode::T if is_pressed => {
                                 toggle = !toggle;
                             }
@@ -1232,9 +1131,14 @@ fn main() -> anyhow::Result<()> {
                     uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
 
                     acceleration_structure_debugging_uniforms.view_inverse = view_matrix.inverse();
-                    acceleration_structure_debugging_uniforms.proj_inverse = perspective_matrix.inverse();
-                    acceleration_structure_debugging_uniforms.size = UVec2::new(extent.width, extent.height);
-                    acceleration_structure_debugging_uniforms_buffer.write_mapped(unsafe { bytes_of(&acceleration_structure_debugging_uniforms) }, 0)?;
+                    acceleration_structure_debugging_uniforms.proj_inverse =
+                        perspective_matrix.inverse();
+                    acceleration_structure_debugging_uniforms.size =
+                        UVec2::new(extent.width, extent.height);
+                    acceleration_structure_debugging_uniforms_buffer.write_mapped(
+                        unsafe { bytes_of(&acceleration_structure_debugging_uniforms) },
+                        0,
+                    )?;
 
                     window.request_redraw();
                 }
@@ -1344,14 +1248,21 @@ fn main() -> anyhow::Result<()> {
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         model_buffers.cleanup(&device, &mut allocator)?;
-                        acceleration_structure_debugging_uniforms_buffer.cleanup(&device, &mut allocator)?;
+                        acceleration_structure_debugging_uniforms_buffer
+                            .cleanup(&device, &mut allocator)?;
 
                         for acceleration_structure in &acceleration_structures {
-                            acceleration_structure.buffer.cleanup(&device, &mut allocator)?;
+                            acceleration_structure
+                                .buffer
+                                .cleanup(&device, &mut allocator)?;
                         }
 
-                        if let Some(acceleration_structure) = top_level_acceleration_structure.as_ref() {
-                            acceleration_structure.buffer.cleanup(&device, &mut allocator)?;
+                        if let Some(acceleration_structure) =
+                            top_level_acceleration_structure.as_ref()
+                        {
+                            acceleration_structure
+                                .buffer
+                                .cleanup(&device, &mut allocator)?;
                         }
                     }
                 }
@@ -1374,7 +1285,11 @@ struct LightBuffers {
 }
 
 impl LightBuffers {
-    fn cleanup(&self, device: &ash::Device, allocator: &mut gpu_allocator::vulkan::Allocator) -> anyhow::Result<()> {
+    fn cleanup(
+        &self,
+        device: &ash::Device,
+        allocator: &mut gpu_allocator::vulkan::Allocator,
+    ) -> anyhow::Result<()> {
         self.lights.cleanup(device, allocator)?;
         self.froxel_light_counts.cleanup(device, allocator)?;
         self.froxel_light_indices.cleanup(device, allocator)?;
@@ -1894,7 +1809,10 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_end_render_pass(command_buffer);
 
-    if let Some(pipeline) = pipelines.acceleration_structure_debugging.filter(|_| toggle) {
+    if let Some(pipeline) = pipelines
+        .acceleration_structure_debugging
+        .filter(|_| toggle)
+    {
         let subresource_range = *vk::ImageSubresourceRange::builder()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
             .level_count(1)
@@ -1918,11 +1836,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             }],
         );
 
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipeline,
-        );
+        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, pipeline);
 
         device.cmd_bind_descriptor_sets(
             command_buffer,
@@ -1941,7 +1855,12 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             bytes_of(&push_constants),
         );
 
-        device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 8), 1);
+        device.cmd_dispatch(
+            command_buffer,
+            dispatch_count(extent.width, 8),
+            dispatch_count(extent.height, 8),
+            1,
+        );
 
         vk_sync::cmd::pipeline_barrier(
             device,
@@ -1949,10 +1868,10 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             None,
             &[],
             &[vk_sync::ImageBarrier {
-                previous_accesses: &[
-                    vk_sync::AccessType::ComputeShaderWrite,
+                previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                next_accesses: &[
+                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
                 ],
-                next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
                 next_layout: vk_sync::ImageLayout::Optimal,
                 image: hdr_framebuffer.image,
                 range: subresource_range,
@@ -2276,7 +2195,8 @@ impl ModelStagingBuffers {
         &self,
         init_resources: &mut ash_abstractions::InitResources,
     ) -> anyhow::Result<ModelBuffers> {
-        let ray_tracing_flags =  vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR;
+        let ray_tracing_flags = vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+            | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR;
 
         Ok(ModelBuffers {
             position: ash_abstractions::Buffer::new(
@@ -2412,55 +2332,13 @@ struct MaxDrawCounts {
     transmission_alpha_clip: u32,
 }
 
-struct AccelerationStructure {
-    buffer: ash_abstractions::Buffer,
-    object: vk::AccelerationStructureKHR,
-}
-
-impl AccelerationStructure {
-    fn new(size: u64, name: &str, ty: vk::AccelerationStructureTypeKHR, acceleration_structure_loader: &AccelerationStructureLoader, init_resources: &mut ash_abstractions::InitResources) -> anyhow::Result<Self> {
-        let buffer = ash_abstractions::Buffer::new_of_size(
-            size,
-            name,
-            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-            init_resources
-        )?;
-
-        let object = unsafe {
-            acceleration_structure_loader.create_acceleration_structure(
-                &vk::AccelerationStructureCreateInfoKHR::builder()
-                    .buffer(buffer.buffer)
-                    .offset(0)
-                    .size(size)
-                    .ty(ty),
-                None,
-            )
-        }?;
-
-        if let Some(debug_utils_loader) = init_resources.debug_utils_loader {
-            ash_abstractions::set_object_name(
-                init_resources.device,
-                debug_utils_loader,
-                object,
-                name,
-            )?;
-        }
-
-        Ok(Self {
-            object,
-            buffer,
-        })
-    }
-}
-
 pub fn transpose_matrix_for_acceleration_structure_instance(matrix: Mat4) -> [f32; 12] {
     let row_0 = matrix.row(0);
     let row_1 = matrix.row(1);
     let row_2 = matrix.row(2);
     [
-        row_0.x, row_0.y, row_0.z, row_0.w,
-        row_1.x, row_1.y, row_1.z, row_1.w,
-        row_2.x, row_2.y, row_2.z, row_2.w,
+        row_0.x, row_0.y, row_0.z, row_0.w, row_1.x, row_1.y, row_1.z, row_1.w, row_2.x, row_2.y,
+        row_2.z, row_2.w,
     ]
 }
 
@@ -2485,11 +2363,18 @@ impl Packed24_8 {
     }
 }
 
-fn end_init_resources(init_resources: ash_abstractions::InitResources, queue: vk::Queue) -> anyhow::Result<()> {
+fn end_init_resources(
+    init_resources: ash_abstractions::InitResources,
+    queue: vk::Queue,
+) -> anyhow::Result<()> {
     unsafe {
-        init_resources.device.end_command_buffer(init_resources.command_buffer)?;
+        init_resources
+            .device
+            .end_command_buffer(init_resources.command_buffer)?;
 
-        let fence = init_resources.device.create_fence(&vk::FenceCreateInfo::builder(), None)?;
+        let fence = init_resources
+            .device
+            .create_fence(&vk::FenceCreateInfo::builder(), None)?;
 
         init_resources.device.queue_submit(
             queue,
@@ -2497,7 +2382,9 @@ fn end_init_resources(init_resources: ash_abstractions::InitResources, queue: vk
             fence,
         )?;
 
-        init_resources.device.wait_for_fences(&[fence], true, u64::MAX)?;
+        init_resources
+            .device
+            .wait_for_fences(&[fence], true, u64::MAX)?;
     }
 
     Ok(())
