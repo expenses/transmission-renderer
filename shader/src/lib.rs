@@ -81,7 +81,7 @@ pub fn fragment_transmission(
 
     #[cfg(target_feature = "RayQueryKHR")]
     let acceleration_structure = unsafe {
-        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
+        AccelerationStructure::from_vec(push_constants.acceleration_structure_address)
     };
 
     let (result, mut transmission) = evaluate_lights_transmission(
@@ -142,7 +142,7 @@ pub fn fragment_transmission(
 }
 
 #[spirv(fragment)]
-pub fn fragment(
+pub fn fragment_normal(
     position: Vec3,
     normal: Vec3,
     uv: Vec2,
@@ -181,7 +181,7 @@ pub fn fragment(
 
     #[cfg(target_feature = "RayQueryKHR")]
     let acceleration_structure = unsafe {
-        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
+        AccelerationStructure::from_vec(push_constants.acceleration_structure_address)
     };
 
     let result = evaluate_lights(
@@ -564,7 +564,7 @@ pub fn acceleration_structure_debugging(
     let direction = (uniforms.view_inverse * local_direction_vector.extend(0.0)).truncate();
 
     let acceleration_structure = unsafe {
-        AccelerationStructure::from_u64(push_constants.acceleration_structure_address)
+        AccelerationStructure::from_vec(push_constants.acceleration_structure_address)
     };
 
     use spirv_std::ray_tracing::{AccelerationStructure, RayFlags, RayQuery, CommittedIntersection};

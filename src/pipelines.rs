@@ -49,10 +49,10 @@ impl Pipelines {
         };
 
         let fragment_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(maybe_ray_tracing, "fragment")?,
+            &read_shader(maybe_ray_tracing, "fragment_normal")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("fragment")
+            c_str!("fragment_normal")
         )?;
 
         let fragment_transmission_stage = ash_abstractions::load_shader_module_as_stage(

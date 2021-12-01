@@ -195,21 +195,21 @@ impl DescriptorSets {
                     .pool_sizes(&[
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(2 + 8 + 3),
+                            .descriptor_count(2 + 8 + 3 + 10),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                            .descriptor_count(3 + 1),
+                            .descriptor_count(3 + 1 + 10),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(MAX_IMAGES),
+                            .descriptor_count(MAX_IMAGES + 10),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLER)
-                            .descriptor_count(3),
+                            .descriptor_count(3 + 10),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::STORAGE_IMAGE)
-                            .descriptor_count(1),
+                            .descriptor_count(1 + 10),
                     ])
-                    .max_sets(7),
+                    .max_sets(10),
                 None,
             )
         }?;

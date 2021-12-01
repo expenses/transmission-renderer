@@ -39,7 +39,10 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
     )
 }
 
+#[cfg(not(target_os = "macos"))]
 pub const MAX_IMAGES: u32 = 193;
+#[cfg(target_os = "macos")]
+pub const MAX_IMAGES: u32 = 127;
 pub const NEAR_Z: f32 = 0.01;
 
 #[derive(StructOpt)]
@@ -73,7 +76,7 @@ fn main() -> anyhow::Result<()> {
         use simplelog::*;
 
         CombinedLogger::init(vec![TermLogger::new(
-            LevelFilter::Info,
+            LevelFilter::Trace,
             Config::default(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
@@ -87,7 +90,11 @@ fn main() -> anyhow::Result<()> {
 
     let entry = unsafe { ash::Entry::new() }?;
 
-    let api_version = vk::API_VERSION_1_2;
+    let api_version = if cfg!(not(target_os = "macos")) {
+        vk::API_VERSION_1_2
+    } else {
+        vk::API_VERSION_1_1
+    };
 
     let app_info = vk::ApplicationInfo::builder()
         .application_name(c_str_macro::c_str!("Transmission Renderer"))
@@ -109,6 +116,10 @@ fn main() -> anyhow::Result<()> {
 
     if opt.ray_tracing {
         extensions.extend_from_slice(&[DeferredHostOperationsLoader::name(), AccelerationStructureLoader::name(), vk::KhrRayQueryFn::name(), vk::KhrShaderNonSemanticInfoFn::name()]);
+    }
+
+    if cfg!(target_os = "macos") {
+        extensions.extend_from_slice(&[vk::KhrPortabilitySubsetFn::name(), vk::ExtDescriptorIndexingFn::name()]);
     }
 
     let device_extensions = CStrList::new(extensions);
@@ -162,12 +173,10 @@ fn main() -> anyhow::Result<()> {
             .queue_family_index(graphics_queue_family)
             .queue_priorities(&[1.0])];
 
-        let device_features = vk::PhysicalDeviceFeatures::builder().shader_int64(true);
+        let device_features = vk::PhysicalDeviceFeatures::builder().multi_draw_indirect(true);
 
         let mut vulkan_1_2_features = vk::PhysicalDeviceVulkan12Features::builder()
-            .runtime_descriptor_array(true)
             .draw_indirect_count(true)
-            .descriptor_binding_partially_bound(true)
             .buffer_device_address(true);
 
         let mut ray_query_features = vk::PhysicalDeviceRayQueryFeaturesKHR::builder()
@@ -176,12 +185,21 @@ fn main() -> anyhow::Result<()> {
         let mut acceleration_structure_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder()
             .acceleration_structure(true);
 
+        let mut descriptor_indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::builder()
+            .runtime_descriptor_array(true)
+            .descriptor_binding_partially_bound(true);
+
         let mut device_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_info)
             .enabled_features(&device_features)
             .enabled_extension_names(device_extensions.pointers())
-            .enabled_layer_names(enabled_layers.pointers())
-            .push_next(&mut vulkan_1_2_features);
+            .enabled_layer_names(enabled_layers.pointers());
+        
+        if cfg!(not(target_os = "macos")) {
+            device_info = device_info.push_next(&mut vulkan_1_2_features);
+        } else {
+            device_info = device_info.push_next(&mut descriptor_indexing_features);
+        }
 
         if opt.ray_tracing {
             device_info = device_info.push_next(&mut ray_query_features).push_next(&mut acceleration_structure_features);
@@ -237,7 +255,7 @@ fn main() -> anyhow::Result<()> {
                 log_leaks_on_shutdown: opt.log_leaks,
                 ..Default::default()
             },
-            buffer_device_address: true,
+            buffer_device_address: opt.ray_tracing,
         })?;
 
     unsafe {
@@ -730,7 +748,7 @@ fn main() -> anyhow::Result<()> {
         proj_view: Default::default(),
         view_position: Default::default(),
         framebuffer_size: UVec2::new(extent.width, extent.height),
-        acceleration_structure_address: top_level_acceleration_structure.as_ref().map(|a| a.buffer.device_address(&device)).unwrap_or(0),
+        acceleration_structure_address: UVec2::ZERO,//top_level_acceleration_structure.as_ref().map(|a| a.buffer.device_address(&device)).unwrap_or(0),
     };
 
     // Swapchain
@@ -2175,6 +2193,7 @@ impl DrawBuffer {
         draw_count_index: u64,
         command_buffer: vk::CommandBuffer,
     ) {
+        #[cfg(not(target_os = "macos"))]
         device.cmd_draw_indexed_indirect_count(
             command_buffer,
             self.buffer.buffer,
@@ -2183,7 +2202,15 @@ impl DrawBuffer {
             draw_count_index * 4,
             self.max_draws,
             std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
-        )
+        );
+        #[cfg(target_os = "macos")]
+        device.cmd_draw_indexed_indirect(
+            command_buffer,
+            self.buffer.buffer,
+            0,
+            self.max_draws,
+            std::mem::size_of::<vk::DrawIndexedIndirectCommand>() as u32,
+        );
     }
 }
 

@@ -12,7 +12,7 @@ pub struct PushConstants {
     pub proj_view: Mat4,
     pub view_position: Vec3A,
     pub framebuffer_size: UVec2,
-    pub acceleration_structure_address: u64,
+    pub acceleration_structure_address: UVec2,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
