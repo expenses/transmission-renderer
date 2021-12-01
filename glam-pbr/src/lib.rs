@@ -12,13 +12,14 @@ use num_traits::Float;
 pub fn light_direction_and_attenuation(
     fragment_position: Vec3,
     light_position: Vec3,
-) -> (Vec3, f32) {
+) -> (Vec3, f32, f32) {
     let vector = light_position - fragment_position;
     let distance_sq = vector.length_squared();
-    let direction = vector / distance_sq.sqrt();
+    let distance = distance_sq.sqrt();
+    let direction = vector / distance;
     let attenuation = 1.0 / distance_sq;
 
-    (direction, attenuation)
+    (direction, distance, attenuation)
 }
 
 fn clamp(value: f32, min: f32, max: f32) -> f32 {
