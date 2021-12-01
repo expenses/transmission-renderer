@@ -13,6 +13,7 @@ use winit::window::Fullscreen;
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
 use shared_structs::{Instance, PointLight, PushConstants, Similarity};
 
+mod command_graph;
 mod descriptor_sets;
 mod model_loading;
 mod pipelines;
@@ -204,7 +205,7 @@ fn main() -> anyhow::Result<()> {
         )
     }?;
 
-    let command_buffer = command_buffers[0];
+    let init_command_buffer = command_buffers[0];
 
     let mut allocator =
         gpu_allocator::vulkan::Allocator::new(&gpu_allocator::vulkan::AllocatorCreateDesc {
@@ -220,14 +221,14 @@ fn main() -> anyhow::Result<()> {
 
     unsafe {
         device.begin_command_buffer(
-            command_buffer,
+            init_command_buffer,
             &vk::CommandBufferBeginInfo::builder()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
         )
     }?;
 
     let mut init_resources = ash_abstractions::InitResources {
-        command_buffer,
+        command_buffer: init_command_buffer,
         device: &device,
         allocator: &mut allocator,
         debug_utils_loader: Some(&debug_utils_loader),
@@ -440,12 +441,12 @@ fn main() -> anyhow::Result<()> {
     unsafe {
         let _span = tracy_client::span!("Waiting on the init command buffer");
 
-        device.end_command_buffer(command_buffer)?;
+        device.end_command_buffer(init_command_buffer)?;
         let fence = device.create_fence(&vk::FenceCreateInfo::builder(), None)?;
 
         device.queue_submit(
             queue,
-            &[*vk::SubmitInfo::builder().command_buffers(&[command_buffer])],
+            &[*vk::SubmitInfo::builder().command_buffers(&[init_command_buffer])],
             fence,
         )?;
 
@@ -681,8 +682,12 @@ fn main() -> anyhow::Result<()> {
     let mut screen_center =
         winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
 
-    let mut profiling_ctx =
+    let profiling_ctx =
         query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
+
+    let thread_pool = thread_pool::ThreadPool::new();
+    let mut command_graph =
+        command_graph::CommandGraph::new(&device, thread_pool, graphics_queue_family)?;
 
     drop(entire_setup_span);
 
@@ -788,7 +793,7 @@ fn main() -> anyhow::Result<()> {
                             )?;
 
                             device.begin_command_buffer(
-                                command_buffer,
+                                init_command_buffer,
                                 &vk::CommandBufferBeginInfo::builder()
                                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                             )?;
@@ -799,7 +804,7 @@ fn main() -> anyhow::Result<()> {
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
-                            command_buffer,
+                            command_buffer: init_command_buffer,
                             device: &device,
                             allocator: &mut allocator,
                             debug_utils_loader: Some(&debug_utils_loader),
@@ -868,13 +873,14 @@ fn main() -> anyhow::Result<()> {
                         drop(init_resources);
 
                         unsafe {
-                            device.end_command_buffer(command_buffer)?;
+                            device.end_command_buffer(init_command_buffer)?;
                             let fence =
                                 device.create_fence(&vk::FenceCreateInfo::builder(), None)?;
 
                             device.queue_submit(
                                 queue,
-                                &[*vk::SubmitInfo::builder().command_buffers(&[command_buffer])],
+                                &[*vk::SubmitInfo::builder()
+                                    .command_buffers(&[init_command_buffer])],
                                 fence,
                             )?;
 
@@ -964,40 +970,190 @@ fn main() -> anyhow::Result<()> {
                     let tonemap_framebuffer =
                         swapchain_image_framebuffers[swapchain_image_index as usize];
 
-                    {
-                        device.begin_command_buffer(
-                            command_buffer,
-                            &vk::CommandBufferBeginInfo::builder()
-                                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                        )?;
+                    command_graph.reset();
 
-                        record(RecordParams {
-                            device: &device,
-                            command_buffer,
-                            pipelines: &pipelines,
-                            draw_buffers: &draw_buffers,
-                            profiling_ctx: &mut profiling_ctx,
-                            model_buffers: &model_buffers,
-                            render_passes: &render_passes,
-                            draw_framebuffer,
-                            tonemap_framebuffer,
-                            transmission_framebuffer,
-                            descriptor_sets: &descriptor_sets,
-                            opaque_sampled_hdr_framebuffer: &opaque_sampled_hdr_framebuffer,
-                            dynamic: DynamicRecordParams {
-                                extent,
-                                num_primitives,
-                                num_instances,
-                                push_constants,
-                                view_matrix,
-                                perspective_matrix,
-                                opaque_mip_levels,
-                                tonemapping_params,
+                    let device = &device;
+                    let profiling_ctx = &profiling_ctx;
+
+                    let reset_query_pool = command_graph
+                        .register_commands("reset_query_pool", &[], |command_buffer| {
+                            profiling_ctx.reset(&device, command_buffer);
+                        })
+                        .unwrap();
+
+                    let transfer_to_compute_barrier = command_graph
+                        .register_global_barrier(vk_sync::GlobalBarrier {
+                            previous_accesses: &[vk_sync::AccessType::TransferWrite],
+                            next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                        })
+                        .unwrap();
+
+                    let compute_to_compute_barrier = command_graph
+                        .register_global_barrier(vk_sync::GlobalBarrier {
+                            previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                            next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                        })
+                        .unwrap();
+
+                    let zero_frustum_culling_buffers = command_graph
+                        .register_commands(
+                            "zero_frustum_culling_buffers",
+                            &[(reset_query_pool, None)],
+                            |command_buffer| {
+                                let profiling_zone = profiling_zone!(
+                                    "zeroing the instance count buffer",
+                                    &device,
+                                    command_buffer,
+                                    &profiling_ctx
+                                );
+
+                                device.cmd_fill_buffer(
+                                    command_buffer,
+                                    draw_buffers.instance_count_buffer.buffer,
+                                    0,
+                                    vk::WHOLE_SIZE,
+                                    0,
+                                );
+
+                                drop(profiling_zone);
+
+                                let profiling_zone = profiling_zone!(
+                                    "zeroing the draw count buffer",
+                                    &device,
+                                    command_buffer,
+                                    &profiling_ctx
+                                );
+
+                                device.cmd_fill_buffer(
+                                    command_buffer,
+                                    draw_buffers.draw_counts_buffer.buffer,
+                                    0,
+                                    vk::WHOLE_SIZE,
+                                    0,
+                                );
+
+                                drop(profiling_zone);
                             },
-                        })?;
+                        )
+                        .unwrap();
 
-                        device.end_command_buffer(command_buffer)?;
-                    }
+                    let frustum_culling = command_graph
+                        .register_commands(
+                            "frustum culling",
+                            &[(
+                                zero_frustum_culling_buffers,
+                                Some(transfer_to_compute_barrier),
+                            )],
+                            |command_buffer| {
+                                record_frustum_culling(RecordFrustumCullingParams {
+                                    device: &device,
+                                    command_buffer,
+                                    pipelines: &pipelines,
+                                    profiling_ctx: &profiling_ctx,
+                                    descriptor_sets: &descriptor_sets,
+                                    num_instances,
+                                    view_matrix,
+                                    perspective_matrix,
+                                });
+                            },
+                        )
+                        .unwrap();
+
+                    let frustum_culling_demultiplex_draws = command_graph
+                        .register_commands(
+                            "frustum_culling_demultiplex_draws",
+                            &[(frustum_culling, Some(compute_to_compute_barrier))],
+                            |command_buffer| {
+                                let _profiling_zone = profiling_zone!(
+                                    "demultiplex draws compute shader",
+                                    &device,
+                                    command_buffer,
+                                    &profiling_ctx
+                                );
+
+                                device.cmd_bind_pipeline(
+                                    command_buffer,
+                                    vk::PipelineBindPoint::COMPUTE,
+                                    pipelines.demultiplex_draws,
+                                );
+
+                                device.cmd_bind_descriptor_sets(
+                                    command_buffer,
+                                    vk::PipelineBindPoint::COMPUTE,
+                                    pipelines.frustum_culling_pipeline_layout,
+                                    0,
+                                    &[
+                                        descriptor_sets.frustum_culling,
+                                        descriptor_sets.instance_buffer,
+                                    ],
+                                    &[],
+                                );
+
+                                device.cmd_bind_pipeline(
+                                    command_buffer,
+                                    vk::PipelineBindPoint::COMPUTE,
+                                    pipelines.demultiplex_draws,
+                                );
+
+                                device.cmd_dispatch(
+                                    command_buffer,
+                                    dispatch_count(num_primitives, 64),
+                                    1,
+                                    1,
+                                );
+                            },
+                        )
+                        .unwrap();
+
+                    let light_assignment = command_graph
+                        .register_commands(
+                            "light_assignment",
+                            &[(reset_query_pool, None)],
+                            |command_buffer| {
+                                record_light_assignment(RecordLightAssignmentParams {
+                                    device: &device,
+                                    command_buffer,
+                                    profiling_ctx: &profiling_ctx,
+                                    descriptor_sets: &descriptor_sets,
+                                    light_buffers: &light_buffers,
+                                });
+                            },
+                        )
+                        .unwrap();
+
+                    command_graph
+                        .register_commands(
+                            "render",
+                            &[
+                                (frustum_culling_demultiplex_draws, None),
+                                (light_assignment, None),
+                            ],
+                            |command_buffer| {
+                                record(RecordParams {
+                                    device: &device,
+                                    command_buffer,
+                                    pipelines: &pipelines,
+                                    draw_buffers: &draw_buffers,
+                                    profiling_ctx: &profiling_ctx,
+                                    model_buffers: &model_buffers,
+                                    render_passes: &render_passes,
+                                    draw_framebuffer,
+                                    tonemap_framebuffer,
+                                    transmission_framebuffer,
+                                    descriptor_sets: &descriptor_sets,
+                                    opaque_sampled_hdr_framebuffer: &opaque_sampled_hdr_framebuffer,
+                                    dynamic: DynamicRecordParams {
+                                        extent,
+                                        push_constants,
+                                        opaque_mip_levels,
+                                        tonemapping_params,
+                                    },
+                                });
+                            },
+                        )
+                        .unwrap();
+
+                    let buffers = command_graph.get_buffers();
 
                     {
                         let _submission_span = tracy_client::span!("Command buffer submission");
@@ -1006,8 +1162,10 @@ fn main() -> anyhow::Result<()> {
                             queue,
                             &[*vk::SubmitInfo::builder()
                                 .wait_semaphores(&[present_semaphore])
-                                .wait_dst_stage_mask(&[vk::PipelineStageFlags::TRANSFER])
-                                .command_buffers(&[command_buffer])
+                                .wait_dst_stage_mask(&[
+                                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                ])
+                                .command_buffers(&buffers)
                                 .signal_semaphores(&[render_semaphore])],
                             render_fence,
                         )?;
@@ -1064,6 +1222,123 @@ struct LightBuffers {
     froxel_light_indices: ash_abstractions::Buffer,
 }
 
+struct RecordLightAssignmentParams<'a> {
+    device: &'a ash::Device,
+    command_buffer: vk::CommandBuffer,
+    profiling_ctx: &'a ProfilingContext,
+    descriptor_sets: &'a DescriptorSets,
+    light_buffers: &'a LightBuffers,
+}
+
+unsafe fn record_light_assignment(params: RecordLightAssignmentParams) {
+    let RecordLightAssignmentParams {
+        device,
+        command_buffer,
+        profiling_ctx,
+        descriptor_sets,
+        light_buffers,
+    } = params;
+
+    let _profiling_zone = profiling_zone!(
+        "light assignment",
+        vk::PipelineStageFlags::TOP_OF_PIPE,
+        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+        device,
+        command_buffer,
+        profiling_ctx
+    );
+
+    device.cmd_fill_buffer(
+        command_buffer,
+        light_buffers.froxel_light_counts.buffer,
+        0,
+        vk::WHOLE_SIZE,
+        0,
+    );
+}
+
+struct RecordFrustumCullingParams<'a> {
+    device: &'a ash::Device,
+    command_buffer: vk::CommandBuffer,
+    profiling_ctx: &'a ProfilingContext,
+    pipelines: &'a Pipelines,
+    descriptor_sets: &'a DescriptorSets,
+    perspective_matrix: Mat4,
+    view_matrix: Mat4,
+    num_instances: u32,
+}
+
+unsafe fn record_frustum_culling(params: RecordFrustumCullingParams) {
+    let RecordFrustumCullingParams {
+        device,
+        command_buffer,
+        profiling_ctx,
+        pipelines,
+        perspective_matrix,
+        view_matrix,
+        num_instances,
+        descriptor_sets,
+    } = params;
+
+    let _profiling_zone = profiling_zone!(
+        "frustum culling",
+        vk::PipelineStageFlags::TOP_OF_PIPE,
+        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+        device,
+        command_buffer,
+        profiling_ctx
+    );
+
+    device.cmd_bind_descriptor_sets(
+        command_buffer,
+        vk::PipelineBindPoint::COMPUTE,
+        pipelines.frustum_culling_pipeline_layout,
+        0,
+        &[
+            descriptor_sets.frustum_culling,
+            descriptor_sets.instance_buffer,
+        ],
+        &[],
+    );
+
+    let trunc_row = |index| perspective_matrix.row(index).truncate();
+
+    // Get the left and top planes (the ones that satisfy 'x + w < 0' and 'y + w < 0') (I think, don't quote me on this)
+    // https://github.com/zeux/niagara/blob/98f5d5ae2b48e15e145e3ad13ae7f4f9f1e0e297/src/niagara.cpp#L822-L823
+    let frustum_x = (trunc_row(3) + trunc_row(0)).normalize();
+    let frustum_y = (trunc_row(3) + trunc_row(1)).normalize();
+
+    device.cmd_push_constants(
+        command_buffer,
+        pipelines.frustum_culling_pipeline_layout,
+        vk::ShaderStageFlags::COMPUTE,
+        0,
+        bytes_of(&shared_structs::CullingPushConstants {
+            view: view_matrix,
+            frustum_x_xz: frustum_x.xz(),
+            frustum_y_yz: frustum_y.yz(),
+            z_near: NEAR_Z,
+        }),
+    );
+
+    device.cmd_bind_pipeline(
+        command_buffer,
+        vk::PipelineBindPoint::COMPUTE,
+        pipelines.frustum_culling,
+    );
+
+    {
+        let _profiling_zone = profiling_zone!(
+            "frustum culling compute shader",
+            device,
+            command_buffer,
+            profiling_ctx
+        );
+
+        device.cmd_dispatch(command_buffer, dispatch_count(num_instances, 64), 1, 1);
+    }
+}
+
 struct RecordParams<'a> {
     device: &'a ash::Device,
     command_buffer: vk::CommandBuffer,
@@ -1082,18 +1357,12 @@ struct RecordParams<'a> {
 
 struct DynamicRecordParams {
     extent: vk::Extent2D,
-    num_primitives: u32,
-    num_instances: u32,
     push_constants: PushConstants,
-    view_matrix: Mat4,
-    perspective_matrix: Mat4,
     opaque_mip_levels: u32,
     tonemapping_params: colstodian::tonemap::BakedLottesTonemapperParams,
 }
 
-unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
-    let _span = tracy_client::span!("Command buffer recording");
-
+unsafe fn record(params: RecordParams) {
     let RecordParams {
         device,
         command_buffer,
@@ -1106,11 +1375,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         tonemap_framebuffer,
         dynamic:
             DynamicRecordParams {
-                num_primitives,
-                num_instances,
                 push_constants,
-                view_matrix,
-                perspective_matrix,
                 extent,
                 opaque_mip_levels,
                 tonemapping_params,
@@ -1175,8 +1440,6 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .min_depth(0.0)
         .max_depth(1.0);
 
-    profiling_ctx.reset(device, command_buffer);
-
     let all_commands_profiling_zone = profiling_zone!(
         "all commands",
         vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -1185,152 +1448,6 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         command_buffer,
         profiling_ctx
     );
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "frustum culling",
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        {
-            let profiling_zone = profiling_zone!(
-                "zeroing the instance count buffer",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_fill_buffer(
-                command_buffer,
-                draw_buffers.instance_count_buffer.buffer,
-                0,
-                vk::WHOLE_SIZE,
-                0,
-            );
-
-            drop(profiling_zone);
-
-            let profiling_zone = profiling_zone!(
-                "zeroing the draw count buffer",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_fill_buffer(
-                command_buffer,
-                draw_buffers.draw_counts_buffer.buffer,
-                0,
-                vk::WHOLE_SIZE,
-                0,
-            );
-
-            drop(profiling_zone);
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::TransferWrite],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-            }),
-            &[],
-            &[],
-        );
-
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.frustum_culling_pipeline_layout,
-            0,
-            &[
-                descriptor_sets.frustum_culling,
-                descriptor_sets.instance_buffer,
-            ],
-            &[],
-        );
-
-        let trunc_row = |index| perspective_matrix.row(index).truncate();
-
-        // Get the left and top planes (the ones that satisfy 'x + w < 0' and 'y + w < 0') (I think, don't quote me on this)
-        // https://github.com/zeux/niagara/blob/98f5d5ae2b48e15e145e3ad13ae7f4f9f1e0e297/src/niagara.cpp#L822-L823
-        let frustum_x = (trunc_row(3) + trunc_row(0)).normalize();
-        let frustum_y = (trunc_row(3) + trunc_row(1)).normalize();
-
-        device.cmd_push_constants(
-            command_buffer,
-            pipelines.frustum_culling_pipeline_layout,
-            vk::ShaderStageFlags::COMPUTE,
-            0,
-            bytes_of(&shared_structs::CullingPushConstants {
-                view: view_matrix,
-                frustum_x_xz: frustum_x.xz(),
-                frustum_y_yz: frustum_y.yz(),
-                z_near: NEAR_Z,
-            }),
-        );
-
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.frustum_culling,
-        );
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "frustum culling compute shader",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_dispatch(command_buffer, dispatch_count(num_instances, 64), 1, 1);
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-            }),
-            &[],
-            &[],
-        );
-
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.demultiplex_draws,
-        );
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "demultiplex draws compute shader",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[vk_sync::AccessType::IndirectBuffer],
-            }),
-            &[],
-            &[],
-        );
-    }
 
     device.cmd_begin_render_pass(
         command_buffer,
@@ -1512,6 +1629,8 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         );
     }
 
+    let transmissive_pass_span = tracy_client::span!("transmissive pass");
+
     device.cmd_begin_render_pass(
         command_buffer,
         &transmission_render_pass_info,
@@ -1572,6 +1691,10 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_end_render_pass(command_buffer);
 
+    drop(transmissive_pass_span);
+
+    let tonemap_pass_span = tracy_client::span!("tonemap pass");
+
     device.cmd_begin_render_pass(
         command_buffer,
         &tonemap_render_pass_info,
@@ -1609,6 +1732,8 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_end_render_pass(command_buffer);
 
+    drop(tonemap_pass_span);
+
     {
         let subresource_range = *vk::ImageSubresourceRange::builder()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -1636,8 +1761,6 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     }
 
     drop(all_commands_profiling_zone);
-
-    Ok(())
 }
 
 fn create_transmission_framebuffer(

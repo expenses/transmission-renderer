@@ -37,7 +37,7 @@ impl PointLight {
 
         Self {
             position: position.into(),
-            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1)
+            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1),
         }
     }
 }

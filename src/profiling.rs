@@ -158,6 +158,7 @@ macro_rules! profiling_zone {
             $device,
             $command_buffer,
             $context,
+            tracy_client::span!($name),
         )
     }};
 }
@@ -176,6 +177,7 @@ pub struct ProfilingZone {
     command_buffer: vk::CommandBuffer,
     end_query_id: u16,
     end_stage: vk::PipelineStageFlags,
+    _span: tracy_client::Span,
 }
 
 impl ProfilingZone {
@@ -186,13 +188,12 @@ impl ProfilingZone {
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
         context: &ProfilingContext,
+        span: tracy_client::Span,
     ) -> Self {
         let start_query_id = context
             .num_written_timestamps
-            .fetch_add(1, Ordering::Relaxed);
-        let end_query_id = context
-            .num_written_timestamps
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(2, Ordering::Relaxed);
+        let end_query_id = start_query_id + 1;
 
         unsafe {
             device.cmd_write_timestamp(
@@ -218,6 +219,7 @@ impl ProfilingZone {
             command_buffer,
             end_query_id,
             end_stage,
+            _span: span,
         }
     }
 }
