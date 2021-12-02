@@ -96,6 +96,12 @@ pub fn fragment_transmission(
         &acceleration_structure,
     );
 
+    let mut transmission = Vec3::ZERO;
+    let mut result = glam_pbr::BrdfResult {
+        diffuse: Vec3::ZERO,
+        specular: Vec3::ZERO
+    };
+
     let mut thickness = material.thickness_factor;
 
     if material.textures.thickness != -1 {
@@ -136,8 +142,6 @@ pub fn fragment_transmission(
     let real_transmission = transmission_factor * transmission;
 
     let diffuse = result.diffuse.lerp(real_transmission, transmission_factor);
-
-    //*output = (normal.0).extend(1.0);
 
     *output = (diffuse + result.specular + emission).extend(1.0);
 }
@@ -196,9 +200,9 @@ pub fn fragment_normal(
         &acceleration_structure,
     );
 
-    let output = (result.diffuse + result.specular + emission).extend(1.0);
-
-    //let output = position.extend(1.0);
+    let output = (result.diffuse + result.specular).extend(1.0);
+    // Need this is avoid timing out the device on metal :(
+    let output = diffuse;
 
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;

@@ -85,10 +85,14 @@ fn main() -> anyhow::Result<()> {
         use simplelog::*;
 
         CombinedLogger::init(vec![TermLogger::new(
-            LevelFilter::Trace,
+            LevelFilter::Info,
             Config::default(),
             TerminalMode::Mixed,
             ColorChoice::Auto,
+        ), WriteLogger::new(
+            LevelFilter::Trace,
+            Config::default(),
+            std::fs::File::create("run.log")?,
         )])?;
     }
 
@@ -845,7 +849,7 @@ fn main() -> anyhow::Result<()> {
     let mut cursor_grab = false;
 
     let mut screen_center =
-        winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
+        winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0 / window.scale_factor(), extent.height as f64 / 2.0 / window.scale_factor());
 
     let mut profiling_ctx =
         query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
@@ -853,19 +857,6 @@ fn main() -> anyhow::Result<()> {
     drop(entire_setup_span);
 
     let mut toggle = false;
-
-    let test_opaque_draw_commands = model_staging_buffers.primitives.iter()
-        .filter(|primitive| primitive.draw_buffer_index == 0)
-        .map(|primitive| {
-            vk::DrawIndexedIndirectCommand {
-                instance_count: 1,
-                index_count: primitive.index_count,
-                first_index: primitive.first_index,
-                first_instance: primitive.first_instance,
-                vertex_offset: 0,
-            }
-        })
-        .collect::<Vec<_>>();
 
     event_loop.run(move |event, _, control_flow| {
         let loop_closure = || -> anyhow::Result<()> {
@@ -952,8 +943,8 @@ fn main() -> anyhow::Result<()> {
                         );
 
                         screen_center = winit::dpi::LogicalPosition::new(
-                            extent.width as f64 / 2.0,
-                            extent.height as f64 / 2.0,
+                            extent.width as f64 / 2.0 / window.scale_factor(),
+                            extent.height as f64 / 2.0 / window.scale_factor(),
                         );
 
                         swapchain_info.image_extent = extent;
@@ -1219,7 +1210,6 @@ fn main() -> anyhow::Result<()> {
                             hdr_framebuffer: &hdr_framebuffer,
                             opaque_sampled_hdr_framebuffer: &opaque_sampled_hdr_framebuffer,
                             toggle,
-                            test_opaque_draw_commands: &test_opaque_draw_commands,
                             dynamic: DynamicRecordParams {
                                 extent,
                                 num_primitives,
@@ -1344,7 +1334,6 @@ struct RecordParams<'a> {
     descriptor_sets: &'a DescriptorSets,
     dynamic: DynamicRecordParams,
     toggle: bool,
-    test_opaque_draw_commands: &'a [vk::DrawIndexedIndirectCommand]
 }
 
 struct DynamicRecordParams {
@@ -1372,7 +1361,6 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         transmission_framebuffer,
         tonemap_framebuffer,
         toggle,
-        test_opaque_draw_commands,
         dynamic:
             DynamicRecordParams {
                 num_primitives,
@@ -1668,13 +1656,9 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 pipelines.depth_pre_pass,
             );
 
-            for draw_command in test_opaque_draw_commands {
-                device.cmd_draw_indexed(command_buffer, draw_command.index_count, draw_command.instance_count, draw_command.first_index, draw_command.vertex_offset, draw_command.first_instance);
-            }
-
-            /*draw_buffers
+            draw_buffers
                 .opaque
-                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);*/
+                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
         }
 
         {
