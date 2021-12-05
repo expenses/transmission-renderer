@@ -7,9 +7,9 @@ edition = "2021"
 members = [".", "glam-pbr", "shader", "shared-structs"]
 
 [dependencies]
-anyhow = "1.0.45"
-ash = "0.33.3"
-ash-window = "0.7.0"
+anyhow = { version = "1.0.45", features = ["backtrace"] }
+ash = { path = "../ash/ash" }
+ash-window = { path = "../ash/ash-window" }
 dolly = "0.1.4"
 gltf = { git = "https://github.com/expenses/gltf", branch = "more-extensions", default-features = false, features = ["utils", "import", "image_jpeg_rayon", "KHR_materials_ior", "KHR_materials_transmission", "KHR_texture_transform", "KHR_materials_volume", "KHR_materials_specular"] }
 image = { version = "*", default-features = false }
@@ -25,6 +25,10 @@ colstodian = { git = "https://github.com/termhn/colstodian" }
 tracy-client = { git = "https://github.com/expenses/rust_tracy_client", branch = "dodgy-high-level-bindings" }
 c_str_macro = "1.0.3"
 structopt = "0.3.25"
+ash-molten = "0.11.0+1.1.5"
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[patch.crates-io]
+ash = { path = "../ash/ash" }

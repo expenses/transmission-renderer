@@ -1,0 +1,3743 @@
+warning: /Users/ashley/projects/transmission-renderer/Cargo.toml: version requirement `0.11.0+1.1.5` for dependency `ash-molten` includes semver metadata which will be ignored, removing the metadata is recommended to avoid confusion
+warning: field is never read: `lib`
+  --> /Users/ashley/projects/ash/ash/src/entry.rs:25:5
+   |
+25 |     lib: L,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: field is never read: `handle`
+ --> /Users/ashley/projects/ash/ash/src/extensions/khr/draw_indirect_count.rs:8:5
+  |
+8 |     handle: vk::Device,
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: `ash` (lib) generated 2 warnings
+warning: unused import: `std::ffi::CStr`
+  --> src/main.rs:12:5
+   |
+12 | use std::ffi::CStr;
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused variable: `xyz`
+   --> src/main.rs:183:9
+    |
+183 |     let xyz: vk::native::PFN_vkGetMoltenVKConfigurationMVK = {
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_xyz`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `xyz`
+   --> src/main.rs:187:13
+    |
+187 |         let xyz = Xyz::load(|name| unsafe {
+    |             ^^^ help: if this is intentional, prefix it with an underscore: `_xyz`
+
+warning: unused variable: `toggle`
+    --> src/main.rs:1398:9
+     |
+1398 |         toggle,
+     |         ^^^^^^ help: try ignoring the field: `toggle: _`
+
+warning: unused variable: `hdr_framebuffer`
+    --> src/main.rs:1411:9
+     |
+1411 |         hdr_framebuffer,
+     |         ^^^^^^^^^^^^^^^ help: try ignoring the field: `hdr_framebuffer: _`
+
+warning: unused variable: `transmission_render_pass_info`
+    --> src/main.rs:1452:9
+     |
+1452 |     let transmission_render_pass_info = vk::RenderPassBeginInfo::builder()
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_transmission_render_pass_info`
+
+warning: unused variable: `draw_count_buffer`
+    --> src/main.rs:2150:9
+     |
+2150 |         draw_count_buffer: &ash_abstractions::Buffer,
+     |         ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_draw_count_buffer`
+
+warning: unused variable: `draw_count_index`
+    --> src/main.rs:2151:9
+     |
+2151 |         draw_count_index: u64,
+     |         ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_draw_count_index`
+
+warning: field is never read: `get`
+   --> src/main.rs:162:9
+    |
+162 |         get: vk::native::PFN_vkGetMoltenVKConfigurationMVK
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: `transmission-renderer` (bin "transmission-renderer") generated 9 warnings
+    Finished dev [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/transmission-renderer DamagedHelmet`
+[src/main.rs:126] entry.enumerate_instance_layer_properties()? = [
+    LayerProperties {
+        layer_name: "MoltenVK",
+        spec_version: 4198589,
+        implementation_version: 10105,
+        description: "MoltenVK driver layer",
+    },
+]
+[mvk-info] MoltenVK version 1.1.5, supporting Vulkan version 1.1.189.
+	The following 72 Vulkan extensions are supported:
+		VK_KHR_16bit_storage v1
+		VK_KHR_8bit_storage v1
+		VK_KHR_bind_memory2 v1
+		VK_KHR_create_renderpass2 v1
+		VK_KHR_dedicated_allocation v3
+		VK_KHR_depth_stencil_resolve v1
+		VK_KHR_descriptor_update_template v1
+		VK_KHR_device_group v4
+		VK_KHR_device_group_creation v1
+		VK_KHR_driver_properties v1
+		VK_KHR_external_fence v1
+		VK_KHR_external_fence_capabilities v1
+		VK_KHR_external_memory v1
+		VK_KHR_external_memory_capabilities v1
+		VK_KHR_external_semaphore v1
+		VK_KHR_external_semaphore_capabilities v1
+		VK_KHR_get_memory_requirements2 v1
+		VK_KHR_get_physical_device_properties2 v2
+		VK_KHR_get_surface_capabilities2 v1
+		VK_KHR_imageless_framebuffer v1
+		VK_KHR_image_format_list v1
+		VK_KHR_maintenance1 v2
+		VK_KHR_maintenance2 v1
+		VK_KHR_maintenance3 v1
+		VK_KHR_multiview v1
+		VK_KHR_portability_subset v1
+		VK_KHR_push_descriptor v2
+		VK_KHR_relaxed_block_layout v1
+		VK_KHR_sampler_mirror_clamp_to_edge v3
+		VK_KHR_sampler_ycbcr_conversion v14
+		VK_KHR_shader_draw_parameters v1
+		VK_KHR_shader_float16_int8 v1
+		VK_KHR_shader_subgroup_extended_types v1
+		VK_KHR_storage_buffer_storage_class v1
+		VK_KHR_surface v25
+		VK_KHR_swapchain v70
+		VK_KHR_swapchain_mutable_format v1
+		VK_KHR_timeline_semaphore v2
+		VK_KHR_uniform_buffer_standard_layout v1
+		VK_KHR_variable_pointers v1
+		VK_EXT_debug_marker v4
+		VK_EXT_debug_report v10
+		VK_EXT_debug_utils v2
+		VK_EXT_descriptor_indexing v2
+		VK_EXT_fragment_shader_interlock v1
+		VK_EXT_hdr_metadata v2
+		VK_EXT_host_query_reset v1
+		VK_EXT_image_robustness v1
+		VK_EXT_inline_uniform_block v1
+		VK_EXT_memory_budget v1
+		VK_EXT_metal_surface v1
+		VK_EXT_post_depth_coverage v1
+		VK_EXT_private_data v1
+		VK_EXT_robustness2 v1
+		VK_EXT_scalar_block_layout v1
+		VK_EXT_shader_stencil_export v1
+		VK_EXT_shader_viewport_index_layer v1
+		VK_EXT_subgroup_size_control v2
+		VK_EXT_swapchain_colorspace v4
+		VK_EXT_texel_buffer_alignment v1
+		VK_EXT_texture_compression_astc_hdr v1
+		VK_EXT_vertex_attribute_divisor v3
+		VK_AMD_gpu_shader_half_float v2
+		VK_AMD_negative_viewport_height v1
+		VK_AMD_shader_image_load_store_lod v1
+		VK_AMD_shader_trinary_minmax v1
+		VK_IMG_format_pvrtc v1
+		VK_INTEL_shader_integer_functions2 v1
+		VK_GOOGLE_display_timing v1
+		VK_MVK_macos_surface v3
+		VK_MVK_moltenvk v32
+		VK_NV_glsl_shader v1
+15:57:26 [0m[34m[INFO] [0m[Debug Msg][general | validation | performance | 1111111111111111111111111111000] "MoltenVK version 1.1.5, supporting Vulkan version 1.1.189.\n\tThe following 72 Vulkan extensions are supported:\n\t\tVK_KHR_16bit_storage v1\n\t\tVK_KHR_8bit_storage v1\n\t\tVK_KHR_bind_memory2 v1\n\t\tVK_KHR_create_renderpass2 v1\n\t\tVK_KHR_dedicated_allocation v3\n\t\tVK_KHR_depth_stencil_resolve v1\n\t\tVK_KHR_descriptor_update_template v1\n\t\tVK_KHR_device_group v4\n\t\tVK_KHR_device_group_creation v1\n\t\tVK_KHR_driver_properties v1\n\t\tVK_KHR_external_fence v1\n\t\tVK_KHR_external_fence_capabilities v1\n\t\tVK_KHR_external_memory v1\n\t\tVK_KHR_external_memory_capabilities v1\n\t\tVK_KHR_external_semaphore v1\n\t\tVK_KHR_external_semaphore_capabilities v1\n\t\tVK_KHR_get_memory_requirements2 v1\n\t\tVK_KHR_get_physical_device_properties2 v2\n\t\tVK_KHR_get_surface_capabilities2 v1\n\t\tVK_KHR_imageless_framebuffer v1\n\t\tVK_KHR_image_format_list v1\n\t\tVK_KHR_maintenance1 v2\n\t\tVK_KHR_maintenance2 v1\n\t\tVK_KHR_maintenance3 v1\n\t\tVK_KHR_multiview v1\n\t\tVK_KHR_portability_subset v1\n\t\tVK_KHR_push_descriptor v2\n\t\tVK_KHR_relaxed_block_layout v1\n\t\tVK_KHR_sampler_mirror_clamp_to_edge v3\n\t\tVK_KHR_sampler_ycbcr_conversion v14\n\t\tVK_KHR_shader_draw_parameters v1\n\t\tVK_KHR_shader_float16_int8 v1\n\t\tVK_KHR_shader_subgroup_extended_types v1\n\t\tVK_KHR_storage_buffer_storage_class v1\n\t\tVK_KHR_surface v25\n\t\tVK_KHR_swapchain v70\n\t\tVK_KHR_swapchain_mutable_format v1\n\t\tVK_KHR_timeline_semaphore v2\n\t\tVK_KHR_uniform_buffer_standard_layout v1\n\t\tVK_KHR_variable_pointers v1\n\t\tVK_EXT_debug_marker v4\n\t\tVK_EXT_debug_report v10\n\t\tVK_EXT_debug_utils v2\n\t\tVK_EXT_descriptor_indexing v2\n\t\tVK_EXT_fragment_shader_interlock v1\n\t\tVK_EXT_hdr_metadata v2\n\t\tVK_EXT_host_query_reset v1\n\t\tVK_EXT_image_robustness v1\n\t\tVK_EXT_inline_uniform_block v1\n\t\tVK_EXT_memory_budget v1\n\t\tVK_EXT_metal_surface v1\n\t\tVK_EXT_post_depth_coverage v1\n\t\tVK_EXT_private_data v1\n\t\tVK_EXT_robustness2 v1\n\t\tVK_EXT_scalar_block_layout v1\n\t\tVK_EXT_shader_stencil_export v1\n\t\tVK_EXT_shader_viewport_index_layer v1\n\t\tVK_EXT_subgroup_size_control v2\n\t\tVK_EXT_swapchain_colorspace v4\n\t\tVK_EXT_texel_buffer_alignment v1\n\t\tVK_EXT_texture_compression_astc_hdr v1\n\t\tVK_EXT_vertex_attribute_divisor v3\n\t\tVK_AMD_gpu_shader_half_float v2\n\t\tVK_AMD_negative_viewport_height v1\n\t\tVK_AMD_shader_image_load_store_lod v1\n\t\tVK_AMD_shader_trinary_minmax v1\n\t\tVK_IMG_format_pvrtc v1\n\t\tVK_INTEL_shader_integer_functions2 v1\n\t\tVK_GOOGLE_display_timing v1\n\t\tVK_MVK_macos_surface v3\n\t\tVK_MVK_moltenvk v32\n\t\tVK_NV_glsl_shader v1"
+[mvk-info] GPU device:
+		model: Intel(R) Iris(TM) Plus Graphics 640
+		type: Integrated
+		vendorID: 0x8086
+		deviceID: 0x5926
+		pipelineCacheUUID: C1D03328-0400-07D2-0000-000100000000
+	supports the following Metal Versions, GPU's and Feature Sets:
+		Metal Shading Language 2.2
+		GPU Family Mac 2
+		GPU Family Mac 1
+		GPU Family Common 3
+		GPU Family Common 2
+		GPU Family Common 1
+		macOS GPU Family 2 v1
+		macOS GPU Family 1 v4
+		macOS GPU Family 1 v3
+		macOS GPU Family 1 v2
+		macOS GPU Family 1 v1
+15:57:26 [0m[34m[INFO] [0m[Debug Msg][general | validation | performance | 1111111111111111111111111111000] "GPU device:\n\t\tmodel: Intel(R) Iris(TM) Plus Graphics 640\n\t\ttype: Integrated\n\t\tvendorID: 0x8086\n\t\tdeviceID: 0x5926\n\t\tpipelineCacheUUID: C1D03328-0400-07D2-0000-000100000000\n\tsupports the following Metal Versions, GPU\'s and Feature Sets:\n\t\tMetal Shading Language 2.2\n\t\tGPU Family Mac 2\n\t\tGPU Family Mac 1\n\t\tGPU Family Common 3\n\t\tGPU Family Common 2\n\t\tGPU Family Common 1\n\t\tmacOS GPU Family 2 v1\n\t\tmacOS GPU Family 1 v4\n\t\tmacOS GPU Family 1 v3\n\t\tmacOS GPU Family 1 v2\n\t\tmacOS GPU Family 1 v1"
+[mvk-info] Created VkInstance for Vulkan version 1.1.0, as requested by app, with the following 3 Vulkan extensions enabled:
+		VK_KHR_surface v25
+		VK_EXT_debug_utils v2
+		VK_EXT_metal_surface v1
+15:57:26 [0m[34m[INFO] [0m[Debug Msg][general | validation | performance | 1111111111111111111111111111000] "Created VkInstance for Vulkan version 1.1.0, as requested by app, with the following 3 Vulkan extensions enabled:\n\t\tVK_KHR_surface v25\n\t\tVK_EXT_debug_utils v2\n\t\tVK_EXT_metal_surface v1"
+[src/main.rs:175] val = 0x0000000000000000
+15:57:26 [0m[34m[INFO] [0mFound 1 device
+15:57:26 [0m[34m[INFO] [0m
+15:57:26 [0m[34m[INFO] [0mChecking Device: "Intel(R) Iris(TM) Plus Graphics 640"
+15:57:26 [0m[34m[INFO] [0m  Checking for a graphics queue family: ✔️
+15:57:26 [0m[34m[INFO] [0m  Checking for an appropriate surface format: ✔️
+15:57:26 [0m[34m[INFO] [0m  Checking for required extensions:
+15:57:26 [0m[34m[INFO] [0m    * "VK_KHR_swapchain": ✔️
+15:57:26 [0m[34m[INFO] [0m    * "VK_KHR_portability_subset": ✔️
+15:57:26 [0m[34m[INFO] [0m    * "VK_EXT_descriptor_indexing": ✔️
+15:57:26 [0m[34m[INFO] [0m
+15:57:26 [0m[34m[INFO] [0mUsing device "Intel(R) Iris(TM) Plus Graphics 640"
+[mvk-info] Using MTLEvent for Vulkan semaphores.
+[mvk-info] Created VkDevice to run on GPU Intel(R) Iris(TM) Plus Graphics 640 with the following 3 Vulkan extensions enabled:
+		VK_KHR_portability_subset v1
+		VK_KHR_swapchain v70
+		VK_EXT_descriptor_indexing v2
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 348
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Vertex %1 "vertex_instanced" %2 %3 %4 %5 %6 %7 %8 %9 %10
+               OpMemberDecorate %31 0 Offset 0
+               OpMemberDecorate %31 1 Offset 16
+               OpMemberDecorate %32 0 Offset 0
+               OpMemberDecorate %32 1 Offset 32
+               OpMemberDecorate %32 2 Offset 36
+               OpDecorate %41 ArrayStride 48
+               OpMemberDecorate %33 0 Offset 0
+               OpMemberDecorate %33 1 Offset 16
+               OpMemberDecorate %33 2 Offset 32
+               OpMemberDecorate %33 3 Offset 48
+               OpMemberDecorate %34 0 Offset 0
+               OpMemberDecorate %36 0 Offset 0
+               OpMemberDecorate %36 1 Offset 64
+               OpMemberDecorate %36 2 Offset 80
+               OpMemberDecorate %36 3 Offset 88
+               OpDecorate %2 Location 0
+               OpDecorate %3 Location 1
+               OpDecorate %4 Location 2
+               OpDecorate %42 Block
+               OpMemberDecorate %42 0 Offset 0
+               OpDecorate %43 Block
+               OpMemberDecorate %43 0 Offset 0
+               OpDecorate %38 DescriptorSet 1
+               OpDecorate %38 Binding 0
+               OpDecorate %5 BuiltIn InstanceIndex
+               OpDecorate %10 BuiltIn Position
+               OpDecorate %6 Location 0
+               OpDecorate %7 Location 1
+               OpDecorate %8 Location 2
+               OpDecorate %9 Location 3
+         %44 = OpTypeFloat 32
+         %45 = OpTypeVector %44 4
+         %46 = OpTypeVector %44 2
+         %47 = OpTypePointer Input %46
+         %48 = OpTypePointer Output %46
+         %49 = OpTypePointer Output %45
+         %50 = OpTypeInt 32 0
+         %51 = OpTypePointer Input %50
+         %52 = OpTypePointer Output %50
+         %53 = OpTypePointer StorageBuffer %50
+         %54 = OpConstant %50 0
+         %55 = OpTypeVector %44 3
+         %56 = OpTypePointer Input %55
+         %57 = OpTypePointer Output %55
+         %58 = OpConstant %50 2
+         %31 = OpTypeStruct %45 %45
+         %32 = OpTypeStruct %31 %50 %50
+         %41 = OpTypeRuntimeArray %32
+         %62 = OpTypeVoid
+         %63 = OpTypeVector %50 2
+         %33 = OpTypeStruct %45 %45 %45 %45
+         %34 = OpTypeStruct %33
+         %36 = OpTypeStruct %34 %55 %63 %63
+         %65 = OpTypeFunction %62
+          %2 = OpVariable %56 Input
+          %3 = OpVariable %56 Input
+          %4 = OpVariable %47 Input
+         %42 = OpTypeStruct %36
+         %66 = OpTypePointer PushConstant %42
+         %37 = OpVariable %66 PushConstant
+         %43 = OpTypeStruct %41
+         %67 = OpTypePointer StorageBuffer %43
+         %38 = OpVariable %67 StorageBuffer
+          %5 = OpVariable %51 Input
+         %10 = OpVariable %49 Output
+          %6 = OpVariable %57 Output
+          %7 = OpVariable %57 Output
+          %8 = OpVariable %48 Output
+          %9 = OpVariable %52 Output
+         %68 = OpConstant %44 2
+         %69 = OpTypePointer PushConstant %34
+         %71 = OpTypePointer StorageBuffer %31
+          %1 = OpFunction %62 None %65
+         %73 = OpLabel
+         %74 = OpLoad %55 %2
+         %75 = OpLoad %55 %3
+         %76 = OpLoad %46 %4
+         %78 = OpLoad %50 %5
+         %81 = OpAccessChain %71 %38 %54 %78 %54
+         %82 = OpLoad %31 %81
+        %275 = OpCompositeExtract %45 %82 0
+        %276 = OpCompositeExtract %44 %275 0
+        %277 = OpCompositeExtract %44 %275 1
+        %278 = OpCompositeExtract %44 %275 2
+        %279 = OpCompositeConstruct %55 %276 %277 %278
+        %280 = OpCompositeExtract %44 %82 0 3
+        %281 = OpCompositeExtract %45 %82 1
+        %289 = OpCompositeExtract %44 %281 3
+        %290 = OpCompositeExtract %44 %281 0
+        %291 = OpCompositeExtract %44 %281 1
+        %292 = OpCompositeExtract %44 %281 2
+        %293 = OpFMul %44 %290 %290
+        %294 = OpFMul %44 %291 %291
+        %295 = OpFAdd %44 %293 %294
+        %296 = OpFMul %44 %292 %292
+        %297 = OpFAdd %44 %295 %296
+        %298 = OpFMul %44 %289 %289
+        %299 = OpFSub %44 %298 %297
+        %300 = OpCompositeExtract %44 %74 0
+        %301 = OpFMul %44 %300 %299
+        %302 = OpCompositeExtract %44 %74 1
+        %303 = OpFMul %44 %302 %299
+        %304 = OpCompositeExtract %44 %74 2
+        %305 = OpFMul %44 %304 %299
+        %307 = OpFMul %44 %300 %290
+        %309 = OpFMul %44 %302 %291
+        %310 = OpFAdd %44 %307 %309
+        %312 = OpFMul %44 %304 %292
+        %313 = OpFAdd %44 %310 %312
+        %314 = OpFMul %44 %313 %68
+        %315 = OpFMul %44 %290 %314
+        %316 = OpFMul %44 %291 %314
+        %317 = OpFMul %44 %292 %314
+        %318 = OpFAdd %44 %301 %315
+        %319 = OpFAdd %44 %303 %316
+        %320 = OpFAdd %44 %305 %317
+        %322 = OpFMul %44 %291 %304
+        %324 = OpFMul %44 %302 %292
+        %325 = OpFSub %44 %322 %324
+        %327 = OpFMul %44 %292 %300
+        %329 = OpFMul %44 %304 %290
+        %330 = OpFSub %44 %327 %329
+        %332 = OpFMul %44 %290 %302
+        %334 = OpFMul %44 %300 %291
+        %335 = OpFSub %44 %332 %334
+        %336 = OpFMul %44 %289 %68
+        %337 = OpFMul %44 %325 %336
+        %338 = OpFMul %44 %330 %336
+        %339 = OpFMul %44 %335 %336
+        %340 = OpFAdd %44 %318 %337
+        %341 = OpFAdd %44 %319 %338
+        %342 = OpFAdd %44 %320 %339
+        %343 = OpFMul %44 %280 %340
+        %344 = OpFMul %44 %280 %341
+        %345 = OpFMul %44 %280 %342
+        %346 = OpCompositeConstruct %55 %343 %344 %345
+        %347 = OpFAdd %55 %279 %346
+               OpStore %6 %347
+         %97 = OpCompositeExtract %44 %75 0
+         %98 = OpFMul %44 %97 %299
+         %99 = OpCompositeExtract %44 %75 1
+        %100 = OpFMul %44 %99 %299
+        %101 = OpCompositeExtract %44 %75 2
+        %102 = OpFMul %44 %101 %299
+        %104 = OpFMul %44 %97 %290
+        %106 = OpFMul %44 %99 %291
+        %107 = OpFAdd %44 %104 %106
+        %109 = OpFMul %44 %101 %292
+        %110 = OpFAdd %44 %107 %109
+        %111 = OpFMul %44 %110 %68
+        %112 = OpFMul %44 %290 %111
+        %113 = OpFMul %44 %291 %111
+        %114 = OpFMul %44 %292 %111
+        %115 = OpFAdd %44 %98 %112
+        %116 = OpFAdd %44 %100 %113
+        %117 = OpFAdd %44 %102 %114
+        %119 = OpFMul %44 %291 %101
+        %121 = OpFMul %44 %99 %292
+        %122 = OpFSub %44 %119 %121
+        %124 = OpFMul %44 %292 %97
+        %126 = OpFMul %44 %101 %290
+        %127 = OpFSub %44 %124 %126
+        %129 = OpFMul %44 %290 %99
+        %131 = OpFMul %44 %97 %291
+        %132 = OpFSub %44 %129 %131
+        %134 = OpFMul %44 %122 %336
+        %135 = OpFMul %44 %127 %336
+        %136 = OpFMul %44 %132 %336
+        %137 = OpFAdd %44 %115 %134
+        %138 = OpFAdd %44 %116 %135
+        %139 = OpFAdd %44 %117 %136
+        %140 = OpCompositeConstruct %55 %137 %138 %139
+               OpStore %7 %140
+               OpStore %8 %76
+        %141 = OpAccessChain %53 %38 %54 %78 %58
+        %142 = OpLoad %50 %141
+               OpStore %9 %142
+        %143 = OpAccessChain %69 %37 %54 %54
+        %144 = OpLoad %34 %143
+        %145 = OpCompositeExtract %44 %347 0
+        %146 = OpCompositeExtract %44 %347 1
+        %147 = OpCompositeExtract %44 %347 2
+        %148 = OpCompositeExtract %45 %144 0 0
+        %149 = OpCompositeExtract %44 %148 0
+        %150 = OpFMul %44 %149 %145
+        %151 = OpCompositeExtract %44 %148 1
+        %152 = OpFMul %44 %151 %145
+        %153 = OpCompositeExtract %44 %148 2
+        %154 = OpFMul %44 %153 %145
+        %155 = OpCompositeExtract %44 %148 3
+        %156 = OpFMul %44 %155 %145
+        %157 = OpCompositeExtract %45 %144 0 1
+        %158 = OpCompositeExtract %44 %157 0
+        %159 = OpFMul %44 %158 %146
+        %160 = OpFAdd %44 %159 %150
+        %161 = OpCompositeExtract %44 %157 1
+        %162 = OpFMul %44 %161 %146
+        %163 = OpFAdd %44 %162 %152
+        %164 = OpCompositeExtract %44 %157 2
+        %165 = OpFMul %44 %164 %146
+        %166 = OpFAdd %44 %165 %154
+        %167 = OpCompositeExtract %44 %157 3
+        %168 = OpFMul %44 %167 %146
+        %169 = OpFAdd %44 %168 %156
+        %170 = OpCompositeExtract %45 %144 0 2
+        %171 = OpCompositeExtract %44 %170 0
+        %172 = OpFMul %44 %171 %147
+        %173 = OpFAdd %44 %172 %160
+        %174 = OpCompositeExtract %44 %170 1
+        %175 = OpFMul %44 %174 %147
+        %176 = OpFAdd %44 %175 %163
+        %177 = OpCompositeExtract %44 %170 2
+        %178 = OpFMul %44 %177 %147
+        %179 = OpFAdd %44 %178 %166
+        %180 = OpCompositeExtract %44 %170 3
+        %181 = OpFMul %44 %180 %147
+        %182 = OpFAdd %44 %181 %169
+        %183 = OpCompositeExtract %45 %144 0 3
+        %184 = OpCompositeExtract %44 %183 0
+        %186 = OpFAdd %44 %184 %173
+        %187 = OpCompositeExtract %44 %183 1
+        %189 = OpFAdd %44 %187 %176
+        %190 = OpCompositeExtract %44 %183 2
+        %192 = OpFAdd %44 %190 %179
+        %193 = OpCompositeExtract %44 %183 3
+        %195 = OpFAdd %44 %193 %182
+        %196 = OpCompositeConstruct %45 %186 %189 %192 %195
+               OpStore %10 %196
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _31
+{
+    float4 _m0;
+    float4 _m1;
+};
+
+struct _32
+{
+    _31 _m0;
+    uint _m1;
+    uint _m2;
+    char _m0_final_padding[8];
+};
+
+struct _33
+{
+    float4 _m0;
+    float4 _m1;
+    float4 _m2;
+    float4 _m3;
+};
+
+struct _34
+{
+    _33 _m0;
+};
+
+struct _36
+{
+    _34 _m0;
+    float3 _m1;
+    uint2 _m2;
+    uint2 _m3;
+};
+
+struct _42
+{
+    _36 _m0;
+};
+
+struct _43
+{
+    _32 _m0[1];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    device _43* m_38 [[id(0)]];
+};
+
+struct vertex_instanced_out
+{
+    float3 m_6 [[user(locn0)]];
+    float3 m_7 [[user(locn1)]];
+    float2 m_8 [[user(locn2)]];
+    uint m_9 [[user(locn3)]];
+    float4 gl_Position [[position]];
+};
+
+struct vertex_instanced_in
+{
+    float3 m_2 [[attribute(0)]];
+    float3 m_3 [[attribute(1)]];
+    float2 m_4 [[attribute(2)]];
+};
+
+vertex vertex_instanced_out vertex_instanced(vertex_instanced_in in [[stage_in]], constant spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant _42& _37 [[buffer(3)]], uint gl_InstanceIndex [[instance_id]])
+{
+    vertex_instanced_out out = {};
+    float _299 = ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.w * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.w) - ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y)) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z));
+    float _314 = (((in.m_2.x * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x) + (in.m_2.y * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y)) + (in.m_2.z * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z)) * 2.0;
+    float _336 = (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.w * 2.0;
+    float3 _347 = float3((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m0.xyz) + float3((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.x * _299) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x * _314)) + ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y * in.m_2.z) - (in.m_2.y * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z)) * _336)), (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.y * _299) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y * _314)) + ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z * in.m_2.x) - (in.m_2.z * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x)) * _336)), (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.z * _299) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z * _314)) + ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x * in.m_2.y) - (in.m_2.x * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y)) * _336)));
+    out.m_6 = _347;
+    float _111 = (((in.m_3.x * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x) + (in.m_3.y * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y)) + (in.m_3.z * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z)) * 2.0;
+    out.m_7 = float3(((in.m_3.x * _299) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x * _111)) + ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y * in.m_3.z) - (in.m_3.y * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z)) * _336), ((in.m_3.y * _299) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y * _111)) + ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z * in.m_3.x) - (in.m_3.z * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x)) * _336), ((in.m_3.z * _299) + ((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.z * _111)) + ((((*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.x * in.m_3.y) - (in.m_3.x * (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m0._m1.y)) * _336));
+    out.m_8 = in.m_4;
+    out.m_9 = (*spvDescriptorSet1.m_38)._m0[gl_InstanceIndex]._m2;
+    float _145 = _347.x;
+    float _146 = _347.y;
+    float _147 = _347.z;
+    out.gl_Position = float4(_37._m0._m0._m0._m3.x + ((_37._m0._m0._m0._m2.x * _147) + ((_37._m0._m0._m0._m1.x * _146) + (_37._m0._m0._m0._m0.x * _145))), _37._m0._m0._m0._m3.y + ((_37._m0._m0._m0._m2.y * _147) + ((_37._m0._m0._m0._m1.y * _146) + (_37._m0._m0._m0._m0.y * _145))), _37._m0._m0._m0._m3.z + ((_37._m0._m0._m0._m2.z * _147) + ((_37._m0._m0._m0._m1.z * _146) + (_37._m0._m0._m0._m0.z * _145))), _37._m0._m0._m0._m3.w + ((_37._m0._m0._m0._m2.w * _147) + ((_37._m0._m0._m0._m1.w * _146) + (_37._m0._m0._m0._m0.w * _145))));
+    out.gl_Position.y = -(out.gl_Position.y);    // Invert Y-axis for Metal
+    return out;
+}
+
+
+End MSL
+
+Estimated original GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
+
+struct _31
+{
+    vec4 _m0;
+    vec4 _m1;
+};
+
+struct _32
+{
+    _31 _m0;
+    uint _m1;
+    uint _m2;
+};
+
+struct _33
+{
+    vec4 _m0;
+    vec4 _m1;
+    vec4 _m2;
+    vec4 _m3;
+};
+
+struct _34
+{
+    _33 _m0;
+};
+
+struct _36
+{
+    _34 _m0;
+    vec3 _m1;
+    uvec2 _m2;
+    uvec2 _m3;
+};
+
+layout(set = 1, binding = 0, std430) buffer _43_38
+{
+    _32 _m0[];
+} _38;
+
+layout(push_constant, std430) uniform _42_37
+{
+    _36 _m0;
+} _37;
+
+layout(location = 0) in vec3 _2;
+layout(location = 1) in vec3 _3;
+layout(location = 2) in vec2 _4;
+layout(location = 0) out vec3 _6;
+layout(location = 1) out vec3 _7;
+layout(location = 2) out vec2 _8;
+layout(location = 3) out uint _9;
+
+void main()
+{
+    float _299 = (_38._m0[uint(gl_InstanceIndex)]._m0._m1.w * _38._m0[uint(gl_InstanceIndex)]._m0._m1.w) - (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.x * _38._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.y * _38._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.z * _38._m0[uint(gl_InstanceIndex)]._m0._m1.z));
+    float _314 = (((_2.x * _38._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_2.y * _38._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_2.z * _38._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * 2.0;
+    float _336 = _38._m0[uint(gl_InstanceIndex)]._m0._m1.w * 2.0;
+    vec3 _347 = vec3(_38._m0[uint(gl_InstanceIndex)]._m0._m0.xyz) + vec3(_38._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.x * _299) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.x * _314)) + (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.y * _2.z) - (_2.y * _38._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * _336)), _38._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.y * _299) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.y * _314)) + (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.z * _2.x) - (_2.z * _38._m0[uint(gl_InstanceIndex)]._m0._m1.x)) * _336)), _38._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.z * _299) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.z * _314)) + (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.x * _2.y) - (_2.x * _38._m0[uint(gl_InstanceIndex)]._m0._m1.y)) * _336)));
+    _6 = _347;
+    float _111 = (((_3.x * _38._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_3.y * _38._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_3.z * _38._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * 2.0;
+    _7 = vec3(((_3.x * _299) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.x * _111)) + (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.y * _3.z) - (_3.y * _38._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * _336), ((_3.y * _299) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.y * _111)) + (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.z * _3.x) - (_3.z * _38._m0[uint(gl_InstanceIndex)]._m0._m1.x)) * _336), ((_3.z * _299) + (_38._m0[uint(gl_InstanceIndex)]._m0._m1.z * _111)) + (((_38._m0[uint(gl_InstanceIndex)]._m0._m1.x * _3.y) - (_3.x * _38._m0[uint(gl_InstanceIndex)]._m0._m1.y)) * _336));
+    _8 = _4;
+    _9 = _38._m0[uint(gl_InstanceIndex)]._m2;
+    float _145 = _347.x;
+    float _146 = _347.y;
+    float _147 = _347.z;
+    gl_Position = vec4(_37._m0._m0._m0._m3.x + ((_37._m0._m0._m0._m2.x * _147) + ((_37._m0._m0._m0._m1.x * _146) + (_37._m0._m0._m0._m0.x * _145))), _37._m0._m0._m0._m3.y + ((_37._m0._m0._m0._m2.y * _147) + ((_37._m0._m0._m0._m1.y * _146) + (_37._m0._m0._m0._m0.y * _145))), _37._m0._m0._m0._m3.z + ((_37._m0._m0._m0._m2.z * _147) + ((_37._m0._m0._m0._m1.z * _146) + (_37._m0._m0._m0._m0.z * _145))), _37._m0._m0._m0._m3.w + ((_37._m0._m0._m0._m2.w * _147) + ((_37._m0._m0._m0._m1.w * _146) + (_37._m0._m0._m0._m0.w * _145))));
+}
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 438
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Fragment %2 "fragment_normal" %3 %4 %5 %6 %7 %8
+               OpExecutionMode %2 OriginUpperLeft
+               OpMemberDecorate %45 0 Offset 0
+               OpMemberDecorate %45 1 Offset 4
+               OpMemberDecorate %45 2 Offset 8
+               OpMemberDecorate %45 3 Offset 12
+               OpMemberDecorate %45 4 Offset 16
+               OpMemberDecorate %45 5 Offset 20
+               OpMemberDecorate %45 6 Offset 24
+               OpMemberDecorate %45 7 Offset 28
+               OpMemberDecorate %45 8 Offset 32
+               OpMemberDecorate %46 0 Offset 0
+               OpMemberDecorate %46 1 Offset 36
+               OpMemberDecorate %46 2 Offset 40
+               OpMemberDecorate %46 3 Offset 44
+               OpMemberDecorate %46 4 Offset 48
+               OpMemberDecorate %46 5 Offset 64
+               OpMemberDecorate %46 6 Offset 80
+               OpMemberDecorate %46 7 Offset 84
+               OpMemberDecorate %46 8 Offset 88
+               OpMemberDecorate %46 9 Offset 92
+               OpMemberDecorate %46 10 Offset 96
+               OpMemberDecorate %46 11 Offset 100
+               OpMemberDecorate %46 12 Offset 112
+               OpMemberDecorate %46 13 Offset 128
+               OpMemberDecorate %46 14 Offset 144
+               OpDecorate %63 ArrayStride 160
+               OpDecorate %64 ArrayStride 4
+               OpDecorate %3 Location 0
+               OpDecorate %4 Location 1
+               OpDecorate %5 Location 2
+               OpDecorate %6 Flat
+               OpDecorate %6 Location 3
+               OpDecorate %58 DescriptorSet 0
+               OpDecorate %58 Binding 0
+               OpDecorate %59 DescriptorSet 0
+               OpDecorate %59 Binding 1
+               OpDecorate %66 Block
+               OpMemberDecorate %66 0 Offset 0
+               OpDecorate %60 DescriptorSet 0
+               OpDecorate %60 Binding 2
+               OpDecorate %7 Location 0
+               OpDecorate %8 Location 1
+         %67 = OpTypeFloat 32
+         %68 = OpTypeVector %67 4
+         %69 = OpTypeImage %67 2D 2 0 0 1 Unknown
+         %70 = OpTypePointer UniformConstant %69
+         %71 = OpTypeSampler
+         %72 = OpTypeVector %67 2
+         %74 = OpTypePointer UniformConstant %71
+         %75 = OpTypePointer Input %72
+         %77 = OpTypePointer Output %68
+         %78 = OpTypePointer StorageBuffer %68
+         %79 = OpTypeSampledImage %69
+         %80 = OpTypeInt 32 0
+         %81 = OpTypePointer Input %80
+         %82 = OpConstant %80 4
+         %83 = OpConstant %80 0
+         %85 = OpTypeVector %67 3
+         %87 = OpTypePointer Input %85
+         %94 = OpTypeInt 32 1
+         %45 = OpTypeStruct %94 %94 %94 %94 %94 %94 %94 %94 %94
+         %46 = OpTypeStruct %45 %67 %67 %67 %68 %85 %67 %67 %67 %67 %67 %67 %85 %67 %85
+         %63 = OpTypeRuntimeArray %46
+         %64 = OpTypeRuntimeArray %69
+         %97 = OpTypePointer UniformConstant %64
+         %99 = OpTypeVoid
+        %102 = OpTypeBool
+        %104 = OpTypePointer StorageBuffer %94
+        %105 = OpConstant %94 -1
+        %115 = OpTypeFunction %99
+          %3 = OpVariable %87 Input
+          %4 = OpVariable %87 Input
+          %5 = OpVariable %75 Input
+          %6 = OpVariable %81 Input
+         %58 = OpVariable %97 UniformConstant
+         %59 = OpVariable %74 UniformConstant
+         %66 = OpTypeStruct %63
+        %117 = OpTypePointer StorageBuffer %66
+         %60 = OpVariable %117 StorageBuffer
+          %7 = OpVariable %77 Output
+          %8 = OpVariable %77 Output
+          %2 = OpFunction %99 None %115
+        %232 = OpLabel
+        %235 = OpLoad %72 %5
+        %236 = OpLoad %80 %6
+        %240 = OpLoad %71 %59
+        %241 = OpAccessChain %78 %60 %83 %236 %82
+        %242 = OpLoad %68 %241
+        %244 = OpAccessChain %104 %60 %83 %236 %83 %83
+        %245 = OpLoad %94 %244
+        %246 = OpIEqual %102 %245 %105
+               OpSelectionMerge %247 None
+               OpBranchConditional %246 %248 %249
+        %248 = OpLabel
+               OpBranch %247
+        %249 = OpLabel
+        %252 = OpLoad %94 %244
+        %253 = OpBitcast %80 %252
+        %254 = OpAccessChain %70 %58 %253
+        %435 = OpLoad %69 %254
+        %436 = OpSampledImage %79 %435 %240
+        %437 = OpImageSampleImplicitLod %68 %436 %235
+        %256 = OpFMul %68 %242 %437
+               OpBranch %247
+        %247 = OpLabel
+        %257 = OpPhi %68 %242 %248 %256 %249
+               OpStore %7 %257
+               OpStore %8 %257
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _45
+{
+    int _m0;
+    int _m1;
+    int _m2;
+    int _m3;
+    int _m4;
+    int _m5;
+    int _m6;
+    int _m7;
+    int _m8;
+};
+
+struct _46
+{
+    _45 _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    float4 _m4;
+    float3 _m5;
+    float _m6;
+    float _m7;
+    float _m8;
+    float _m9;
+    float _m10;
+    float _m11;
+    float3 _m12;
+    float _m13;
+    float3 _m14;
+};
+
+struct _66
+{
+    _46 _m0[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    array<texture2d<float>, 127> m_58 [[id(0)]];
+    sampler m_59 [[id(127)]];
+    device _66* m_60 [[id(128)]];
+};
+
+struct fragment_normal_out
+{
+    float4 m_7 [[color(0)]];
+    float4 m_8 [[color(1)]];
+};
+
+struct fragment_normal_in
+{
+    float2 m_5 [[user(locn2)]];
+    uint m_6 [[user(locn3)]];
+};
+
+fragment fragment_normal_out fragment_normal(fragment_normal_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    fragment_normal_out out = {};
+    float4 _257;
+    if ((*spvDescriptorSet0.m_60)._m0[in.m_6]._m0._m0 == (-1))
+    {
+        _257 = (*spvDescriptorSet0.m_60)._m0[in.m_6]._m4;
+    }
+    else
+    {
+        uint _253 = uint((*spvDescriptorSet0.m_60)._m0[in.m_6]._m0._m0);
+        _257 = (*spvDescriptorSet0.m_60)._m0[in.m_6]._m4 * spvDescriptorSet0.m_58[_253].sample(spvDescriptorSet0.m_59, in.m_5);
+    }
+    out.m_7 = _257;
+    out.m_8 = _257;
+    return out;
+}
+
+
+End MSL
+
+Original GLSL extraction error: Buffer block cannot be expressed as any of std430, std140, scalar, even with enhanced layouts. You can try flattening this block to support a more flexible layout.
+
+Partially converted GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+struct _45
+{
+    int _m0;
+    int _m1;
+    int _m2;
+    int _m3;
+    int _m4;
+    int _m5;
+    int _m6;
+    int _m7;
+    int _m8;
+};
+
+struct _46
+{
+    _45 _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    vec4 _m4;
+    vec3 _m5;
+    float _m6;
+    float _m7;
+    float _m8;
+    float _m9;
+    float _m10;
+    float _m11;
+    vec3 _m12;
+    float _m13;
+    vec3 _m14;
+};
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 273
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Vertex %1 "depth_pre_pass_instanced" %2 %3 %4
+               OpMemberDecorate %23 0 Offset 0
+               OpMemberDecorate %23 1 Offset 16
+               OpMemberDecorate %24 0 Offset 0
+               OpMemberDecorate %24 1 Offset 32
+               OpMemberDecorate %24 2 Offset 36
+               OpDecorate %33 ArrayStride 48
+               OpMemberDecorate %25 0 Offset 0
+               OpMemberDecorate %25 1 Offset 16
+               OpMemberDecorate %25 2 Offset 32
+               OpMemberDecorate %25 3 Offset 48
+               OpMemberDecorate %26 0 Offset 0
+               OpMemberDecorate %28 0 Offset 0
+               OpMemberDecorate %28 1 Offset 64
+               OpMemberDecorate %28 2 Offset 80
+               OpMemberDecorate %28 3 Offset 88
+               OpDecorate %2 Location 0
+               OpDecorate %34 Block
+               OpMemberDecorate %34 0 Offset 0
+               OpDecorate %35 Block
+               OpMemberDecorate %35 0 Offset 0
+               OpDecorate %30 DescriptorSet 1
+               OpDecorate %30 Binding 0
+               OpDecorate %3 BuiltIn InstanceIndex
+               OpDecorate %4 BuiltIn Position
+         %36 = OpTypeFloat 32
+         %37 = OpTypeVector %36 4
+         %38 = OpTypePointer Output %37
+         %39 = OpTypeInt 32 0
+         %40 = OpTypePointer Input %39
+         %41 = OpConstant %39 0
+         %42 = OpTypeVector %36 3
+         %43 = OpTypePointer Input %42
+         %23 = OpTypeStruct %37 %37
+         %24 = OpTypeStruct %23 %39 %39
+         %33 = OpTypeRuntimeArray %24
+         %47 = OpTypeVoid
+         %48 = OpTypeVector %39 2
+         %25 = OpTypeStruct %37 %37 %37 %37
+         %26 = OpTypeStruct %25
+         %28 = OpTypeStruct %26 %42 %48 %48
+         %50 = OpTypeFunction %47
+          %2 = OpVariable %43 Input
+         %34 = OpTypeStruct %28
+         %51 = OpTypePointer PushConstant %34
+         %29 = OpVariable %51 PushConstant
+         %35 = OpTypeStruct %33
+         %52 = OpTypePointer StorageBuffer %35
+         %30 = OpVariable %52 StorageBuffer
+          %3 = OpVariable %40 Input
+          %4 = OpVariable %38 Output
+         %53 = OpConstant %36 2
+         %54 = OpTypePointer PushConstant %26
+         %56 = OpTypePointer StorageBuffer %23
+          %1 = OpFunction %47 None %50
+         %58 = OpLabel
+         %59 = OpLoad %42 %2
+         %61 = OpLoad %39 %3
+         %64 = OpAccessChain %56 %30 %41 %61 %41
+         %65 = OpLoad %23 %64
+        %200 = OpCompositeExtract %37 %65 0
+        %201 = OpCompositeExtract %36 %200 0
+        %202 = OpCompositeExtract %36 %200 1
+        %203 = OpCompositeExtract %36 %200 2
+        %204 = OpCompositeConstruct %42 %201 %202 %203
+        %205 = OpCompositeExtract %36 %65 0 3
+        %206 = OpCompositeExtract %37 %65 1
+        %214 = OpCompositeExtract %36 %206 3
+        %215 = OpCompositeExtract %36 %206 0
+        %216 = OpCompositeExtract %36 %206 1
+        %217 = OpCompositeExtract %36 %206 2
+        %218 = OpFMul %36 %215 %215
+        %219 = OpFMul %36 %216 %216
+        %220 = OpFAdd %36 %218 %219
+        %221 = OpFMul %36 %217 %217
+        %222 = OpFAdd %36 %220 %221
+        %223 = OpFMul %36 %214 %214
+        %224 = OpFSub %36 %223 %222
+        %225 = OpCompositeExtract %36 %59 0
+        %226 = OpFMul %36 %225 %224
+        %227 = OpCompositeExtract %36 %59 1
+        %228 = OpFMul %36 %227 %224
+        %229 = OpCompositeExtract %36 %59 2
+        %230 = OpFMul %36 %229 %224
+        %232 = OpFMul %36 %225 %215
+        %234 = OpFMul %36 %227 %216
+        %235 = OpFAdd %36 %232 %234
+        %237 = OpFMul %36 %229 %217
+        %238 = OpFAdd %36 %235 %237
+        %239 = OpFMul %36 %238 %53
+        %240 = OpFMul %36 %215 %239
+        %241 = OpFMul %36 %216 %239
+        %242 = OpFMul %36 %217 %239
+        %243 = OpFAdd %36 %226 %240
+        %244 = OpFAdd %36 %228 %241
+        %245 = OpFAdd %36 %230 %242
+        %247 = OpFMul %36 %216 %229
+        %249 = OpFMul %36 %227 %217
+        %250 = OpFSub %36 %247 %249
+        %252 = OpFMul %36 %217 %225
+        %254 = OpFMul %36 %229 %215
+        %255 = OpFSub %36 %252 %254
+        %257 = OpFMul %36 %215 %227
+        %259 = OpFMul %36 %225 %216
+        %260 = OpFSub %36 %257 %259
+        %261 = OpFMul %36 %214 %53
+        %262 = OpFMul %36 %250 %261
+        %263 = OpFMul %36 %255 %261
+        %264 = OpFMul %36 %260 %261
+        %265 = OpFAdd %36 %243 %262
+        %266 = OpFAdd %36 %244 %263
+        %267 = OpFAdd %36 %245 %264
+        %268 = OpFMul %36 %205 %265
+        %269 = OpFMul %36 %205 %266
+        %270 = OpFMul %36 %205 %267
+        %271 = OpCompositeConstruct %42 %268 %269 %270
+        %272 = OpFAdd %42 %204 %271
+         %68 = OpAccessChain %54 %29 %41 %41
+         %69 = OpLoad %26 %68
+         %70 = OpCompositeExtract %36 %272 0
+         %71 = OpCompositeExtract %36 %272 1
+         %72 = OpCompositeExtract %36 %272 2
+         %73 = OpCompositeExtract %37 %69 0 0
+         %74 = OpCompositeExtract %36 %73 0
+         %75 = OpFMul %36 %74 %70
+         %76 = OpCompositeExtract %36 %73 1
+         %77 = OpFMul %36 %76 %70
+         %78 = OpCompositeExtract %36 %73 2
+         %79 = OpFMul %36 %78 %70
+         %80 = OpCompositeExtract %36 %73 3
+         %81 = OpFMul %36 %80 %70
+         %82 = OpCompositeExtract %37 %69 0 1
+         %83 = OpCompositeExtract %36 %82 0
+         %84 = OpFMul %36 %83 %71
+         %85 = OpFAdd %36 %84 %75
+         %86 = OpCompositeExtract %36 %82 1
+         %87 = OpFMul %36 %86 %71
+         %88 = OpFAdd %36 %87 %77
+         %89 = OpCompositeExtract %36 %82 2
+         %90 = OpFMul %36 %89 %71
+         %91 = OpFAdd %36 %90 %79
+         %92 = OpCompositeExtract %36 %82 3
+         %93 = OpFMul %36 %92 %71
+         %94 = OpFAdd %36 %93 %81
+         %95 = OpCompositeExtract %37 %69 0 2
+         %96 = OpCompositeExtract %36 %95 0
+         %97 = OpFMul %36 %96 %72
+         %98 = OpFAdd %36 %97 %85
+         %99 = OpCompositeExtract %36 %95 1
+        %100 = OpFMul %36 %99 %72
+        %101 = OpFAdd %36 %100 %88
+        %102 = OpCompositeExtract %36 %95 2
+        %103 = OpFMul %36 %102 %72
+        %104 = OpFAdd %36 %103 %91
+        %105 = OpCompositeExtract %36 %95 3
+        %106 = OpFMul %36 %105 %72
+        %107 = OpFAdd %36 %106 %94
+        %108 = OpCompositeExtract %37 %69 0 3
+        %109 = OpCompositeExtract %36 %108 0
+        %111 = OpFAdd %36 %109 %98
+        %112 = OpCompositeExtract %36 %108 1
+        %114 = OpFAdd %36 %112 %101
+        %115 = OpCompositeExtract %36 %108 2
+        %117 = OpFAdd %36 %115 %104
+        %118 = OpCompositeExtract %36 %108 3
+        %120 = OpFAdd %36 %118 %107
+        %121 = OpCompositeConstruct %37 %111 %114 %117 %120
+               OpStore %4 %121
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _23
+{
+    float4 _m0;
+    float4 _m1;
+};
+
+struct _24
+{
+    _23 _m0;
+    uint _m1;
+    uint _m2;
+    char _m0_final_padding[8];
+};
+
+struct _25
+{
+    float4 _m0;
+    float4 _m1;
+    float4 _m2;
+    float4 _m3;
+};
+
+struct _26
+{
+    _25 _m0;
+};
+
+struct _28
+{
+    _26 _m0;
+    float3 _m1;
+    uint2 _m2;
+    uint2 _m3;
+};
+
+struct _34
+{
+    _28 _m0;
+};
+
+struct _35
+{
+    _24 _m0[1];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    device _35* m_30 [[id(0)]];
+};
+
+struct depth_pre_pass_instanced_out
+{
+    float4 gl_Position [[position]];
+};
+
+struct depth_pre_pass_instanced_in
+{
+    float3 m_2 [[attribute(0)]];
+};
+
+vertex depth_pre_pass_instanced_out depth_pre_pass_instanced(depth_pre_pass_instanced_in in [[stage_in]], constant spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant _34& _29 [[buffer(3)]], uint gl_InstanceIndex [[instance_id]])
+{
+    depth_pre_pass_instanced_out out = {};
+    float _224 = ((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.w * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.w) - ((((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.x * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.x) + ((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.y * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.y)) + ((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.z * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.z));
+    float _239 = (((in.m_2.x * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.x) + (in.m_2.y * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.y)) + (in.m_2.z * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.z)) * 2.0;
+    float _261 = (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.w * 2.0;
+    float3 _272 = float3((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m0.xyz) + float3((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.x * _224) + ((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.x * _239)) + ((((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.y * in.m_2.z) - (in.m_2.y * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.z)) * _261)), (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.y * _224) + ((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.y * _239)) + ((((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.z * in.m_2.x) - (in.m_2.z * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.x)) * _261)), (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.z * _224) + ((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.z * _239)) + ((((*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.x * in.m_2.y) - (in.m_2.x * (*spvDescriptorSet1.m_30)._m0[gl_InstanceIndex]._m0._m1.y)) * _261)));
+    float _70 = _272.x;
+    float _71 = _272.y;
+    float _72 = _272.z;
+    out.gl_Position = float4(_29._m0._m0._m0._m3.x + ((_29._m0._m0._m0._m2.x * _72) + ((_29._m0._m0._m0._m1.x * _71) + (_29._m0._m0._m0._m0.x * _70))), _29._m0._m0._m0._m3.y + ((_29._m0._m0._m0._m2.y * _72) + ((_29._m0._m0._m0._m1.y * _71) + (_29._m0._m0._m0._m0.y * _70))), _29._m0._m0._m0._m3.z + ((_29._m0._m0._m0._m2.z * _72) + ((_29._m0._m0._m0._m1.z * _71) + (_29._m0._m0._m0._m0.z * _70))), _29._m0._m0._m0._m3.w + ((_29._m0._m0._m0._m2.w * _72) + ((_29._m0._m0._m0._m1.w * _71) + (_29._m0._m0._m0._m0.w * _70))));
+    out.gl_Position.y = -(out.gl_Position.y);    // Invert Y-axis for Metal
+    return out;
+}
+
+
+End MSL
+
+Estimated original GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
+
+struct _23
+{
+    vec4 _m0;
+    vec4 _m1;
+};
+
+struct _24
+{
+    _23 _m0;
+    uint _m1;
+    uint _m2;
+};
+
+struct _25
+{
+    vec4 _m0;
+    vec4 _m1;
+    vec4 _m2;
+    vec4 _m3;
+};
+
+struct _26
+{
+    _25 _m0;
+};
+
+struct _28
+{
+    _26 _m0;
+    vec3 _m1;
+    uvec2 _m2;
+    uvec2 _m3;
+};
+
+layout(set = 1, binding = 0, std430) buffer _35_30
+{
+    _24 _m0[];
+} _30;
+
+layout(push_constant, std430) uniform _34_29
+{
+    _28 _m0;
+} _29;
+
+layout(location = 0) in vec3 _2;
+
+void main()
+{
+    float _224 = (_30._m0[uint(gl_InstanceIndex)]._m0._m1.w * _30._m0[uint(gl_InstanceIndex)]._m0._m1.w) - (((_30._m0[uint(gl_InstanceIndex)]._m0._m1.x * _30._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_30._m0[uint(gl_InstanceIndex)]._m0._m1.y * _30._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_30._m0[uint(gl_InstanceIndex)]._m0._m1.z * _30._m0[uint(gl_InstanceIndex)]._m0._m1.z));
+    float _239 = (((_2.x * _30._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_2.y * _30._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_2.z * _30._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * 2.0;
+    float _261 = _30._m0[uint(gl_InstanceIndex)]._m0._m1.w * 2.0;
+    vec3 _272 = vec3(_30._m0[uint(gl_InstanceIndex)]._m0._m0.xyz) + vec3(_30._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.x * _224) + (_30._m0[uint(gl_InstanceIndex)]._m0._m1.x * _239)) + (((_30._m0[uint(gl_InstanceIndex)]._m0._m1.y * _2.z) - (_2.y * _30._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * _261)), _30._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.y * _224) + (_30._m0[uint(gl_InstanceIndex)]._m0._m1.y * _239)) + (((_30._m0[uint(gl_InstanceIndex)]._m0._m1.z * _2.x) - (_2.z * _30._m0[uint(gl_InstanceIndex)]._m0._m1.x)) * _261)), _30._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.z * _224) + (_30._m0[uint(gl_InstanceIndex)]._m0._m1.z * _239)) + (((_30._m0[uint(gl_InstanceIndex)]._m0._m1.x * _2.y) - (_2.x * _30._m0[uint(gl_InstanceIndex)]._m0._m1.y)) * _261)));
+    float _70 = _272.x;
+    float _71 = _272.y;
+    float _72 = _272.z;
+    gl_Position = vec4(_29._m0._m0._m0._m3.x + ((_29._m0._m0._m0._m2.x * _72) + ((_29._m0._m0._m0._m1.x * _71) + (_29._m0._m0._m0._m0.x * _70))), _29._m0._m0._m0._m3.y + ((_29._m0._m0._m0._m2.y * _72) + ((_29._m0._m0._m0._m1.y * _71) + (_29._m0._m0._m0._m0.y * _70))), _29._m0._m0._m0._m3.z + ((_29._m0._m0._m0._m2.z * _72) + ((_29._m0._m0._m0._m1.z * _71) + (_29._m0._m0._m0._m0.z * _70))), _29._m0._m0._m0._m3.w + ((_29._m0._m0._m0._m2.w * _72) + ((_29._m0._m0._m0._m1.w * _71) + (_29._m0._m0._m0._m0.w * _70))));
+}
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 285
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Vertex %1 "depth_pre_pass_vertex_alpha_clip" %2 %3 %4 %5 %6 %7
+               OpMemberDecorate %26 0 Offset 0
+               OpMemberDecorate %26 1 Offset 16
+               OpMemberDecorate %27 0 Offset 0
+               OpMemberDecorate %27 1 Offset 32
+               OpMemberDecorate %27 2 Offset 36
+               OpDecorate %36 ArrayStride 48
+               OpMemberDecorate %28 0 Offset 0
+               OpMemberDecorate %28 1 Offset 16
+               OpMemberDecorate %28 2 Offset 32
+               OpMemberDecorate %28 3 Offset 48
+               OpMemberDecorate %29 0 Offset 0
+               OpMemberDecorate %31 0 Offset 0
+               OpMemberDecorate %31 1 Offset 64
+               OpMemberDecorate %31 2 Offset 80
+               OpMemberDecorate %31 3 Offset 88
+               OpDecorate %2 Location 0
+               OpDecorate %37 Block
+               OpMemberDecorate %37 0 Offset 0
+               OpDecorate %3 Location 1
+               OpDecorate %38 Block
+               OpMemberDecorate %38 0 Offset 0
+               OpDecorate %33 DescriptorSet 1
+               OpDecorate %33 Binding 0
+               OpDecorate %4 BuiltIn InstanceIndex
+               OpDecorate %5 BuiltIn Position
+               OpDecorate %6 Location 0
+               OpDecorate %7 Location 1
+         %39 = OpTypeFloat 32
+         %40 = OpTypeVector %39 4
+         %41 = OpTypeVector %39 2
+         %42 = OpTypePointer Input %41
+         %43 = OpTypePointer Output %41
+         %44 = OpTypePointer Output %40
+         %45 = OpTypeInt 32 0
+         %46 = OpTypePointer Input %45
+         %47 = OpTypePointer Output %45
+         %48 = OpTypePointer StorageBuffer %45
+         %49 = OpConstant %45 0
+         %50 = OpTypeVector %39 3
+         %51 = OpTypePointer Input %50
+         %52 = OpConstant %45 2
+         %26 = OpTypeStruct %40 %40
+         %27 = OpTypeStruct %26 %45 %45
+         %36 = OpTypeRuntimeArray %27
+         %56 = OpTypeVoid
+         %57 = OpTypeVector %45 2
+         %28 = OpTypeStruct %40 %40 %40 %40
+         %29 = OpTypeStruct %28
+         %31 = OpTypeStruct %29 %50 %57 %57
+         %59 = OpTypeFunction %56
+          %2 = OpVariable %51 Input
+         %37 = OpTypeStruct %31
+         %60 = OpTypePointer PushConstant %37
+         %32 = OpVariable %60 PushConstant
+          %3 = OpVariable %42 Input
+         %38 = OpTypeStruct %36
+         %61 = OpTypePointer StorageBuffer %38
+         %33 = OpVariable %61 StorageBuffer
+          %4 = OpVariable %46 Input
+          %5 = OpVariable %44 Output
+          %6 = OpVariable %43 Output
+          %7 = OpVariable %47 Output
+         %62 = OpConstant %39 2
+         %63 = OpTypePointer PushConstant %29
+         %65 = OpTypePointer StorageBuffer %26
+          %1 = OpFunction %56 None %59
+         %67 = OpLabel
+         %68 = OpLoad %50 %2
+         %69 = OpLoad %41 %3
+         %71 = OpLoad %45 %4
+         %74 = OpAccessChain %65 %33 %49 %71 %49
+         %75 = OpLoad %26 %74
+        %212 = OpCompositeExtract %40 %75 0
+        %213 = OpCompositeExtract %39 %212 0
+        %214 = OpCompositeExtract %39 %212 1
+        %215 = OpCompositeExtract %39 %212 2
+        %216 = OpCompositeConstruct %50 %213 %214 %215
+        %217 = OpCompositeExtract %39 %75 0 3
+        %218 = OpCompositeExtract %40 %75 1
+        %226 = OpCompositeExtract %39 %218 3
+        %227 = OpCompositeExtract %39 %218 0
+        %228 = OpCompositeExtract %39 %218 1
+        %229 = OpCompositeExtract %39 %218 2
+        %230 = OpFMul %39 %227 %227
+        %231 = OpFMul %39 %228 %228
+        %232 = OpFAdd %39 %230 %231
+        %233 = OpFMul %39 %229 %229
+        %234 = OpFAdd %39 %232 %233
+        %235 = OpFMul %39 %226 %226
+        %236 = OpFSub %39 %235 %234
+        %237 = OpCompositeExtract %39 %68 0
+        %238 = OpFMul %39 %237 %236
+        %239 = OpCompositeExtract %39 %68 1
+        %240 = OpFMul %39 %239 %236
+        %241 = OpCompositeExtract %39 %68 2
+        %242 = OpFMul %39 %241 %236
+        %244 = OpFMul %39 %237 %227
+        %246 = OpFMul %39 %239 %228
+        %247 = OpFAdd %39 %244 %246
+        %249 = OpFMul %39 %241 %229
+        %250 = OpFAdd %39 %247 %249
+        %251 = OpFMul %39 %250 %62
+        %252 = OpFMul %39 %227 %251
+        %253 = OpFMul %39 %228 %251
+        %254 = OpFMul %39 %229 %251
+        %255 = OpFAdd %39 %238 %252
+        %256 = OpFAdd %39 %240 %253
+        %257 = OpFAdd %39 %242 %254
+        %259 = OpFMul %39 %228 %241
+        %261 = OpFMul %39 %239 %229
+        %262 = OpFSub %39 %259 %261
+        %264 = OpFMul %39 %229 %237
+        %266 = OpFMul %39 %241 %227
+        %267 = OpFSub %39 %264 %266
+        %269 = OpFMul %39 %227 %239
+        %271 = OpFMul %39 %237 %228
+        %272 = OpFSub %39 %269 %271
+        %273 = OpFMul %39 %226 %62
+        %274 = OpFMul %39 %262 %273
+        %275 = OpFMul %39 %267 %273
+        %276 = OpFMul %39 %272 %273
+        %277 = OpFAdd %39 %255 %274
+        %278 = OpFAdd %39 %256 %275
+        %279 = OpFAdd %39 %257 %276
+        %280 = OpFMul %39 %217 %277
+        %281 = OpFMul %39 %217 %278
+        %282 = OpFMul %39 %217 %279
+        %283 = OpCompositeConstruct %50 %280 %281 %282
+        %284 = OpFAdd %50 %216 %283
+               OpStore %6 %69
+         %78 = OpAccessChain %48 %33 %49 %71 %52
+         %79 = OpLoad %45 %78
+               OpStore %7 %79
+         %80 = OpAccessChain %63 %32 %49 %49
+         %81 = OpLoad %29 %80
+         %82 = OpCompositeExtract %39 %284 0
+         %83 = OpCompositeExtract %39 %284 1
+         %84 = OpCompositeExtract %39 %284 2
+         %85 = OpCompositeExtract %40 %81 0 0
+         %86 = OpCompositeExtract %39 %85 0
+         %87 = OpFMul %39 %86 %82
+         %88 = OpCompositeExtract %39 %85 1
+         %89 = OpFMul %39 %88 %82
+         %90 = OpCompositeExtract %39 %85 2
+         %91 = OpFMul %39 %90 %82
+         %92 = OpCompositeExtract %39 %85 3
+         %93 = OpFMul %39 %92 %82
+         %94 = OpCompositeExtract %40 %81 0 1
+         %95 = OpCompositeExtract %39 %94 0
+         %96 = OpFMul %39 %95 %83
+         %97 = OpFAdd %39 %96 %87
+         %98 = OpCompositeExtract %39 %94 1
+         %99 = OpFMul %39 %98 %83
+        %100 = OpFAdd %39 %99 %89
+        %101 = OpCompositeExtract %39 %94 2
+        %102 = OpFMul %39 %101 %83
+        %103 = OpFAdd %39 %102 %91
+        %104 = OpCompositeExtract %39 %94 3
+        %105 = OpFMul %39 %104 %83
+        %106 = OpFAdd %39 %105 %93
+        %107 = OpCompositeExtract %40 %81 0 2
+        %108 = OpCompositeExtract %39 %107 0
+        %109 = OpFMul %39 %108 %84
+        %110 = OpFAdd %39 %109 %97
+        %111 = OpCompositeExtract %39 %107 1
+        %112 = OpFMul %39 %111 %84
+        %113 = OpFAdd %39 %112 %100
+        %114 = OpCompositeExtract %39 %107 2
+        %115 = OpFMul %39 %114 %84
+        %116 = OpFAdd %39 %115 %103
+        %117 = OpCompositeExtract %39 %107 3
+        %118 = OpFMul %39 %117 %84
+        %119 = OpFAdd %39 %118 %106
+        %120 = OpCompositeExtract %40 %81 0 3
+        %121 = OpCompositeExtract %39 %120 0
+        %123 = OpFAdd %39 %121 %110
+        %124 = OpCompositeExtract %39 %120 1
+        %126 = OpFAdd %39 %124 %113
+        %127 = OpCompositeExtract %39 %120 2
+        %129 = OpFAdd %39 %127 %116
+        %130 = OpCompositeExtract %39 %120 3
+        %132 = OpFAdd %39 %130 %119
+        %133 = OpCompositeConstruct %40 %123 %126 %129 %132
+               OpStore %5 %133
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _26
+{
+    float4 _m0;
+    float4 _m1;
+};
+
+struct _27
+{
+    _26 _m0;
+    uint _m1;
+    uint _m2;
+    char _m0_final_padding[8];
+};
+
+struct _28
+{
+    float4 _m0;
+    float4 _m1;
+    float4 _m2;
+    float4 _m3;
+};
+
+struct _29
+{
+    _28 _m0;
+};
+
+struct _31
+{
+    _29 _m0;
+    float3 _m1;
+    uint2 _m2;
+    uint2 _m3;
+};
+
+struct _37
+{
+    _31 _m0;
+};
+
+struct _38
+{
+    _27 _m0[1];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    device _38* m_33 [[id(0)]];
+};
+
+struct depth_pre_pass_vertex_alpha_clip_out
+{
+    float2 m_6 [[user(locn0)]];
+    uint m_7 [[user(locn1)]];
+    float4 gl_Position [[position]];
+};
+
+struct depth_pre_pass_vertex_alpha_clip_in
+{
+    float3 m_2 [[attribute(0)]];
+    float2 m_3 [[attribute(1)]];
+};
+
+vertex depth_pre_pass_vertex_alpha_clip_out depth_pre_pass_vertex_alpha_clip(depth_pre_pass_vertex_alpha_clip_in in [[stage_in]], constant spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant _37& _32 [[buffer(3)]], uint gl_InstanceIndex [[instance_id]])
+{
+    depth_pre_pass_vertex_alpha_clip_out out = {};
+    float _236 = ((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.w * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.w) - ((((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.x * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.x) + ((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.y * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.y)) + ((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.z * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.z));
+    float _251 = (((in.m_2.x * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.x) + (in.m_2.y * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.y)) + (in.m_2.z * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.z)) * 2.0;
+    float _273 = (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.w * 2.0;
+    float3 _284 = float3((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m0.xyz) + float3((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.x * _236) + ((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.x * _251)) + ((((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.y * in.m_2.z) - (in.m_2.y * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.z)) * _273)), (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.y * _236) + ((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.y * _251)) + ((((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.z * in.m_2.x) - (in.m_2.z * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.x)) * _273)), (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.z * _236) + ((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.z * _251)) + ((((*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.x * in.m_2.y) - (in.m_2.x * (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m0._m1.y)) * _273)));
+    out.m_6 = in.m_3;
+    out.m_7 = (*spvDescriptorSet1.m_33)._m0[gl_InstanceIndex]._m2;
+    float _82 = _284.x;
+    float _83 = _284.y;
+    float _84 = _284.z;
+    out.gl_Position = float4(_32._m0._m0._m0._m3.x + ((_32._m0._m0._m0._m2.x * _84) + ((_32._m0._m0._m0._m1.x * _83) + (_32._m0._m0._m0._m0.x * _82))), _32._m0._m0._m0._m3.y + ((_32._m0._m0._m0._m2.y * _84) + ((_32._m0._m0._m0._m1.y * _83) + (_32._m0._m0._m0._m0.y * _82))), _32._m0._m0._m0._m3.z + ((_32._m0._m0._m0._m2.z * _84) + ((_32._m0._m0._m0._m1.z * _83) + (_32._m0._m0._m0._m0.z * _82))), _32._m0._m0._m0._m3.w + ((_32._m0._m0._m0._m2.w * _84) + ((_32._m0._m0._m0._m1.w * _83) + (_32._m0._m0._m0._m0.w * _82))));
+    out.gl_Position.y = -(out.gl_Position.y);    // Invert Y-axis for Metal
+    return out;
+}
+
+
+End MSL
+
+Estimated original GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
+
+struct _26
+{
+    vec4 _m0;
+    vec4 _m1;
+};
+
+struct _27
+{
+    _26 _m0;
+    uint _m1;
+    uint _m2;
+};
+
+struct _28
+{
+    vec4 _m0;
+    vec4 _m1;
+    vec4 _m2;
+    vec4 _m3;
+};
+
+struct _29
+{
+    _28 _m0;
+};
+
+struct _31
+{
+    _29 _m0;
+    vec3 _m1;
+    uvec2 _m2;
+    uvec2 _m3;
+};
+
+layout(set = 1, binding = 0, std430) buffer _38_33
+{
+    _27 _m0[];
+} _33;
+
+layout(push_constant, std430) uniform _37_32
+{
+    _31 _m0;
+} _32;
+
+layout(location = 0) in vec3 _2;
+layout(location = 1) in vec2 _3;
+layout(location = 0) out vec2 _6;
+layout(location = 1) out uint _7;
+
+void main()
+{
+    float _236 = (_33._m0[uint(gl_InstanceIndex)]._m0._m1.w * _33._m0[uint(gl_InstanceIndex)]._m0._m1.w) - (((_33._m0[uint(gl_InstanceIndex)]._m0._m1.x * _33._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_33._m0[uint(gl_InstanceIndex)]._m0._m1.y * _33._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_33._m0[uint(gl_InstanceIndex)]._m0._m1.z * _33._m0[uint(gl_InstanceIndex)]._m0._m1.z));
+    float _251 = (((_2.x * _33._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_2.y * _33._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_2.z * _33._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * 2.0;
+    float _273 = _33._m0[uint(gl_InstanceIndex)]._m0._m1.w * 2.0;
+    vec3 _284 = vec3(_33._m0[uint(gl_InstanceIndex)]._m0._m0.xyz) + vec3(_33._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.x * _236) + (_33._m0[uint(gl_InstanceIndex)]._m0._m1.x * _251)) + (((_33._m0[uint(gl_InstanceIndex)]._m0._m1.y * _2.z) - (_2.y * _33._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * _273)), _33._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.y * _236) + (_33._m0[uint(gl_InstanceIndex)]._m0._m1.y * _251)) + (((_33._m0[uint(gl_InstanceIndex)]._m0._m1.z * _2.x) - (_2.z * _33._m0[uint(gl_InstanceIndex)]._m0._m1.x)) * _273)), _33._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.z * _236) + (_33._m0[uint(gl_InstanceIndex)]._m0._m1.z * _251)) + (((_33._m0[uint(gl_InstanceIndex)]._m0._m1.x * _2.y) - (_2.x * _33._m0[uint(gl_InstanceIndex)]._m0._m1.y)) * _273)));
+    _6 = _3;
+    _7 = _33._m0[uint(gl_InstanceIndex)]._m2;
+    float _82 = _284.x;
+    float _83 = _284.y;
+    float _84 = _284.z;
+    gl_Position = vec4(_32._m0._m0._m0._m3.x + ((_32._m0._m0._m0._m2.x * _84) + ((_32._m0._m0._m0._m1.x * _83) + (_32._m0._m0._m0._m0.x * _82))), _32._m0._m0._m0._m3.y + ((_32._m0._m0._m0._m2.y * _84) + ((_32._m0._m0._m0._m1.y * _83) + (_32._m0._m0._m0._m0.y * _82))), _32._m0._m0._m0._m3.z + ((_32._m0._m0._m0._m2.z * _84) + ((_32._m0._m0._m0._m1.z * _83) + (_32._m0._m0._m0._m0.z * _82))), _32._m0._m0._m0._m3.w + ((_32._m0._m0._m0._m2.w * _84) + ((_32._m0._m0._m0._m1.w * _83) + (_32._m0._m0._m0._m0.w * _82))));
+}
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 104
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Fragment %1 "depth_pre_pass_alpha_clip" %2 %3
+               OpExecutionMode %1 OriginUpperLeft
+               OpMemberDecorate %15 0 Offset 0
+               OpMemberDecorate %15 1 Offset 4
+               OpMemberDecorate %15 2 Offset 8
+               OpMemberDecorate %15 3 Offset 12
+               OpMemberDecorate %15 4 Offset 16
+               OpMemberDecorate %15 5 Offset 20
+               OpMemberDecorate %15 6 Offset 24
+               OpMemberDecorate %15 7 Offset 28
+               OpMemberDecorate %15 8 Offset 32
+               OpMemberDecorate %16 0 Offset 0
+               OpMemberDecorate %16 1 Offset 36
+               OpMemberDecorate %16 2 Offset 40
+               OpMemberDecorate %16 3 Offset 44
+               OpMemberDecorate %16 4 Offset 48
+               OpMemberDecorate %16 5 Offset 64
+               OpMemberDecorate %16 6 Offset 80
+               OpMemberDecorate %16 7 Offset 84
+               OpMemberDecorate %16 8 Offset 88
+               OpMemberDecorate %16 9 Offset 92
+               OpMemberDecorate %16 10 Offset 96
+               OpMemberDecorate %16 11 Offset 100
+               OpMemberDecorate %16 12 Offset 112
+               OpMemberDecorate %16 13 Offset 128
+               OpMemberDecorate %16 14 Offset 144
+               OpDecorate %21 ArrayStride 160
+               OpDecorate %22 ArrayStride 4
+               OpDecorate %17 DescriptorSet 0
+               OpDecorate %17 Binding 0
+               OpDecorate %18 DescriptorSet 0
+               OpDecorate %18 Binding 1
+               OpDecorate %23 Block
+               OpMemberDecorate %23 0 Offset 0
+               OpDecorate %19 DescriptorSet 0
+               OpDecorate %19 Binding 2
+               OpDecorate %2 Location 0
+               OpDecorate %3 Flat
+               OpDecorate %3 Location 1
+         %24 = OpTypeFloat 32
+         %25 = OpTypeVector %24 4
+         %26 = OpTypeImage %24 2D 2 0 0 1 Unknown
+         %27 = OpTypePointer UniformConstant %26
+         %28 = OpTypeSampler
+         %29 = OpTypeVector %24 2
+         %31 = OpTypePointer UniformConstant %28
+         %32 = OpTypePointer Input %29
+         %33 = OpTypePointer StorageBuffer %24
+         %34 = OpTypePointer StorageBuffer %25
+         %35 = OpTypeSampledImage %26
+         %36 = OpTypeInt 32 0
+         %37 = OpTypePointer Input %36
+         %38 = OpConstant %36 4
+         %39 = OpConstant %36 0
+         %40 = OpTypeVector %24 3
+         %41 = OpConstant %36 3
+         %42 = OpTypeInt 32 1
+         %15 = OpTypeStruct %42 %42 %42 %42 %42 %42 %42 %42 %42
+         %16 = OpTypeStruct %15 %24 %24 %24 %25 %40 %24 %24 %24 %24 %24 %24 %40 %24 %40
+         %21 = OpTypeRuntimeArray %16
+         %22 = OpTypeRuntimeArray %26
+         %45 = OpTypePointer UniformConstant %22
+         %46 = OpTypeVoid
+         %47 = OpTypeBool
+         %49 = OpTypePointer StorageBuffer %42
+         %50 = OpConstant %42 -1
+         %51 = OpTypeFunction %46
+         %17 = OpVariable %45 UniformConstant
+         %18 = OpVariable %31 UniformConstant
+         %23 = OpTypeStruct %21
+         %52 = OpTypePointer StorageBuffer %23
+         %19 = OpVariable %52 StorageBuffer
+          %2 = OpVariable %32 Input
+          %3 = OpVariable %37 Input
+          %1 = OpFunction %46 None %51
+         %60 = OpLabel
+               OpSelectionMerge %89 None
+               OpSwitch %39 %93
+         %93 = OpLabel
+         %61 = OpLoad %29 %2
+         %62 = OpLoad %36 %3
+         %65 = OpLoad %28 %18
+         %66 = OpAccessChain %34 %19 %39 %62 %38
+         %67 = OpLoad %25 %66
+         %69 = OpAccessChain %49 %19 %39 %62 %39 %39
+         %70 = OpLoad %42 %69
+         %71 = OpIEqual %47 %70 %50
+               OpSelectionMerge %72 None
+               OpBranchConditional %71 %73 %74
+         %74 = OpLabel
+         %77 = OpLoad %42 %69
+         %78 = OpBitcast %36 %77
+         %79 = OpAccessChain %27 %17 %78
+        %101 = OpLoad %26 %79
+        %102 = OpSampledImage %35 %101 %65
+        %103 = OpImageSampleImplicitLod %25 %102 %61
+         %81 = OpFMul %25 %67 %103
+               OpBranch %72
+         %73 = OpLabel
+               OpBranch %72
+         %72 = OpLabel
+         %82 = OpPhi %25 %67 %73 %81 %74
+         %83 = OpCompositeExtract %24 %82 3
+         %84 = OpAccessChain %33 %19 %39 %62 %41
+         %85 = OpLoad %24 %84
+         %86 = OpFOrdLessThan %47 %83 %85
+               OpSelectionMerge %87 None
+               OpBranchConditional %86 %88 %89
+         %89 = OpLabel
+               OpReturn
+         %88 = OpLabel
+               OpKill
+         %87 = OpLabel
+               OpUnreachable
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _15
+{
+    int _m0;
+    int _m1;
+    int _m2;
+    int _m3;
+    int _m4;
+    int _m5;
+    int _m6;
+    int _m7;
+    int _m8;
+};
+
+struct _16
+{
+    _15 _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    float4 _m4;
+    float3 _m5;
+    float _m6;
+    float _m7;
+    float _m8;
+    float _m9;
+    float _m10;
+    float _m11;
+    float3 _m12;
+    float _m13;
+    float3 _m14;
+};
+
+struct _23
+{
+    _16 _m0[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    array<texture2d<float>, 127> m_17 [[id(0)]];
+    sampler m_18 [[id(127)]];
+    device _23* m_19 [[id(128)]];
+};
+
+struct depth_pre_pass_alpha_clip_in
+{
+    float2 m_2 [[user(locn0)]];
+    uint m_3 [[user(locn1)]];
+};
+
+fragment void depth_pre_pass_alpha_clip(depth_pre_pass_alpha_clip_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    do
+    {
+        float4 _82;
+        if ((*spvDescriptorSet0.m_19)._m0[in.m_3]._m0._m0 == (-1))
+        {
+            _82 = (*spvDescriptorSet0.m_19)._m0[in.m_3]._m4;
+        }
+        else
+        {
+            uint _78 = uint((*spvDescriptorSet0.m_19)._m0[in.m_3]._m0._m0);
+            _82 = (*spvDescriptorSet0.m_19)._m0[in.m_3]._m4 * spvDescriptorSet0.m_17[_78].sample(spvDescriptorSet0.m_18, in.m_2);
+        }
+        if (_82.w < (*spvDescriptorSet0.m_19)._m0[in.m_3]._m3)
+        {
+            discard_fragment();
+        }
+        else
+        {
+            break;
+        }
+    } while(false);
+}
+
+
+End MSL
+
+Original GLSL extraction error: Buffer block cannot be expressed as any of std430, std140, scalar, even with enhanced layouts. You can try flattening this block to support a more flexible layout.
+
+Partially converted GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+struct _15
+{
+    int _m0;
+    int _m1;
+    int _m2;
+    int _m3;
+    int _m4;
+    int _m5;
+    int _m6;
+    int _m7;
+    int _m8;
+};
+
+struct _16
+{
+    _15 _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    vec4 _m4;
+    vec3 _m5;
+    float _m6;
+    float _m7;
+    float _m8;
+    float _m9;
+    float _m10;
+    float _m11;
+    vec3 _m12;
+    float _m13;
+    vec3 _m14;
+};
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 351
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Vertex %1 "vertex_instanced_with_scale" %2 %3 %4 %5 %6 %7 %8 %9 %10 %11
+               OpMemberDecorate %32 0 Offset 0
+               OpMemberDecorate %32 1 Offset 16
+               OpMemberDecorate %33 0 Offset 0
+               OpMemberDecorate %33 1 Offset 32
+               OpMemberDecorate %33 2 Offset 36
+               OpDecorate %42 ArrayStride 48
+               OpMemberDecorate %34 0 Offset 0
+               OpMemberDecorate %34 1 Offset 16
+               OpMemberDecorate %34 2 Offset 32
+               OpMemberDecorate %34 3 Offset 48
+               OpMemberDecorate %35 0 Offset 0
+               OpMemberDecorate %37 0 Offset 0
+               OpMemberDecorate %37 1 Offset 64
+               OpMemberDecorate %37 2 Offset 80
+               OpMemberDecorate %37 3 Offset 88
+               OpDecorate %2 Location 0
+               OpDecorate %3 Location 1
+               OpDecorate %4 Location 2
+               OpDecorate %43 Block
+               OpMemberDecorate %43 0 Offset 0
+               OpDecorate %44 Block
+               OpMemberDecorate %44 0 Offset 0
+               OpDecorate %39 DescriptorSet 1
+               OpDecorate %39 Binding 0
+               OpDecorate %5 BuiltIn InstanceIndex
+               OpDecorate %11 BuiltIn Position
+               OpDecorate %6 Location 0
+               OpDecorate %7 Location 1
+               OpDecorate %8 Location 2
+               OpDecorate %9 Location 3
+               OpDecorate %10 Location 4
+         %45 = OpTypeFloat 32
+         %46 = OpTypeVector %45 4
+         %47 = OpTypeVector %45 2
+         %48 = OpTypePointer Input %47
+         %49 = OpTypePointer Output %47
+         %50 = OpTypePointer Output %45
+         %51 = OpTypePointer Output %46
+         %52 = OpTypeInt 32 0
+         %53 = OpTypePointer Input %52
+         %54 = OpTypePointer Output %52
+         %55 = OpTypePointer StorageBuffer %52
+         %56 = OpConstant %52 0
+         %57 = OpTypeVector %45 3
+         %58 = OpTypePointer Input %57
+         %59 = OpTypePointer Output %57
+         %60 = OpConstant %52 2
+         %32 = OpTypeStruct %46 %46
+         %33 = OpTypeStruct %32 %52 %52
+         %42 = OpTypeRuntimeArray %33
+         %64 = OpTypeVoid
+         %65 = OpTypeVector %52 2
+         %34 = OpTypeStruct %46 %46 %46 %46
+         %35 = OpTypeStruct %34
+         %37 = OpTypeStruct %35 %57 %65 %65
+         %67 = OpTypeFunction %64
+          %2 = OpVariable %58 Input
+          %3 = OpVariable %58 Input
+          %4 = OpVariable %48 Input
+         %43 = OpTypeStruct %37
+         %68 = OpTypePointer PushConstant %43
+         %38 = OpVariable %68 PushConstant
+         %44 = OpTypeStruct %42
+         %69 = OpTypePointer StorageBuffer %44
+         %39 = OpVariable %69 StorageBuffer
+          %5 = OpVariable %53 Input
+         %11 = OpVariable %51 Output
+          %6 = OpVariable %59 Output
+          %7 = OpVariable %59 Output
+          %8 = OpVariable %49 Output
+          %9 = OpVariable %54 Output
+         %10 = OpVariable %50 Output
+         %70 = OpConstant %45 2
+         %71 = OpTypePointer PushConstant %35
+         %73 = OpTypePointer StorageBuffer %32
+          %1 = OpFunction %64 None %67
+         %75 = OpLabel
+         %76 = OpLoad %57 %2
+         %77 = OpLoad %57 %3
+         %78 = OpLoad %47 %4
+         %80 = OpLoad %52 %5
+         %83 = OpAccessChain %73 %39 %56 %80 %56
+         %84 = OpLoad %32 %83
+        %278 = OpCompositeExtract %46 %84 0
+        %279 = OpCompositeExtract %45 %278 0
+        %280 = OpCompositeExtract %45 %278 1
+        %281 = OpCompositeExtract %45 %278 2
+        %282 = OpCompositeConstruct %57 %279 %280 %281
+        %283 = OpCompositeExtract %45 %84 0 3
+        %284 = OpCompositeExtract %46 %84 1
+        %292 = OpCompositeExtract %45 %284 3
+        %293 = OpCompositeExtract %45 %284 0
+        %294 = OpCompositeExtract %45 %284 1
+        %295 = OpCompositeExtract %45 %284 2
+        %296 = OpFMul %45 %293 %293
+        %297 = OpFMul %45 %294 %294
+        %298 = OpFAdd %45 %296 %297
+        %299 = OpFMul %45 %295 %295
+        %300 = OpFAdd %45 %298 %299
+        %301 = OpFMul %45 %292 %292
+        %302 = OpFSub %45 %301 %300
+        %303 = OpCompositeExtract %45 %76 0
+        %304 = OpFMul %45 %303 %302
+        %305 = OpCompositeExtract %45 %76 1
+        %306 = OpFMul %45 %305 %302
+        %307 = OpCompositeExtract %45 %76 2
+        %308 = OpFMul %45 %307 %302
+        %310 = OpFMul %45 %303 %293
+        %312 = OpFMul %45 %305 %294
+        %313 = OpFAdd %45 %310 %312
+        %315 = OpFMul %45 %307 %295
+        %316 = OpFAdd %45 %313 %315
+        %317 = OpFMul %45 %316 %70
+        %318 = OpFMul %45 %293 %317
+        %319 = OpFMul %45 %294 %317
+        %320 = OpFMul %45 %295 %317
+        %321 = OpFAdd %45 %304 %318
+        %322 = OpFAdd %45 %306 %319
+        %323 = OpFAdd %45 %308 %320
+        %325 = OpFMul %45 %294 %307
+        %327 = OpFMul %45 %305 %295
+        %328 = OpFSub %45 %325 %327
+        %330 = OpFMul %45 %295 %303
+        %332 = OpFMul %45 %307 %293
+        %333 = OpFSub %45 %330 %332
+        %335 = OpFMul %45 %293 %305
+        %337 = OpFMul %45 %303 %294
+        %338 = OpFSub %45 %335 %337
+        %339 = OpFMul %45 %292 %70
+        %340 = OpFMul %45 %328 %339
+        %341 = OpFMul %45 %333 %339
+        %342 = OpFMul %45 %338 %339
+        %343 = OpFAdd %45 %321 %340
+        %344 = OpFAdd %45 %322 %341
+        %345 = OpFAdd %45 %323 %342
+        %346 = OpFMul %45 %283 %343
+        %347 = OpFMul %45 %283 %344
+        %348 = OpFMul %45 %283 %345
+        %349 = OpCompositeConstruct %57 %346 %347 %348
+        %350 = OpFAdd %57 %282 %349
+               OpStore %6 %350
+         %99 = OpCompositeExtract %45 %77 0
+        %100 = OpFMul %45 %99 %302
+        %101 = OpCompositeExtract %45 %77 1
+        %102 = OpFMul %45 %101 %302
+        %103 = OpCompositeExtract %45 %77 2
+        %104 = OpFMul %45 %103 %302
+        %106 = OpFMul %45 %99 %293
+        %108 = OpFMul %45 %101 %294
+        %109 = OpFAdd %45 %106 %108
+        %111 = OpFMul %45 %103 %295
+        %112 = OpFAdd %45 %109 %111
+        %113 = OpFMul %45 %112 %70
+        %114 = OpFMul %45 %293 %113
+        %115 = OpFMul %45 %294 %113
+        %116 = OpFMul %45 %295 %113
+        %117 = OpFAdd %45 %100 %114
+        %118 = OpFAdd %45 %102 %115
+        %119 = OpFAdd %45 %104 %116
+        %121 = OpFMul %45 %294 %103
+        %123 = OpFMul %45 %101 %295
+        %124 = OpFSub %45 %121 %123
+        %126 = OpFMul %45 %295 %99
+        %128 = OpFMul %45 %103 %293
+        %129 = OpFSub %45 %126 %128
+        %131 = OpFMul %45 %293 %101
+        %133 = OpFMul %45 %99 %294
+        %134 = OpFSub %45 %131 %133
+        %136 = OpFMul %45 %124 %339
+        %137 = OpFMul %45 %129 %339
+        %138 = OpFMul %45 %134 %339
+        %139 = OpFAdd %45 %117 %136
+        %140 = OpFAdd %45 %118 %137
+        %141 = OpFAdd %45 %119 %138
+        %142 = OpCompositeConstruct %57 %139 %140 %141
+               OpStore %7 %142
+               OpStore %8 %78
+        %143 = OpAccessChain %55 %39 %56 %80 %60
+        %144 = OpLoad %52 %143
+               OpStore %9 %144
+               OpStore %10 %283
+        %146 = OpAccessChain %71 %38 %56 %56
+        %147 = OpLoad %35 %146
+        %148 = OpCompositeExtract %45 %350 0
+        %149 = OpCompositeExtract %45 %350 1
+        %150 = OpCompositeExtract %45 %350 2
+        %151 = OpCompositeExtract %46 %147 0 0
+        %152 = OpCompositeExtract %45 %151 0
+        %153 = OpFMul %45 %152 %148
+        %154 = OpCompositeExtract %45 %151 1
+        %155 = OpFMul %45 %154 %148
+        %156 = OpCompositeExtract %45 %151 2
+        %157 = OpFMul %45 %156 %148
+        %158 = OpCompositeExtract %45 %151 3
+        %159 = OpFMul %45 %158 %148
+        %160 = OpCompositeExtract %46 %147 0 1
+        %161 = OpCompositeExtract %45 %160 0
+        %162 = OpFMul %45 %161 %149
+        %163 = OpFAdd %45 %162 %153
+        %164 = OpCompositeExtract %45 %160 1
+        %165 = OpFMul %45 %164 %149
+        %166 = OpFAdd %45 %165 %155
+        %167 = OpCompositeExtract %45 %160 2
+        %168 = OpFMul %45 %167 %149
+        %169 = OpFAdd %45 %168 %157
+        %170 = OpCompositeExtract %45 %160 3
+        %171 = OpFMul %45 %170 %149
+        %172 = OpFAdd %45 %171 %159
+        %173 = OpCompositeExtract %46 %147 0 2
+        %174 = OpCompositeExtract %45 %173 0
+        %175 = OpFMul %45 %174 %150
+        %176 = OpFAdd %45 %175 %163
+        %177 = OpCompositeExtract %45 %173 1
+        %178 = OpFMul %45 %177 %150
+        %179 = OpFAdd %45 %178 %166
+        %180 = OpCompositeExtract %45 %173 2
+        %181 = OpFMul %45 %180 %150
+        %182 = OpFAdd %45 %181 %169
+        %183 = OpCompositeExtract %45 %173 3
+        %184 = OpFMul %45 %183 %150
+        %185 = OpFAdd %45 %184 %172
+        %186 = OpCompositeExtract %46 %147 0 3
+        %187 = OpCompositeExtract %45 %186 0
+        %189 = OpFAdd %45 %187 %176
+        %190 = OpCompositeExtract %45 %186 1
+        %192 = OpFAdd %45 %190 %179
+        %193 = OpCompositeExtract %45 %186 2
+        %195 = OpFAdd %45 %193 %182
+        %196 = OpCompositeExtract %45 %186 3
+        %198 = OpFAdd %45 %196 %185
+        %199 = OpCompositeConstruct %46 %189 %192 %195 %198
+               OpStore %11 %199
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _32
+{
+    float4 _m0;
+    float4 _m1;
+};
+
+struct _33
+{
+    _32 _m0;
+    uint _m1;
+    uint _m2;
+    char _m0_final_padding[8];
+};
+
+struct _34
+{
+    float4 _m0;
+    float4 _m1;
+    float4 _m2;
+    float4 _m3;
+};
+
+struct _35
+{
+    _34 _m0;
+};
+
+struct _37
+{
+    _35 _m0;
+    float3 _m1;
+    uint2 _m2;
+    uint2 _m3;
+};
+
+struct _43
+{
+    _37 _m0;
+};
+
+struct _44
+{
+    _33 _m0[1];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    device _44* m_39 [[id(0)]];
+};
+
+struct vertex_instanced_with_scale_out
+{
+    float3 m_6 [[user(locn0)]];
+    float3 m_7 [[user(locn1)]];
+    float2 m_8 [[user(locn2)]];
+    uint m_9 [[user(locn3)]];
+    float m_10 [[user(locn4)]];
+    float4 gl_Position [[position]];
+};
+
+struct vertex_instanced_with_scale_in
+{
+    float3 m_2 [[attribute(0)]];
+    float3 m_3 [[attribute(1)]];
+    float2 m_4 [[attribute(2)]];
+};
+
+vertex vertex_instanced_with_scale_out vertex_instanced_with_scale(vertex_instanced_with_scale_in in [[stage_in]], constant spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant _43& _38 [[buffer(4)]], uint gl_InstanceIndex [[instance_id]])
+{
+    vertex_instanced_with_scale_out out = {};
+    float _302 = ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.w * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.w) - ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y)) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z));
+    float _317 = (((in.m_2.x * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x) + (in.m_2.y * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y)) + (in.m_2.z * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z)) * 2.0;
+    float _339 = (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.w * 2.0;
+    float3 _350 = float3((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m0.xyz) + float3((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.x * _302) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x * _317)) + ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y * in.m_2.z) - (in.m_2.y * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z)) * _339)), (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.y * _302) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y * _317)) + ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z * in.m_2.x) - (in.m_2.z * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x)) * _339)), (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m0.w * (((in.m_2.z * _302) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z * _317)) + ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x * in.m_2.y) - (in.m_2.x * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y)) * _339)));
+    out.m_6 = _350;
+    float _113 = (((in.m_3.x * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x) + (in.m_3.y * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y)) + (in.m_3.z * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z)) * 2.0;
+    out.m_7 = float3(((in.m_3.x * _302) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x * _113)) + ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y * in.m_3.z) - (in.m_3.y * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z)) * _339), ((in.m_3.y * _302) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y * _113)) + ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z * in.m_3.x) - (in.m_3.z * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x)) * _339), ((in.m_3.z * _302) + ((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.z * _113)) + ((((*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.x * in.m_3.y) - (in.m_3.x * (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m1.y)) * _339));
+    out.m_8 = in.m_4;
+    out.m_9 = (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m2;
+    out.m_10 = (*spvDescriptorSet1.m_39)._m0[gl_InstanceIndex]._m0._m0.w;
+    float _148 = _350.x;
+    float _149 = _350.y;
+    float _150 = _350.z;
+    out.gl_Position = float4(_38._m0._m0._m0._m3.x + ((_38._m0._m0._m0._m2.x * _150) + ((_38._m0._m0._m0._m1.x * _149) + (_38._m0._m0._m0._m0.x * _148))), _38._m0._m0._m0._m3.y + ((_38._m0._m0._m0._m2.y * _150) + ((_38._m0._m0._m0._m1.y * _149) + (_38._m0._m0._m0._m0.y * _148))), _38._m0._m0._m0._m3.z + ((_38._m0._m0._m0._m2.z * _150) + ((_38._m0._m0._m0._m1.z * _149) + (_38._m0._m0._m0._m0.z * _148))), _38._m0._m0._m0._m3.w + ((_38._m0._m0._m0._m2.w * _150) + ((_38._m0._m0._m0._m1.w * _149) + (_38._m0._m0._m0._m0.w * _148))));
+    out.gl_Position.y = -(out.gl_Position.y);    // Invert Y-axis for Metal
+    return out;
+}
+
+
+End MSL
+
+Estimated original GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
+
+struct _32
+{
+    vec4 _m0;
+    vec4 _m1;
+};
+
+struct _33
+{
+    _32 _m0;
+    uint _m1;
+    uint _m2;
+};
+
+struct _34
+{
+    vec4 _m0;
+    vec4 _m1;
+    vec4 _m2;
+    vec4 _m3;
+};
+
+struct _35
+{
+    _34 _m0;
+};
+
+struct _37
+{
+    _35 _m0;
+    vec3 _m1;
+    uvec2 _m2;
+    uvec2 _m3;
+};
+
+layout(set = 1, binding = 0, std430) buffer _44_39
+{
+    _33 _m0[];
+} _39;
+
+layout(push_constant, std430) uniform _43_38
+{
+    _37 _m0;
+} _38;
+
+layout(location = 0) in vec3 _2;
+layout(location = 1) in vec3 _3;
+layout(location = 2) in vec2 _4;
+layout(location = 0) out vec3 _6;
+layout(location = 1) out vec3 _7;
+layout(location = 2) out vec2 _8;
+layout(location = 3) out uint _9;
+layout(location = 4) out float _10;
+
+void main()
+{
+    float _302 = (_39._m0[uint(gl_InstanceIndex)]._m0._m1.w * _39._m0[uint(gl_InstanceIndex)]._m0._m1.w) - (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.x * _39._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.y * _39._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.z * _39._m0[uint(gl_InstanceIndex)]._m0._m1.z));
+    float _317 = (((_2.x * _39._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_2.y * _39._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_2.z * _39._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * 2.0;
+    float _339 = _39._m0[uint(gl_InstanceIndex)]._m0._m1.w * 2.0;
+    vec3 _350 = vec3(_39._m0[uint(gl_InstanceIndex)]._m0._m0.xyz) + vec3(_39._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.x * _302) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.x * _317)) + (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.y * _2.z) - (_2.y * _39._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * _339)), _39._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.y * _302) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.y * _317)) + (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.z * _2.x) - (_2.z * _39._m0[uint(gl_InstanceIndex)]._m0._m1.x)) * _339)), _39._m0[uint(gl_InstanceIndex)]._m0._m0.w * (((_2.z * _302) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.z * _317)) + (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.x * _2.y) - (_2.x * _39._m0[uint(gl_InstanceIndex)]._m0._m1.y)) * _339)));
+    _6 = _350;
+    float _113 = (((_3.x * _39._m0[uint(gl_InstanceIndex)]._m0._m1.x) + (_3.y * _39._m0[uint(gl_InstanceIndex)]._m0._m1.y)) + (_3.z * _39._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * 2.0;
+    _7 = vec3(((_3.x * _302) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.x * _113)) + (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.y * _3.z) - (_3.y * _39._m0[uint(gl_InstanceIndex)]._m0._m1.z)) * _339), ((_3.y * _302) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.y * _113)) + (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.z * _3.x) - (_3.z * _39._m0[uint(gl_InstanceIndex)]._m0._m1.x)) * _339), ((_3.z * _302) + (_39._m0[uint(gl_InstanceIndex)]._m0._m1.z * _113)) + (((_39._m0[uint(gl_InstanceIndex)]._m0._m1.x * _3.y) - (_3.x * _39._m0[uint(gl_InstanceIndex)]._m0._m1.y)) * _339));
+    _8 = _4;
+    _9 = _39._m0[uint(gl_InstanceIndex)]._m2;
+    _10 = _39._m0[uint(gl_InstanceIndex)]._m0._m0.w;
+    float _148 = _350.x;
+    float _149 = _350.y;
+    float _150 = _350.z;
+    gl_Position = vec4(_38._m0._m0._m0._m3.x + ((_38._m0._m0._m0._m2.x * _150) + ((_38._m0._m0._m0._m1.x * _149) + (_38._m0._m0._m0._m0.x * _148))), _38._m0._m0._m0._m3.y + ((_38._m0._m0._m0._m2.y * _150) + ((_38._m0._m0._m0._m1.y * _149) + (_38._m0._m0._m0._m0.y * _148))), _38._m0._m0._m0._m3.z + ((_38._m0._m0._m0._m2.z * _150) + ((_38._m0._m0._m0._m1.z * _149) + (_38._m0._m0._m0._m0.z * _148))), _38._m0._m0._m0._m3.w + ((_38._m0._m0._m0._m2.w * _150) + ((_38._m0._m0._m0._m1.w * _149) + (_38._m0._m0._m0._m0.w * _148))));
+}
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 3028
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Fragment %2 "fragment_transmission" %3 %4 %5 %6 %7 %8
+               OpExecutionMode %2 OriginUpperLeft
+               OpMemberDecorate %75 0 Offset 0
+               OpMemberDecorate %75 1 Offset 16
+               OpDecorate %134 ArrayStride 32
+               OpMemberDecorate %76 0 Offset 0
+               OpMemberDecorate %76 1 Offset 4
+               OpMemberDecorate %76 2 Offset 8
+               OpMemberDecorate %76 3 Offset 12
+               OpMemberDecorate %76 4 Offset 16
+               OpMemberDecorate %76 5 Offset 20
+               OpMemberDecorate %76 6 Offset 24
+               OpMemberDecorate %76 7 Offset 28
+               OpMemberDecorate %76 8 Offset 32
+               OpMemberDecorate %77 0 Offset 0
+               OpMemberDecorate %77 1 Offset 36
+               OpMemberDecorate %77 2 Offset 40
+               OpMemberDecorate %77 3 Offset 44
+               OpMemberDecorate %77 4 Offset 48
+               OpMemberDecorate %77 5 Offset 64
+               OpMemberDecorate %77 6 Offset 80
+               OpMemberDecorate %77 7 Offset 84
+               OpMemberDecorate %77 8 Offset 88
+               OpMemberDecorate %77 9 Offset 92
+               OpMemberDecorate %77 10 Offset 96
+               OpMemberDecorate %77 11 Offset 100
+               OpMemberDecorate %77 12 Offset 112
+               OpMemberDecorate %77 13 Offset 128
+               OpMemberDecorate %77 14 Offset 144
+               OpDecorate %135 ArrayStride 160
+               OpDecorate %136 ArrayStride 4
+               OpMemberDecorate %82 0 Offset 0
+               OpMemberDecorate %82 1 Offset 16
+               OpMemberDecorate %82 2 Offset 32
+               OpMemberDecorate %82 3 Offset 40
+               OpMemberDecorate %82 4 Offset 48
+               OpMemberDecorate %82 5 Offset 52
+               OpMemberDecorate %91 0 Offset 0
+               OpMemberDecorate %91 1 Offset 16
+               OpMemberDecorate %91 2 Offset 32
+               OpMemberDecorate %91 3 Offset 48
+               OpMemberDecorate %92 0 Offset 0
+               OpMemberDecorate %93 0 Offset 0
+               OpMemberDecorate %93 1 Offset 64
+               OpMemberDecorate %93 2 Offset 80
+               OpMemberDecorate %93 3 Offset 88
+               OpDecorate %3 Location 0
+               OpDecorate %4 Location 1
+               OpDecorate %5 Location 2
+               OpDecorate %6 Flat
+               OpDecorate %6 Location 3
+               OpDecorate %7 Flat
+               OpDecorate %7 Location 4
+               OpDecorate %137 Block
+               OpMemberDecorate %137 0 Offset 0
+               OpDecorate %95 DescriptorSet 0
+               OpDecorate %95 Binding 0
+               OpDecorate %96 DescriptorSet 0
+               OpDecorate %96 Binding 1
+               OpDecorate %138 Block
+               OpMemberDecorate %138 0 Offset 0
+               OpDecorate %97 DescriptorSet 0
+               OpDecorate %97 Binding 2
+               OpDecorate %139 Block
+               OpMemberDecorate %139 0 Offset 0
+               OpDecorate %98 DescriptorSet 0
+               OpDecorate %98 Binding 3
+               OpDecorate %99 DescriptorSet 0
+               OpDecorate %99 Binding 4
+               OpDecorate %140 Block
+               OpMemberDecorate %140 0 Offset 0
+               OpDecorate %100 DescriptorSet 2
+               OpDecorate %100 Binding 0
+               OpDecorate %101 DescriptorSet 3
+               OpDecorate %101 Binding 0
+               OpDecorate %8 Location 0
+        %141 = OpTypeFloat 32
+        %142 = OpTypeVector %141 4
+        %143 = OpTypeImage %141 2D 2 0 0 1 Unknown
+        %144 = OpTypePointer UniformConstant %143
+        %145 = OpTypeSampler
+        %146 = OpTypeVector %141 2
+        %149 = OpTypePointer UniformConstant %145
+        %150 = OpTypePointer Input %146
+        %151 = OpTypePointer Input %141
+        %153 = OpTypePointer StorageBuffer %141
+        %154 = OpTypePointer Output %142
+        %155 = OpTypePointer StorageBuffer %142
+        %156 = OpTypeSampledImage %143
+        %157 = OpConstant %141 0
+        %158 = OpTypeInt 32 0
+        %159 = OpTypePointer Input %158
+        %160 = OpTypePointer Uniform %158
+        %161 = OpTypePointer PushConstant %158
+        %162 = OpConstant %158 4
+        %163 = OpConstant %158 0
+        %164 = OpConstant %158 1
+        %166 = OpTypeVector %141 3
+        %170 = OpTypePointer Input %166
+        %173 = OpTypePointer PushConstant %166
+        %174 = OpTypePointer StorageBuffer %166
+        %175 = OpConstant %158 2
+        %176 = OpConstant %158 3
+        %177 = OpConstant %158 5
+        %178 = OpConstant %158 6
+        %179 = OpConstant %141 1
+         %75 = OpTypeStruct %166 %142
+        %134 = OpTypeRuntimeArray %75
+        %184 = OpTypeInt 32 1
+         %76 = OpTypeStruct %184 %184 %184 %184 %184 %184 %184 %184 %184
+         %77 = OpTypeStruct %76 %141 %141 %141 %142 %166 %141 %141 %141 %141 %141 %141 %166 %141 %166
+        %135 = OpTypeRuntimeArray %77
+        %136 = OpTypeRuntimeArray %143
+        %187 = OpTypePointer UniformConstant %136
+        %189 = OpTypeVoid
+        %190 = OpTypeVector %158 2
+         %82 = OpTypeStruct %166 %166 %146 %190 %158 %158
+        %195 = OpTypeBool
+        %199 = OpTypePointer StorageBuffer %184
+        %200 = OpConstant %184 -1
+        %203 = OpConstant %141 1.00787401
+        %205 = OpConstant %158 14
+        %206 = OpConstant %158 8
+        %207 = OpConstant %158 13
+        %208 = OpConstant %158 7
+         %91 = OpTypeStruct %142 %142 %142 %142
+         %92 = OpTypeStruct %91
+         %93 = OpTypeStruct %92 %166 %190 %190
+        %211 = OpTypeFunction %189
+          %3 = OpVariable %170 Input
+          %4 = OpVariable %170 Input
+          %5 = OpVariable %150 Input
+          %6 = OpVariable %159 Input
+          %7 = OpVariable %151 Input
+        %137 = OpTypeStruct %93
+        %212 = OpTypePointer PushConstant %137
+         %94 = OpVariable %212 PushConstant
+         %95 = OpVariable %187 UniformConstant
+         %96 = OpVariable %149 UniformConstant
+        %138 = OpTypeStruct %135
+        %213 = OpTypePointer StorageBuffer %138
+         %97 = OpVariable %213 StorageBuffer
+        %139 = OpTypeStruct %82
+        %214 = OpTypePointer Uniform %139
+         %98 = OpVariable %214 Uniform
+         %99 = OpVariable %149 UniformConstant
+        %140 = OpTypeStruct %134
+        %215 = OpTypePointer StorageBuffer %140
+        %100 = OpVariable %215 StorageBuffer
+        %101 = OpVariable %144 UniformConstant
+          %8 = OpVariable %154 Output
+        %216 = OpConstant %141 2
+        %217 = OpTypePointer PushConstant %92
+        %218 = OpConstant %158 9
+        %219 = OpConstant %158 10
+        %220 = OpConstant %158 11
+        %221 = OpConstant %158 12
+        %236 = OpConstant %141 0x1p+128
+       %3024 = OpConstantComposite %166 %203 %203 %203
+       %3026 = OpConstant %141 2.00787401
+       %3027 = OpConstant %141 0.5
+          %2 = OpFunction %189 None %211
+        %364 = OpLabel
+        %365 = OpLoad %166 %3
+        %366 = OpLoad %166 %4
+        %367 = OpLoad %146 %5
+        %368 = OpLoad %158 %6
+        %369 = OpLoad %141 %7
+        %374 = OpArrayLength %158 %100 0
+        %376 = OpLoad %145 %96
+        %377 = OpAccessChain %155 %97 %163 %368 %162
+        %378 = OpLoad %142 %377
+        %380 = OpAccessChain %199 %97 %163 %368 %163 %163
+        %381 = OpLoad %184 %380
+        %382 = OpIEqual %195 %381 %200
+               OpSelectionMerge %383 None
+               OpBranchConditional %382 %384 %385
+        %385 = OpLabel
+        %388 = OpLoad %184 %380
+        %389 = OpBitcast %158 %388
+        %390 = OpAccessChain %144 %95 %389
+       %1412 = OpLoad %143 %390
+       %1413 = OpSampledImage %156 %1412 %376
+       %1414 = OpImageSampleImplicitLod %142 %1413 %367
+        %392 = OpFMul %142 %378 %1414
+               OpBranch %383
+        %384 = OpLabel
+               OpBranch %383
+        %383 = OpLabel
+        %393 = OpPhi %142 %378 %384 %392 %385
+        %394 = OpAccessChain %153 %97 %163 %368 %218
+        %395 = OpLoad %141 %394
+        %397 = OpAccessChain %199 %97 %163 %368 %163 %177
+        %398 = OpLoad %184 %397
+        %399 = OpIEqual %195 %398 %200
+               OpSelectionMerge %400 None
+               OpBranchConditional %399 %401 %402
+        %402 = OpLabel
+        %405 = OpLoad %184 %397
+        %406 = OpBitcast %158 %405
+        %407 = OpAccessChain %144 %95 %406
+       %1417 = OpLoad %143 %407
+       %1418 = OpSampledImage %156 %1417 %376
+       %1419 = OpImageSampleImplicitLod %142 %1418 %367
+        %409 = OpCompositeExtract %141 %1419 0
+        %410 = OpFMul %141 %395 %409
+               OpBranch %400
+        %401 = OpLabel
+               OpBranch %400
+        %400 = OpLabel
+        %411 = OpPhi %141 %395 %401 %410 %402
+        %412 = OpAccessChain %173 %94 %163 %164
+        %413 = OpLoad %166 %412
+        %415 = OpCompositeExtract %141 %413 0
+        %416 = OpCompositeExtract %141 %365 0
+        %417 = OpFSub %141 %415 %416
+        %418 = OpCompositeExtract %141 %413 1
+        %419 = OpCompositeExtract %141 %365 1
+        %420 = OpFSub %141 %418 %419
+        %421 = OpCompositeExtract %141 %413 2
+        %422 = OpCompositeExtract %141 %365 2
+        %423 = OpFSub %141 %421 %422
+        %424 = OpFMul %141 %417 %417
+        %425 = OpFMul %141 %420 %420
+        %426 = OpFAdd %141 %424 %425
+        %427 = OpFMul %141 %423 %423
+        %428 = OpFAdd %141 %426 %427
+        %429 = OpExtInst %141 %1 Sqrt %428
+        %430 = OpFDiv %141 %179 %429
+        %431 = OpFMul %141 %417 %430
+        %432 = OpFMul %141 %420 %430
+        %433 = OpFMul %141 %423 %430
+        %434 = OpCompositeConstruct %166 %431 %432 %433
+        %435 = OpCompositeExtract %141 %366 0
+        %437 = OpFMul %141 %435 %435
+        %438 = OpCompositeExtract %141 %366 1
+        %440 = OpFMul %141 %438 %438
+        %441 = OpFAdd %141 %437 %440
+        %442 = OpCompositeExtract %141 %366 2
+        %444 = OpFMul %141 %442 %442
+        %445 = OpFAdd %141 %441 %444
+        %446 = OpExtInst %141 %1 Sqrt %445
+        %447 = OpFDiv %141 %179 %446
+        %448 = OpVectorTimesScalar %166 %366 %447
+        %450 = OpAccessChain %199 %97 %163 %368 %163 %175
+        %451 = OpLoad %184 %450
+        %452 = OpIEqual %195 %451 %200
+               OpSelectionMerge %453 None
+               OpBranchConditional %452 %454 %455
+        %455 = OpLabel
+        %458 = OpLoad %184 %450
+        %459 = OpBitcast %158 %458
+        %460 = OpAccessChain %144 %95 %459
+       %1428 = OpLoad %143 %460
+       %1429 = OpSampledImage %156 %1428 %376
+       %1430 = OpImageSampleImplicitLod %142 %1429 %367
+        %462 = OpCompositeExtract %141 %1430 0
+        %463 = OpCompositeExtract %141 %1430 1
+        %464 = OpCompositeExtract %141 %1430 2
+        %468 = OpFMul %141 %462 %3026
+        %469 = OpFMul %141 %463 %3026
+        %470 = OpFMul %141 %464 %3026
+        %471 = OpCompositeConstruct %166 %468 %469 %470
+       %1434 = OpFSub %166 %471 %3024
+        %473 = OpFNegate %141 %417
+        %474 = OpFNegate %141 %420
+        %475 = OpFNegate %141 %423
+        %476 = OpCompositeConstruct %166 %473 %474 %475
+       %1531 = OpDPdx %166 %476
+       %1534 = OpDPdy %166 %476
+       %1538 = OpDPdx %146 %367
+       %1541 = OpDPdy %146 %367
+       %1442 = OpCompositeExtract %141 %1534 1
+       %1443 = OpCompositeExtract %141 %448 2
+       %1444 = OpFMul %141 %1442 %1443
+       %1445 = OpCompositeExtract %141 %448 1
+       %1446 = OpCompositeExtract %141 %1534 2
+       %1447 = OpFMul %141 %1445 %1446
+       %1448 = OpFSub %141 %1444 %1447
+       %1450 = OpCompositeExtract %141 %448 0
+       %1451 = OpFMul %141 %1446 %1450
+       %1453 = OpCompositeExtract %141 %1534 0
+       %1454 = OpFMul %141 %1443 %1453
+       %1455 = OpFSub %141 %1451 %1454
+       %1458 = OpFMul %141 %1453 %1445
+       %1461 = OpFMul %141 %1450 %1442
+       %1462 = OpFSub %141 %1458 %1461
+       %1464 = OpCompositeExtract %141 %1531 2
+       %1465 = OpFMul %141 %1445 %1464
+       %1466 = OpCompositeExtract %141 %1531 1
+       %1468 = OpFMul %141 %1466 %1443
+       %1469 = OpFSub %141 %1465 %1468
+       %1471 = OpCompositeExtract %141 %1531 0
+       %1472 = OpFMul %141 %1443 %1471
+       %1475 = OpFMul %141 %1464 %1450
+       %1476 = OpFSub %141 %1472 %1475
+       %1479 = OpFMul %141 %1450 %1466
+       %1482 = OpFMul %141 %1471 %1445
+       %1483 = OpFSub %141 %1479 %1482
+       %1484 = OpCompositeExtract %141 %1538 0
+       %1485 = OpFMul %141 %1448 %1484
+       %1486 = OpFMul %141 %1455 %1484
+       %1487 = OpFMul %141 %1462 %1484
+       %1488 = OpCompositeExtract %141 %1541 0
+       %1489 = OpFMul %141 %1469 %1488
+       %1490 = OpFMul %141 %1476 %1488
+       %1491 = OpFMul %141 %1483 %1488
+       %1492 = OpFAdd %141 %1485 %1489
+       %1493 = OpFAdd %141 %1486 %1490
+       %1494 = OpFAdd %141 %1487 %1491
+       %1495 = OpCompositeExtract %141 %1538 1
+       %1496 = OpFMul %141 %1448 %1495
+       %1497 = OpFMul %141 %1455 %1495
+       %1498 = OpFMul %141 %1462 %1495
+       %1499 = OpCompositeExtract %141 %1541 1
+       %1500 = OpFMul %141 %1469 %1499
+       %1501 = OpFMul %141 %1476 %1499
+       %1502 = OpFMul %141 %1483 %1499
+       %1503 = OpFAdd %141 %1496 %1500
+       %1504 = OpFAdd %141 %1497 %1501
+       %1505 = OpFAdd %141 %1498 %1502
+       %1506 = OpFMul %141 %1492 %1492
+       %1507 = OpFMul %141 %1493 %1493
+       %1508 = OpFAdd %141 %1506 %1507
+       %1509 = OpFMul %141 %1494 %1494
+       %1510 = OpFAdd %141 %1508 %1509
+       %1511 = OpFMul %141 %1503 %1503
+       %1512 = OpFMul %141 %1504 %1504
+       %1513 = OpFAdd %141 %1511 %1512
+       %1514 = OpFMul %141 %1505 %1505
+       %1515 = OpFAdd %141 %1513 %1514
+       %1516 = OpExtInst %141 %1 FMax %1510 %1515
+       %1517 = OpExtInst %141 %1 Sqrt %1516
+       %1518 = OpFDiv %141 %179 %1517
+       %1519 = OpFMul %141 %1492 %1518
+       %1520 = OpFMul %141 %1493 %1518
+       %1521 = OpFMul %141 %1494 %1518
+       %1523 = OpFMul %141 %1503 %1518
+       %1524 = OpFMul %141 %1504 %1518
+       %1525 = OpFMul %141 %1505 %1518
+        %479 = OpCompositeExtract %141 %1434 0
+        %481 = OpFMul %141 %1519 %479
+        %483 = OpFMul %141 %1520 %479
+        %485 = OpFMul %141 %1521 %479
+        %487 = OpCompositeExtract %141 %1434 1
+        %489 = OpFMul %141 %1523 %487
+        %491 = OpFMul %141 %1524 %487
+        %493 = OpFMul %141 %1525 %487
+        %494 = OpFAdd %141 %489 %481
+        %495 = OpFAdd %141 %491 %483
+        %496 = OpFAdd %141 %493 %485
+        %498 = OpCompositeExtract %141 %1434 2
+        %500 = OpFMul %141 %1450 %498
+        %502 = OpFMul %141 %1445 %498
+        %504 = OpFMul %141 %1443 %498
+        %505 = OpFAdd %141 %500 %494
+        %506 = OpFAdd %141 %502 %495
+        %507 = OpFAdd %141 %504 %496
+        %508 = OpFMul %141 %505 %505
+        %509 = OpFMul %141 %506 %506
+        %510 = OpFAdd %141 %508 %509
+        %511 = OpFMul %141 %507 %507
+        %512 = OpFAdd %141 %510 %511
+        %513 = OpExtInst %141 %1 Sqrt %512
+        %514 = OpFDiv %141 %179 %513
+        %515 = OpFMul %141 %505 %514
+        %516 = OpFMul %141 %506 %514
+        %517 = OpFMul %141 %507 %514
+        %518 = OpCompositeConstruct %166 %515 %516 %517
+               OpBranch %453
+        %454 = OpLabel
+               OpBranch %453
+        %453 = OpLabel
+        %519 = OpPhi %166 %448 %454 %518 %455
+        %520 = OpAccessChain %153 %97 %163 %368 %164
+        %521 = OpLoad %141 %520
+        %522 = OpAccessChain %153 %97 %163 %368 %175
+        %523 = OpLoad %141 %522
+        %525 = OpAccessChain %199 %97 %163 %368 %163 %164
+        %526 = OpLoad %184 %525
+        %527 = OpIEqual %195 %526 %200
+               OpSelectionMerge %528 None
+               OpBranchConditional %527 %529 %530
+        %530 = OpLabel
+        %533 = OpLoad %184 %525
+        %534 = OpBitcast %158 %533
+        %535 = OpAccessChain %144 %95 %534
+       %1544 = OpLoad %143 %535
+       %1545 = OpSampledImage %156 %1544 %376
+       %1546 = OpImageSampleImplicitLod %142 %1545 %367
+        %537 = OpCompositeExtract %141 %1546 2
+        %538 = OpCompositeExtract %141 %1546 1
+        %539 = OpFMul %141 %521 %537
+        %540 = OpFMul %141 %523 %538
+               OpBranch %528
+        %529 = OpLabel
+               OpBranch %528
+        %528 = OpLabel
+        %541 = OpPhi %141 %523 %529 %540 %530
+        %542 = OpPhi %141 %521 %529 %539 %530
+        %543 = OpAccessChain %174 %97 %163 %368 %205
+        %544 = OpLoad %166 %543
+        %547 = OpAccessChain %199 %97 %163 %368 %163 %206
+        %548 = OpLoad %184 %547
+        %549 = OpIEqual %195 %548 %200
+               OpSelectionMerge %550 None
+               OpBranchConditional %549 %551 %552
+        %552 = OpLabel
+        %555 = OpLoad %184 %547
+        %556 = OpBitcast %158 %555
+        %557 = OpAccessChain %144 %95 %556
+       %1555 = OpLoad %143 %557
+       %1556 = OpSampledImage %156 %1555 %376
+       %1557 = OpImageSampleImplicitLod %142 %1556 %367
+        %559 = OpCompositeExtract %141 %1557 0
+        %560 = OpCompositeExtract %141 %1557 1
+        %561 = OpCompositeExtract %141 %1557 2
+        %562 = OpCompositeConstruct %166 %559 %560 %561
+        %563 = OpFMul %166 %544 %562
+               OpBranch %550
+        %551 = OpLabel
+               OpBranch %550
+        %550 = OpLabel
+        %564 = OpPhi %166 %544 %551 %563 %552
+        %565 = OpAccessChain %153 %97 %163 %368 %207
+        %566 = OpLoad %141 %565
+        %568 = OpAccessChain %199 %97 %163 %368 %163 %208
+        %569 = OpLoad %184 %568
+        %570 = OpIEqual %195 %569 %200
+               OpSelectionMerge %571 None
+               OpBranchConditional %570 %572 %573
+        %573 = OpLabel
+        %576 = OpLoad %184 %568
+        %577 = OpBitcast %158 %576
+        %578 = OpAccessChain %144 %95 %577
+       %1560 = OpLoad %143 %578
+       %1561 = OpSampledImage %156 %1560 %376
+       %1562 = OpImageSampleImplicitLod %142 %1561 %367
+        %580 = OpCompositeExtract %141 %1562 3
+        %581 = OpFMul %141 %566 %580
+               OpBranch %571
+        %572 = OpLabel
+               OpBranch %571
+        %571 = OpLabel
+        %582 = OpPhi %141 %566 %572 %581 %573
+        %583 = OpCompositeExtract %141 %393 0
+        %584 = OpCompositeExtract %141 %393 1
+        %585 = OpCompositeExtract %141 %393 2
+        %587 = OpAccessChain %153 %97 %163 %368 %206
+        %588 = OpLoad %141 %587
+        %590 = OpAccessChain %174 %97 %163 %368 %177
+        %591 = OpLoad %166 %590
+        %594 = OpAccessChain %199 %97 %163 %368 %163 %176
+        %595 = OpLoad %184 %594
+        %596 = OpIEqual %195 %595 %200
+               OpSelectionMerge %597 None
+               OpBranchConditional %596 %598 %599
+        %599 = OpLabel
+        %602 = OpLoad %184 %594
+        %603 = OpBitcast %158 %602
+        %604 = OpAccessChain %144 %95 %603
+       %1571 = OpLoad %143 %604
+       %1572 = OpSampledImage %156 %1571 %376
+       %1573 = OpImageSampleImplicitLod %142 %1572 %367
+        %606 = OpCompositeExtract %141 %1573 0
+        %607 = OpCompositeExtract %141 %1573 1
+        %608 = OpCompositeExtract %141 %1573 2
+        %609 = OpCompositeConstruct %166 %606 %607 %608
+        %610 = OpFMul %166 %591 %609
+               OpBranch %597
+        %598 = OpLabel
+               OpBranch %597
+        %597 = OpLabel
+        %611 = OpPhi %166 %591 %598 %610 %599
+               OpBranch %626
+        %626 = OpLabel
+        %627 = OpPhi %158 %163 %597 %628 %629
+               OpLoopMerge %634 %629 None
+               OpBranch %635
+        %635 = OpLabel
+        %636 = OpULessThan %195 %627 %374
+               OpSelectionMerge %638 None
+               OpBranchConditional %636 %638 %639
+        %639 = OpLabel
+        %662 = OpAccessChain %153 %97 %163 %368 %219
+        %663 = OpLoad %141 %662
+        %665 = OpAccessChain %199 %97 %163 %368 %163 %178
+        %666 = OpLoad %184 %665
+        %667 = OpIEqual %195 %666 %200
+               OpSelectionMerge %668 None
+               OpBranchConditional %667 %669 %670
+        %670 = OpLabel
+        %673 = OpLoad %184 %665
+        %674 = OpBitcast %158 %673
+        %675 = OpAccessChain %144 %95 %674
+       %2827 = OpLoad %143 %675
+       %2828 = OpSampledImage %156 %2827 %376
+       %2829 = OpImageSampleImplicitLod %142 %2828 %367
+        %677 = OpCompositeExtract %141 %2829 1
+        %678 = OpFMul %141 %663 %677
+               OpBranch %668
+        %669 = OpLabel
+               OpBranch %668
+        %668 = OpLabel
+        %679 = OpPhi %141 %663 %669 %678 %670
+        %680 = OpAccessChain %217 %94 %163 %163
+        %681 = OpLoad %92 %680
+        %683 = OpAccessChain %161 %94 %163 %175 %163
+        %684 = OpLoad %158 %683
+        %685 = OpAccessChain %153 %97 %163 %368 %220
+        %686 = OpLoad %141 %685
+        %687 = OpAccessChain %174 %97 %163 %368 %221
+        %688 = OpLoad %166 %687
+       %2842 = OpFNegate %166 %434
+       %2871 = OpFDiv %141 %179 %588
+       %2872 = OpCompositeExtract %141 %519 0
+       %2873 = OpCompositeExtract %141 %2842 0
+       %2874 = OpFMul %141 %2872 %2873
+       %2875 = OpCompositeExtract %141 %519 1
+       %2876 = OpCompositeExtract %141 %2842 1
+       %2877 = OpFMul %141 %2875 %2876
+       %2878 = OpFAdd %141 %2874 %2877
+       %2879 = OpCompositeExtract %141 %519 2
+       %2880 = OpCompositeExtract %141 %2842 2
+       %2881 = OpFMul %141 %2879 %2880
+       %2882 = OpFAdd %141 %2878 %2881
+       %2883 = OpFMul %141 %2871 %2871
+       %2884 = OpFMul %141 %2882 %2882
+       %2885 = OpFSub %141 %179 %2884
+       %2886 = OpFMul %141 %2883 %2885
+       %2887 = OpFSub %141 %179 %2886
+       %2889 = OpFMul %141 %2871 %2873
+       %2891 = OpFMul %141 %2871 %2876
+       %2893 = OpFMul %141 %2871 %2880
+       %2894 = OpFMul %141 %2871 %2882
+       %2895 = OpExtInst %141 %1 Sqrt %2887
+       %2896 = OpFAdd %141 %2894 %2895
+       %2898 = OpFMul %141 %2896 %2872
+       %2900 = OpFMul %141 %2896 %2875
+       %2902 = OpFMul %141 %2896 %2879
+       %2903 = OpFSub %141 %2889 %2898
+       %2904 = OpFSub %141 %2891 %2900
+       %2905 = OpFSub %141 %2893 %2902
+       %2844 = OpFMul %141 %679 %369
+       %2847 = OpFMul %141 %2903 %2903
+       %2850 = OpFMul %141 %2904 %2904
+       %2851 = OpFAdd %141 %2847 %2850
+       %2854 = OpFMul %141 %2905 %2905
+       %2855 = OpFAdd %141 %2851 %2854
+       %2856 = OpExtInst %141 %1 Sqrt %2855
+       %2857 = OpFDiv %141 %179 %2856
+       %2859 = OpFMul %141 %2903 %2857
+       %2861 = OpFMul %141 %2904 %2857
+       %2863 = OpFMul %141 %2905 %2857
+       %2864 = OpFMul %141 %2859 %2844
+       %2865 = OpFMul %141 %2861 %2844
+       %2866 = OpFMul %141 %2863 %2844
+        %699 = OpFAdd %141 %416 %2864
+        %702 = OpFAdd %141 %419 %2865
+        %705 = OpFAdd %141 %422 %2866
+        %706 = OpCompositeExtract %142 %681 0 0
+        %707 = OpCompositeExtract %141 %706 0
+        %708 = OpFMul %141 %707 %699
+        %709 = OpCompositeExtract %141 %706 1
+        %710 = OpFMul %141 %709 %699
+        %711 = OpCompositeExtract %141 %706 3
+        %712 = OpFMul %141 %711 %699
+        %713 = OpCompositeExtract %142 %681 0 1
+        %714 = OpCompositeExtract %141 %713 0
+        %715 = OpFMul %141 %714 %702
+        %716 = OpFAdd %141 %715 %708
+        %717 = OpCompositeExtract %141 %713 1
+        %718 = OpFMul %141 %717 %702
+        %719 = OpFAdd %141 %718 %710
+        %720 = OpCompositeExtract %141 %713 3
+        %721 = OpFMul %141 %720 %702
+        %722 = OpFAdd %141 %721 %712
+        %723 = OpCompositeExtract %142 %681 0 2
+        %724 = OpCompositeExtract %141 %723 0
+        %725 = OpFMul %141 %724 %705
+        %726 = OpFAdd %141 %725 %716
+        %727 = OpCompositeExtract %141 %723 1
+        %728 = OpFMul %141 %727 %705
+        %729 = OpFAdd %141 %728 %719
+        %730 = OpCompositeExtract %141 %723 3
+        %731 = OpFMul %141 %730 %705
+        %732 = OpFAdd %141 %731 %722
+        %733 = OpCompositeExtract %142 %681 0 3
+        %734 = OpCompositeExtract %141 %733 0
+        %736 = OpFAdd %141 %734 %726
+        %737 = OpCompositeExtract %141 %733 1
+        %739 = OpFAdd %141 %737 %729
+        %740 = OpCompositeExtract %141 %733 3
+        %742 = OpFAdd %141 %740 %732
+        %743 = OpFDiv %141 %736 %742
+        %744 = OpFDiv %141 %739 %742
+        %745 = OpFAdd %141 %743 %179
+        %746 = OpFAdd %141 %744 %179
+        %747 = OpFMul %141 %745 %3027
+        %748 = OpFMul %141 %746 %3027
+        %749 = OpCompositeConstruct %146 %747 %748
+        %750 = OpConvertUToF %141 %684
+        %751 = OpExtInst %141 %1 Log2 %750
+       %2909 = OpFMul %141 %588 %216
+       %2910 = OpFSub %141 %2909 %216
+       %2915 = OpExtInst %141 %1 FMax %2910 %157
+       %2916 = OpExtInst %141 %1 FMin %2915 %179
+       %2912 = OpFMul %141 %541 %2916
+        %753 = OpFMul %141 %751 %2912
+        %754 = OpLoad %145 %99
+       %2919 = OpLoad %143 %101
+       %2920 = OpSampledImage %156 %2919 %754
+       %2921 = OpImageSampleExplicitLod %142 %2920 %749 Lod %753
+        %756 = OpCompositeExtract %141 %2921 0
+        %757 = OpCompositeExtract %141 %2921 1
+        %758 = OpCompositeExtract %141 %2921 2
+        %759 = OpCompositeConstruct %166 %756 %757 %758
+       %2924 = OpFOrdEqual %195 %686 %236
+               OpSelectionMerge %2948 None
+               OpBranchConditional %2924 %2925 %2926
+       %2926 = OpLabel
+       %2958 = OpExtInst %166 %1 Log %688
+       %2928 = OpCompositeExtract %141 %2958 0
+       %2929 = OpFNegate %141 %2928
+       %2930 = OpCompositeExtract %141 %2958 1
+       %2931 = OpFNegate %141 %2930
+       %2932 = OpCompositeExtract %141 %2958 2
+       %2933 = OpFNegate %141 %2932
+       %2934 = OpFDiv %141 %2929 %686
+       %2935 = OpFDiv %141 %2931 %686
+       %2936 = OpFDiv %141 %2933 %686
+       %2937 = OpFNegate %141 %2934
+       %2938 = OpFNegate %141 %2935
+       %2939 = OpFNegate %141 %2936
+       %2940 = OpFMul %141 %2937 %2844
+       %2941 = OpFMul %141 %2938 %2844
+       %2942 = OpFMul %141 %2939 %2844
+       %2943 = OpExtInst %141 %1 Exp %2940
+       %2944 = OpExtInst %141 %1 Exp %2941
+       %2945 = OpExtInst %141 %1 Exp %2942
+       %2946 = OpCompositeConstruct %166 %2943 %2944 %2945
+       %2947 = OpFMul %166 %2946 %759
+               OpBranch %2948
+       %2925 = OpLabel
+               OpBranch %2948
+       %2948 = OpLabel
+       %2949 = OpPhi %166 %759 %2925 %2947 %2926
+        %763 = OpFMul %141 %2872 %431
+        %766 = OpFMul %141 %2875 %432
+        %767 = OpFAdd %141 %763 %766
+        %770 = OpFMul %141 %2879 %433
+        %771 = OpFAdd %141 %767 %770
+        %772 = OpCompositeConstruct %146 %771 %541
+        %773 = OpAccessChain %160 %98 %163 %177
+        %774 = OpLoad %158 %773
+        %775 = OpAccessChain %144 %95 %774
+       %2961 = OpLoad %143 %775
+       %2962 = OpSampledImage %156 %2961 %754
+       %2963 = OpImageSampleImplicitLod %142 %2962 %772
+        %778 = OpCompositeExtract %141 %2963 0
+        %779 = OpCompositeExtract %141 %2963 1
+       %2967 = OpFSub %141 %588 %179
+       %2969 = OpFAdd %141 %588 %179
+       %2970 = OpFDiv %141 %2967 %2969
+       %2971 = OpFMul %141 %2970 %2970
+       %2973 = OpCompositeExtract %141 %564 0
+       %2974 = OpFMul %141 %2971 %2973
+       %2975 = OpCompositeExtract %141 %564 1
+       %2976 = OpFMul %141 %2971 %2975
+       %2977 = OpCompositeExtract %141 %564 2
+       %2978 = OpFMul %141 %2971 %2977
+       %2980 = OpFMul %141 %2974 %582
+       %2981 = OpFMul %141 %2976 %582
+       %2982 = OpFMul %141 %2978 %582
+       %2986 = OpFSub %141 %583 %2980
+       %2988 = OpFSub %141 %584 %2981
+       %2990 = OpFSub %141 %585 %2982
+       %2991 = OpFMul %141 %2986 %542
+       %2992 = OpFMul %141 %2988 %542
+       %2993 = OpFMul %141 %2990 %542
+       %2994 = OpFAdd %141 %2980 %2991
+       %2995 = OpFAdd %141 %2981 %2992
+       %2996 = OpFAdd %141 %2982 %2993
+       %3003 = OpFSub %141 %179 %582
+       %3008 = OpFMul %141 %3003 %542
+       %3011 = OpFAdd %141 %582 %3008
+        %783 = OpFMul %141 %2994 %778
+        %785 = OpFMul %141 %2995 %778
+        %787 = OpFMul %141 %2996 %778
+        %789 = OpFMul %141 %3011 %779
+        %794 = OpFAdd %141 %783 %789
+        %795 = OpFAdd %141 %785 %789
+        %796 = OpFAdd %141 %787 %789
+        %797 = OpFSub %141 %179 %794
+        %798 = OpFSub %141 %179 %795
+        %799 = OpFSub %141 %179 %796
+        %800 = OpCompositeExtract %141 %2949 0
+        %801 = OpFMul %141 %797 %800
+        %802 = OpCompositeExtract %141 %2949 1
+        %803 = OpFMul %141 %798 %802
+        %804 = OpCompositeExtract %141 %2949 2
+        %805 = OpFMul %141 %799 %804
+        %807 = OpFMul %141 %801 %583
+        %809 = OpFMul %141 %803 %584
+        %811 = OpFMul %141 %805 %585
+        %818 = OpFMul %141 %411 %807
+        %819 = OpFMul %141 %411 %809
+        %820 = OpFMul %141 %411 %811
+        %827 = OpFMul %141 %818 %411
+        %828 = OpFMul %141 %819 %411
+        %829 = OpFMul %141 %820 %411
+        %842 = OpCompositeExtract %141 %611 0
+        %843 = OpFAdd %141 %827 %842
+        %844 = OpCompositeExtract %141 %611 1
+        %845 = OpFAdd %141 %828 %844
+        %846 = OpCompositeExtract %141 %611 2
+        %847 = OpFAdd %141 %829 %846
+        %848 = OpCompositeConstruct %142 %843 %845 %847 %179
+               OpStore %8 %848
+               OpBranch %634
+        %638 = OpLabel
+        %628 = OpIAdd %158 %627 %164
+               OpBranch %629
+        %629 = OpLabel
+               OpBranch %626
+        %634 = OpLabel
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _75
+{
+    float3 _m0;
+    float4 _m1;
+};
+
+struct _76
+{
+    int _m0;
+    int _m1;
+    int _m2;
+    int _m3;
+    int _m4;
+    int _m5;
+    int _m6;
+    int _m7;
+    int _m8;
+};
+
+struct _77
+{
+    _76 _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    float4 _m4;
+    float3 _m5;
+    float _m6;
+    float _m7;
+    float _m8;
+    float _m9;
+    float _m10;
+    float _m11;
+    float3 _m12;
+    float _m13;
+    float3 _m14;
+};
+
+struct _82
+{
+    float3 _m0;
+    float3 _m1;
+    float2 _m2;
+    uint2 _m3;
+    uint _m4;
+    uint _m5;
+};
+
+struct _91
+{
+    float4 _m0;
+    float4 _m1;
+    float4 _m2;
+    float4 _m3;
+};
+
+struct _92
+{
+    _91 _m0;
+};
+
+struct _93
+{
+    _92 _m0;
+    float3 _m1;
+    uint2 _m2;
+    uint2 _m3;
+};
+
+struct _137
+{
+    _93 _m0;
+};
+
+struct _138
+{
+    _77 _m0[1];
+};
+
+struct _139
+{
+    _82 _m0;
+};
+
+struct _140
+{
+    _75 _m0[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    array<texture2d<float>, 127> m_95 [[id(0)]];
+    sampler m_96 [[id(127)]];
+    device _138* m_97 [[id(128)]];
+    constant _139* m_98 [[id(129)]];
+    sampler m_99 [[id(130)]];
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant uint* spvBufferSizeConstants [[id(0)]];
+    device _140* m_100 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer3
+{
+    texture2d<float> m_101 [[id(0)]];
+};
+
+struct fragment_transmission_out
+{
+    float4 m_8 [[color(0)]];
+};
+
+struct fragment_transmission_in
+{
+    float3 m_3 [[user(locn0)]];
+    float3 m_4 [[user(locn1)]];
+    float2 m_5 [[user(locn2)]];
+    uint m_6 [[user(locn3)]];
+    float m_7 [[user(locn4), flat]];
+};
+
+fragment fragment_transmission_out fragment_transmission(fragment_transmission_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], constant spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]], constant uint* spvBufferSizeConstants [[buffer(6)]], constant _137& _94 [[buffer(4)]])
+{
+    fragment_transmission_out out = {};
+    constant uint& spvDescriptorSet2_m_100BufferSize = spvDescriptorSet2.spvBufferSizeConstants[0];
+    uint _374 = (spvDescriptorSet2_m_100BufferSize - 0) / 32;
+    float4 _393;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m0 == (-1))
+    {
+        _393 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m4;
+    }
+    else
+    {
+        uint _389 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m0);
+        _393 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m4 * spvDescriptorSet0.m_95[_389].sample(spvDescriptorSet0.m_96, in.m_5);
+    }
+    float _411;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m5 == (-1))
+    {
+        _411 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m9;
+    }
+    else
+    {
+        uint _406 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m5);
+        _411 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m9 * spvDescriptorSet0.m_95[_406].sample(spvDescriptorSet0.m_96, in.m_5).x;
+    }
+    float _417 = _94._m0._m1.x - in.m_3.x;
+    float _420 = _94._m0._m1.y - in.m_3.y;
+    float _423 = _94._m0._m1.z - in.m_3.z;
+    float _430 = 1.0 / sqrt(((_417 * _417) + (_420 * _420)) + (_423 * _423));
+    float _431 = _417 * _430;
+    float _432 = _420 * _430;
+    float _433 = _423 * _430;
+    float3 _434 = float3(_431, _432, _433);
+    float3 _448 = in.m_4 * (1.0 / sqrt(((in.m_4.x * in.m_4.x) + (in.m_4.y * in.m_4.y)) + (in.m_4.z * in.m_4.z)));
+    float3 _519;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m2 == (-1))
+    {
+        _519 = _448;
+    }
+    else
+    {
+        uint _459 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m2);
+        float4 _1430 = spvDescriptorSet0.m_95[_459].sample(spvDescriptorSet0.m_96, in.m_5);
+        float3 _1434 = float3(_1430.x * 2.007874011993408203125, _1430.y * 2.007874011993408203125, _1430.z * 2.007874011993408203125) - float3(1.007874011993408203125);
+        float3 _476 = float3(-_417, -_420, -_423);
+        float3 _1531 = dfdx(_476);
+        float3 _1534 = dfdy(_476);
+        float2 _1538 = dfdx(in.m_5);
+        float2 _1541 = dfdy(in.m_5);
+        float _1442 = _1534.y;
+        float _1443 = _448.z;
+        float _1445 = _448.y;
+        float _1446 = _1534.z;
+        float _1448 = (_1442 * _1443) - (_1445 * _1446);
+        float _1450 = _448.x;
+        float _1453 = _1534.x;
+        float _1455 = (_1446 * _1450) - (_1443 * _1453);
+        float _1462 = (_1453 * _1445) - (_1450 * _1442);
+        float _1464 = _1531.z;
+        float _1466 = _1531.y;
+        float _1469 = (_1445 * _1464) - (_1466 * _1443);
+        float _1471 = _1531.x;
+        float _1476 = (_1443 * _1471) - (_1464 * _1450);
+        float _1483 = (_1450 * _1466) - (_1471 * _1445);
+        float _1484 = _1538.x;
+        float _1488 = _1541.x;
+        float _1492 = (_1448 * _1484) + (_1469 * _1488);
+        float _1493 = (_1455 * _1484) + (_1476 * _1488);
+        float _1494 = (_1462 * _1484) + (_1483 * _1488);
+        float _1495 = _1538.y;
+        float _1499 = _1541.y;
+        float _1503 = (_1448 * _1495) + (_1469 * _1499);
+        float _1504 = (_1455 * _1495) + (_1476 * _1499);
+        float _1505 = (_1462 * _1495) + (_1483 * _1499);
+        float _1518 = 1.0 / sqrt(fast::max(((_1492 * _1492) + (_1493 * _1493)) + (_1494 * _1494), ((_1503 * _1503) + (_1504 * _1504)) + (_1505 * _1505)));
+        float _479 = _1434.x;
+        float _487 = _1434.y;
+        float _498 = _1434.z;
+        float _505 = (_1450 * _498) + (((_1503 * _1518) * _487) + ((_1492 * _1518) * _479));
+        float _506 = (_1445 * _498) + (((_1504 * _1518) * _487) + ((_1493 * _1518) * _479));
+        float _507 = (_1443 * _498) + (((_1505 * _1518) * _487) + ((_1494 * _1518) * _479));
+        float _514 = 1.0 / sqrt(((_505 * _505) + (_506 * _506)) + (_507 * _507));
+        _519 = float3(_505 * _514, _506 * _514, _507 * _514);
+    }
+    float _541;
+    float _542;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m1 == (-1))
+    {
+        _541 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m2;
+        _542 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m1;
+    }
+    else
+    {
+        uint _534 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m1);
+        float4 _1546 = spvDescriptorSet0.m_95[_534].sample(spvDescriptorSet0.m_96, in.m_5);
+        _541 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m2 * _1546.y;
+        _542 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m1 * _1546.z;
+    }
+    float3 _564;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m8 == (-1))
+    {
+        _564 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m14;
+    }
+    else
+    {
+        uint _556 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m8);
+        _564 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m14 * float3(spvDescriptorSet0.m_95[_556].sample(spvDescriptorSet0.m_96, in.m_5).xyz);
+    }
+    float _582;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m7 == (-1))
+    {
+        _582 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m13;
+    }
+    else
+    {
+        uint _577 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m7);
+        _582 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m13 * spvDescriptorSet0.m_95[_577].sample(spvDescriptorSet0.m_96, in.m_5).w;
+    }
+    float3 _611;
+    if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m3 == (-1))
+    {
+        _611 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m5;
+    }
+    else
+    {
+        uint _603 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m3);
+        _611 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m5 * float3(spvDescriptorSet0.m_95[_603].sample(spvDescriptorSet0.m_96, in.m_5).xyz);
+    }
+    uint _628;
+    uint _627 = 0u;
+    for (;;)
+    {
+        if (!(_627 < _374))
+        {
+            float _679;
+            if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m6 == (-1))
+            {
+                _679 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m10;
+            }
+            else
+            {
+                uint _674 = uint((*spvDescriptorSet0.m_97)._m0[in.m_6]._m0._m6);
+                _679 = (*spvDescriptorSet0.m_97)._m0[in.m_6]._m10 * spvDescriptorSet0.m_95[_674].sample(spvDescriptorSet0.m_96, in.m_5).y;
+            }
+            float3 _2842 = -_434;
+            float _2871 = 1.0 / (*spvDescriptorSet0.m_97)._m0[in.m_6]._m8;
+            float _2873 = _2842.x;
+            float _2876 = _2842.y;
+            float _2880 = _2842.z;
+            float _2882 = ((_519.x * _2873) + (_519.y * _2876)) + (_519.z * _2880);
+            float _2896 = (_2871 * _2882) + sqrt(1.0 - ((_2871 * _2871) * (1.0 - (_2882 * _2882))));
+            float _2903 = (_2871 * _2873) - (_2896 * _519.x);
+            float _2904 = (_2871 * _2876) - (_2896 * _519.y);
+            float _2905 = (_2871 * _2880) - (_2896 * _519.z);
+            float _2844 = _679 * in.m_7;
+            float _2857 = 1.0 / sqrt(((_2903 * _2903) + (_2904 * _2904)) + (_2905 * _2905));
+            float _699 = in.m_3.x + ((_2903 * _2857) * _2844);
+            float _702 = in.m_3.y + ((_2904 * _2857) * _2844);
+            float _705 = in.m_3.z + ((_2905 * _2857) * _2844);
+            float _742 = _94._m0._m0._m0._m3.w + ((_94._m0._m0._m0._m2.w * _705) + ((_94._m0._m0._m0._m1.w * _702) + (_94._m0._m0._m0._m0.w * _699)));
+            float3 _759 = float3(spvDescriptorSet3.m_101.sample(spvDescriptorSet0.m_99, float2((((_94._m0._m0._m0._m3.x + ((_94._m0._m0._m0._m2.x * _705) + ((_94._m0._m0._m0._m1.x * _702) + (_94._m0._m0._m0._m0.x * _699)))) / _742) + 1.0) * 0.5, (((_94._m0._m0._m0._m3.y + ((_94._m0._m0._m0._m2.y * _705) + ((_94._m0._m0._m0._m1.y * _702) + (_94._m0._m0._m0._m0.y * _699)))) / _742) + 1.0) * 0.5), level(log2(float(_94._m0._m2.x)) * (_541 * fast::min(fast::max(((*spvDescriptorSet0.m_97)._m0[in.m_6]._m8 * 2.0) - 2.0, 0.0), 1.0)))).xyz);
+            float3 _2949;
+            if ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m11 == as_type<float>(0x7f800000u /* inf */))
+            {
+                _2949 = _759;
+            }
+            else
+            {
+                float3 _2958 = log((*spvDescriptorSet0.m_97)._m0[in.m_6]._m12);
+                _2949 = float3(exp((-((-_2958.x) / (*spvDescriptorSet0.m_97)._m0[in.m_6]._m11)) * _2844), exp((-((-_2958.y) / (*spvDescriptorSet0.m_97)._m0[in.m_6]._m11)) * _2844), exp((-((-_2958.z) / (*spvDescriptorSet0.m_97)._m0[in.m_6]._m11)) * _2844)) * _759;
+            }
+            float4 _2963 = spvDescriptorSet0.m_95[(*spvDescriptorSet0.m_98)._m0._m5].sample(spvDescriptorSet0.m_99, float2(((_519.x * _431) + (_519.y * _432)) + (_519.z * _433), _541));
+            float _778 = _2963.x;
+            float _2970 = ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m8 - 1.0) / ((*spvDescriptorSet0.m_97)._m0[in.m_6]._m8 + 1.0);
+            float _2971 = _2970 * _2970;
+            float _2980 = (_2971 * _564.x) * _582;
+            float _2981 = (_2971 * _564.y) * _582;
+            float _2982 = (_2971 * _564.z) * _582;
+            float _789 = (_582 + ((1.0 - _582) * _542)) * _2963.y;
+            out.m_8 = float4(((_411 * (((1.0 - (((_2980 + ((_393.x - _2980) * _542)) * _778) + _789)) * _2949.x) * _393.x)) * _411) + _611.x, ((_411 * (((1.0 - (((_2981 + ((_393.y - _2981) * _542)) * _778) + _789)) * _2949.y) * _393.y)) * _411) + _611.y, ((_411 * (((1.0 - (((_2982 + ((_393.z - _2982) * _542)) * _778) + _789)) * _2949.z) * _393.z)) * _411) + _611.z, 1.0);
+            break;
+        }
+        _628 = _627 + 1u;
+        _627 = _628;
+        continue;
+    }
+    return out;
+}
+
+
+End MSL
+
+Original GLSL extraction error: Buffer block cannot be expressed as any of std430, std140, scalar, even with enhanced layouts. You can try flattening this block to support a more flexible layout.
+
+Partially converted GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+struct _75
+{
+    vec3 _m0;
+    vec4 _m1;
+};
+
+struct _76
+{
+    int _m0;
+    int _m1;
+    int _m2;
+    int _m3;
+    int _m4;
+    int _m5;
+    int _m6;
+    int _m7;
+    int _m8;
+};
+
+struct _77
+{
+    _76 _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    vec4 _m4;
+    vec3 _m5;
+    float _m6;
+    float _m7;
+    float _m8;
+    float _m9;
+    float _m10;
+    float _m11;
+    vec3 _m12;
+    float _m13;
+    vec3 _m14;
+};
+
+struct _82
+{
+    vec3 _m0;
+    vec3 _m1;
+    vec2 _m2;
+    uvec2 _m3;
+    uint _m4;
+    uint _m5;
+};
+
+struct _91
+{
+    vec4 _m0;
+    vec4 _m1;
+    vec4 _m2;
+    vec4 _m3;
+};
+
+struct _92
+{
+    _91 _m0;
+};
+
+struct _93
+{
+    _92 _m0;
+    vec3 _m1;
+    uvec2 _m2;
+    uvec2 _m3;
+};
+
+
+End GLSL
+
+
+[mvk-error] VK_ERROR_INITIALIZATION_FAILED: Shader library compile failed (Error code 3):
+program_source:129:201: error: cannot assign resource locations to 'spvDescriptorSet2'
+fragment fragment_transmission_out fragment_transmission(fragment_transmission_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], constant spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]], constant uint* spvBufferSizeConstants [[buffer(6)]], constant _137& _94 [[buffer(4)]])
+                                                                                                                                                                                                        ^
+program_source:107:18: note: attribute 'id' set location to 0, but minimum is 1
+    device _140* m_100 [[id(0)]];
+                 ^       ~~~~~
+.
+[mvk-error] VK_ERROR_INVALID_SHADER_NV: Fragment shader function could not be compiled into pipeline. See previous logged error.
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 46
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Vertex %1 "fullscreen_tri" %2 %3 %4
+               OpDecorate %4 BuiltIn Position
+               OpDecorate %2 BuiltIn VertexIndex
+               OpDecorate %3 Location 0
+         %11 = OpTypeFloat 32
+         %12 = OpTypeVector %11 4
+         %13 = OpTypeVector %11 2
+         %14 = OpTypePointer Output %13
+         %15 = OpTypePointer Output %12
+         %16 = OpConstant %11 0
+         %17 = OpConstant %11 1
+         %18 = OpTypeInt 32 1
+         %19 = OpTypeVoid
+         %20 = OpTypePointer Input %18
+         %21 = OpTypeFunction %19
+          %4 = OpVariable %15 Output
+          %2 = OpVariable %20 Input
+          %3 = OpVariable %14 Output
+         %22 = OpConstant %11 2
+         %23 = OpConstant %18 1
+         %25 = OpConstant %18 2
+          %1 = OpFunction %19 None %21
+         %27 = OpLabel
+         %28 = OpLoad %18 %2
+         %30 = OpShiftLeftLogical %18 %28 %23
+         %31 = OpBitwiseAnd %18 %30 %25
+         %32 = OpConvertSToF %11 %31
+         %33 = OpBitwiseAnd %18 %28 %25
+         %34 = OpConvertSToF %11 %33
+         %35 = OpCompositeConstruct %13 %32 %34
+               OpStore %3 %35
+         %36 = OpLoad %13 %3
+         %37 = OpCompositeExtract %11 %36 0
+         %38 = OpFMul %11 %22 %37
+         %39 = OpCompositeExtract %11 %36 1
+         %40 = OpFMul %11 %22 %39
+         %42 = OpFSub %11 %38 %17
+         %44 = OpFSub %11 %40 %17
+         %45 = OpCompositeConstruct %12 %42 %44 %16 %17
+               OpStore %4 %45
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct fullscreen_tri_out
+{
+    float2 m_3 [[user(locn0)]];
+    float4 gl_Position [[position]];
+};
+
+vertex fullscreen_tri_out fullscreen_tri(uint gl_VertexIndex [[vertex_id]])
+{
+    fullscreen_tri_out out = {};
+    out.m_3 = float2(float((int(gl_VertexIndex) << 1) & 2), float(int(gl_VertexIndex) & 2));
+    out.gl_Position = float4((2.0 * out.m_3.x) - 1.0, (2.0 * out.m_3.y) - 1.0, 0.0, 1.0);
+    out.gl_Position.y = -(out.gl_Position.y);    // Invert Y-axis for Metal
+    return out;
+}
+
+
+End MSL
+
+Estimated original GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+out gl_PerVertex
+{
+    vec4 gl_Position;
+};
+
+layout(location = 0) out vec2 _3;
+
+void main()
+{
+    _3 = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
+    gl_Position = vec4((2.0 * _3.x) - 1.0, (2.0 * _3.y) - 1.0, 0.0, 1.0);
+}
+
+
+End GLSL
+
+
+[mvk-info] Converting SPIR-V:
+; SPIR-V
+; Version: 1.3
+; Generator: Embark Studios Rust GPU Compiler Backend; 0
+; Bound: 219
+; Schema: 0
+               OpCapability RuntimeDescriptorArray
+               OpCapability Shader
+               OpExtension "SPV_EXT_descriptor_indexing"
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical Simple
+               OpEntryPoint Fragment %2 "fragment_tonemap" %3 %4
+               OpExecutionMode %2 OriginUpperLeft
+               OpMemberDecorate %20 0 Offset 0
+               OpMemberDecorate %20 1 Offset 4
+               OpMemberDecorate %20 2 Offset 8
+               OpMemberDecorate %20 3 Offset 12
+               OpMemberDecorate %20 4 Offset 16
+               OpMemberDecorate %20 5 Offset 20
+               OpMemberDecorate %20 6 Offset 24
+               OpDecorate %23 DescriptorSet 0
+               OpDecorate %23 Binding 1
+               OpDecorate %4 Location 0
+               OpDecorate %3 Location 0
+               OpDecorate %24 DescriptorSet 1
+               OpDecorate %24 Binding 0
+               OpDecorate %26 Block
+               OpMemberDecorate %26 0 Offset 0
+         %27 = OpTypeFloat 32
+         %28 = OpTypeVector %27 4
+         %29 = OpTypeImage %27 2D 2 0 0 1 Unknown
+         %30 = OpTypePointer UniformConstant %29
+         %31 = OpTypeSampler
+         %32 = OpTypeVector %27 2
+         %34 = OpTypePointer UniformConstant %31
+         %35 = OpTypePointer Input %32
+         %36 = OpTypePointer Output %28
+         %37 = OpTypeSampledImage %29
+         %38 = OpConstant %27 0
+         %39 = OpTypeInt 32 0
+         %40 = OpConstant %39 0
+         %41 = OpTypeVector %27 3
+         %20 = OpTypeStruct %27 %27 %27 %27 %27 %27 %27
+         %43 = OpTypePointer PushConstant %20
+         %44 = OpConstant %27 1
+         %46 = OpConstantComposite %41 %38 %38 %38
+         %47 = OpTypeVoid
+         %48 = OpTypeFunction %47
+         %23 = OpVariable %34 UniformConstant
+          %4 = OpVariable %36 Output
+          %3 = OpVariable %35 Input
+         %24 = OpVariable %30 UniformConstant
+         %26 = OpTypeStruct %20
+         %49 = OpTypePointer PushConstant %26
+         %25 = OpVariable %49 PushConstant
+          %2 = OpFunction %47 None %48
+        %128 = OpLabel
+        %129 = OpLoad %32 %3
+        %130 = OpAccessChain %43 %25 %40
+        %131 = OpLoad %31 %23
+        %146 = OpLoad %29 %24
+        %147 = OpSampledImage %37 %146 %131
+        %148 = OpImageSampleImplicitLod %28 %147 %129
+        %133 = OpCompositeExtract %27 %148 0
+        %134 = OpCompositeExtract %27 %148 1
+        %135 = OpCompositeExtract %27 %148 2
+        %137 = OpLoad %20 %130
+        %155 = OpExtInst %27 %1 FMax %134 %135
+        %156 = OpExtInst %27 %1 FMax %133 %155
+        %158 = OpFDiv %27 %133 %156
+        %160 = OpFDiv %27 %134 %156
+        %162 = OpFDiv %27 %135 %156
+        %210 = OpCompositeExtract %27 %137 0
+        %211 = OpExtInst %27 %1 Pow %156 %210
+        %212 = OpCompositeExtract %27 %137 3
+        %213 = OpExtInst %27 %1 Pow %211 %212
+        %214 = OpCompositeExtract %27 %137 1
+        %215 = OpFMul %27 %213 %214
+        %216 = OpCompositeExtract %27 %137 2
+        %217 = OpFAdd %27 %215 %216
+        %218 = OpFDiv %27 %211 %217
+        %164 = OpCompositeExtract %27 %137 5
+        %165 = OpCompositeExtract %27 %137 6
+        %166 = OpFDiv %27 %164 %165
+        %167 = OpExtInst %27 %1 Pow %158 %166
+        %168 = OpExtInst %27 %1 Pow %160 %166
+        %169 = OpExtInst %27 %1 Pow %162 %166
+        %170 = OpCompositeExtract %27 %137 4
+        %171 = OpExtInst %27 %1 Pow %218 %170
+        %173 = OpFSub %27 %44 %167
+        %175 = OpFSub %27 %44 %168
+        %177 = OpFSub %27 %44 %169
+        %178 = OpFMul %27 %173 %171
+        %179 = OpFMul %27 %175 %171
+        %180 = OpFMul %27 %177 %171
+        %181 = OpFAdd %27 %167 %178
+        %182 = OpFAdd %27 %168 %179
+        %183 = OpFAdd %27 %169 %180
+        %185 = OpExtInst %27 %1 Pow %181 %165
+        %186 = OpExtInst %27 %1 Pow %182 %165
+        %187 = OpExtInst %27 %1 Pow %183 %165
+        %188 = OpFMul %27 %185 %218
+        %189 = OpFMul %27 %186 %218
+        %190 = OpFMul %27 %187 %218
+        %192 = OpExtInst %27 %1 FMin %188 %44
+        %194 = OpExtInst %27 %1 FMin %189 %44
+        %196 = OpExtInst %27 %1 FMin %190 %44
+        %205 = OpCompositeConstruct %41 %192 %194 %196
+        %206 = OpExtInst %41 %1 FMax %205 %46
+        %139 = OpCompositeExtract %27 %206 0
+        %140 = OpCompositeExtract %27 %206 1
+        %141 = OpCompositeExtract %27 %206 2
+        %142 = OpCompositeConstruct %28 %139 %140 %141 %44
+               OpStore %4 %142
+               OpReturn
+               OpFunctionEnd
+
+End SPIR-V
+
+Converted MSL:
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct _20
+{
+    float _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    float _m4;
+    float _m5;
+    float _m6;
+};
+
+struct _26
+{
+    _20 _m0;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    array<texture2d<float>, 127> _m0_pad [[id(0)]];
+    sampler m_23 [[id(127)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> m_24 [[id(0)]];
+};
+
+struct fragment_tonemap_out
+{
+    float4 m_4 [[color(0)]];
+};
+
+struct fragment_tonemap_in
+{
+    float2 m_3 [[user(locn0)]];
+};
+
+fragment fragment_tonemap_out fragment_tonemap(fragment_tonemap_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant _26& _25 [[buffer(2)]])
+{
+    fragment_tonemap_out out = {};
+    float4 _148 = spvDescriptorSet1.m_24.sample(spvDescriptorSet0.m_23, in.m_3);
+    float _133 = _148.x;
+    float _134 = _148.y;
+    float _135 = _148.z;
+    float _156 = fast::max(_133, fast::max(_134, _135));
+    float _211 = pow(_156, _25._m0._m0);
+    float _218 = _211 / ((pow(_211, _25._m0._m3) * _25._m0._m1) + _25._m0._m2);
+    float _166 = _25._m0._m5 / _25._m0._m6;
+    float _167 = pow(_133 / _156, _166);
+    float _168 = pow(_134 / _156, _166);
+    float _169 = pow(_135 / _156, _166);
+    float _171 = pow(_218, _25._m0._m4);
+    out.m_4 = float4(fast::max(float3(fast::min(pow(_167 + ((1.0 - _167) * _171), _25._m0._m6) * _218, 1.0), fast::min(pow(_168 + ((1.0 - _168) * _171), _25._m0._m6) * _218, 1.0), fast::min(pow(_169 + ((1.0 - _169) * _171), _25._m0._m6) * _218, 1.0)), float3(0.0)), 1.0);
+    return out;
+}
+
+
+End MSL
+
+Estimated original GLSL:
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+struct _20
+{
+    float _m0;
+    float _m1;
+    float _m2;
+    float _m3;
+    float _m4;
+    float _m5;
+    float _m6;
+};
+
+layout(push_constant, std430) uniform _26_25
+{
+    _20 _m0;
+} _25;
+
+layout(set = 0, binding = 1) uniform sampler _23;
+layout(set = 1, binding = 0) uniform texture2D _24;
+
+layout(location = 0) out vec4 _4;
+layout(location = 0) in vec2 _3;
+
+void main()
+{
+    vec4 _148 = texture(sampler2D(_24, _23), _3);
+    float _133 = _148.x;
+    float _134 = _148.y;
+    float _135 = _148.z;
+    float _156 = max(_133, max(_134, _135));
+    float _211 = pow(_156, _25._m0._m0);
+    float _218 = _211 / ((pow(_211, _25._m0._m3) * _25._m0._m1) + _25._m0._m2);
+    float _166 = _25._m0._m5 / _25._m0._m6;
+    float _167 = pow(_133 / _156, _166);
+    float _168 = pow(_134 / _156, _166);
+    float _169 = pow(_135 / _156, _166);
+    float _171 = pow(_218, _25._m0._m4);
+    _4 = vec4(max(vec3(min(pow(_167 + ((1.0 - _167) * _171), _25._m0._m6) * _218, 1.0), min(pow(_168 + ((1.0 - _168) * _171), _25._m0._m6) * _218, 1.0), min(pow(_169 + ((1.0 - _169) * _171), _25._m0._m6) * _218, 1.0)), vec3(0.0)), 1.0);
+}
+
+
+End GLSL
+
+
+Error: ERROR_INVALID_SHADER_NV

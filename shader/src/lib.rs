@@ -45,7 +45,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    //#[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     output: &mut Vec4,
 ) {
@@ -85,6 +85,7 @@ pub fn fragment_transmission(
         AccelerationStructure::from_vec(push_constants.acceleration_structure_address)
     };
 
+    /*
     let (result, mut transmission) = evaluate_lights_transmission(
         material_params,
         view,
@@ -95,6 +96,7 @@ pub fn fragment_transmission(
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
     );
+    */
 
     let mut transmission = Vec3::ZERO;
     let mut result = glam_pbr::BrdfResult {
@@ -157,7 +159,7 @@ pub fn fragment_normal(
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    //#[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
 ) {
@@ -189,6 +191,7 @@ pub fn fragment_normal(
         AccelerationStructure::from_vec(push_constants.acceleration_structure_address)
     };
 
+    /*
     let result = evaluate_lights(
         material_params,
         view,
@@ -200,7 +203,7 @@ pub fn fragment_normal(
         &acceleration_structure,
     );
 
-    let output = (result.diffuse + result.specular).extend(1.0);
+    let output = (result.diffuse + result.specular).extend(1.0);*/
     // Need this is avoid timing out the device on metal :(
     let output = diffuse;
 

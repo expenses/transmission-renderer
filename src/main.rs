@@ -121,9 +121,9 @@ fn main() -> anyhow::Result<()> {
         instance_extensions
     });
 
-    let enabled_layers = CStrList::new(vec![CStr::from_bytes_with_nul(
-        b"VK_LAYER_KHRONOS_validation\0",
-    )?]);
+    let enabled_layers = CStrList::new(vec![]);
+
+    dbg!(entry.enumerate_instance_layer_properties()?);
 
     let mut extensions = vec![SwapchainLoader::name()];
 
@@ -156,7 +156,42 @@ fn main() -> anyhow::Result<()> {
                 .push_next(&mut debug_messenger_info),
             None,
         )
-    }?;
+    }.expect("instance creation");
+
+    struct Xyz {
+        get: vk::native::PFN_vkGetMoltenVKConfigurationMVK
+    }
+
+    impl Xyz {
+        fn load<F>(mut _f: F) -> Self
+            where
+            F: FnMut(&::std::ffi::CStr) -> *const std::ffi::c_void,
+        {
+            Self {
+                get: unsafe {
+                    Some({
+                        let cname = c_str_macro::c_str!("vkGetMoltenVKConfigurationMVK");
+                        let val = _f(cname);
+                        dbg!(val);
+                        ::std::mem::transmute(val)
+                    })
+                }
+            }
+        }
+    }
+
+    let xyz: vk::native::PFN_vkGetMoltenVKConfigurationMVK = {
+        let entry = &entry;
+        let instance = &instance;
+
+        let xyz = Xyz::load(|name| unsafe {
+            std::mem::transmute(entry.get_instance_proc_addr(instance.handle(), name.as_ptr()))
+        });
+
+        //xyz.get.as_ref().unwrap()
+
+        None
+    };
 
     let debug_utils_loader = DebugUtilsLoader::new(&entry, &instance);
 
@@ -1612,6 +1647,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         &[],
     );
 
+
     device.cmd_push_constants(
         command_buffer,
         pipelines.pipeline_layout,
@@ -1709,7 +1745,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
 
-    {
+    /*{
         let _profiling_zone = profiling_zone!(
             "depth pre pass transmissive",
             device,
@@ -1746,11 +1782,11 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 command_buffer,
             );
         }
-    }
+    }*/
 
     device.cmd_end_render_pass(command_buffer);
 
-    {
+    /*{
         let _profiling_zone = profiling_zone!(
             "opaque framebuffer mipchain",
             device,
@@ -1899,7 +1935,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 ..Default::default()
             }],
         );
-    }
+    }*/
 
     device.cmd_begin_render_pass(
         command_buffer,

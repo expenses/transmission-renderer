@@ -1,3 +1,4 @@
 - Froxel light clustering
 - Test on egpu
 - implement welzl's algorithm for the smallest circle.
+- Work out why it's slow on metal - `env MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1  cargo run -- DamagedHelmet` errors with https://github.com/KhronosGroup/SPIRV-Cross/issues/1821
