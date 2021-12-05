@@ -19,12 +19,43 @@ pub struct PushConstants {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Uniforms {
+    pub light_clustering_coefficients: LightClusterCoefficients,
     pub sun_dir: Vec3A,
     pub sun_intensity: Vec3A,
     pub tile_size_in_pixels: Vec2,
     pub num_tiles: UVec2,
     pub debug_froxels: u32,
     pub ggx_lut_texture_index: u32,
+}
+
+// https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct LightClusterCoefficients {
+    pub coefficient_0: f32,
+    pub coefficient_1: f32,
+    pub index_scale: f32,
+    pub index_bias: f32,
+}
+
+impl LightClusterCoefficients {
+    pub fn new(z_near: f32, z_far: f32, z_special_near: f32, max_depth_slices: u32) -> Self {
+        Self {
+            coefficient_0: 1.0 - (z_far / z_near),
+            coefficient_1: z_far / z_near,
+            index_scale: ((max_depth_slices - 1) as f32 / (z_special_near / z_far).log2()),
+            index_bias: max_depth_slices as f32
+        }
+    }
+
+    // https://www.desmos.com/calculator/spahzn1han
+    pub fn get_depth_slice(self, frag_depth: f32) -> u32 {
+        // todo: filament uses opengl depth (-1 to 1) as opposed to vulkan depth (0 to 1)
+        let opengl_coord = 2.0 * frag_depth - 1.0;
+        let linear_depth = opengl_coord * self.coefficient_0 + self.coefficient_1;
+        (linear_depth.log2() * self.index_scale + self.index_bias).max(0.0) as u32
+    }
 }
 
 #[repr(C)]

@@ -496,6 +496,15 @@ fn main() -> anyhow::Result<()> {
         tile_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
             / num_tiles.as_vec2(),
         debug_froxels: 0,
+        // todo: these values are a bit nonsense as I based it off the filament implementation:
+        // https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering
+        // which uses opengl and a depth range of -1 to 1.
+        light_clustering_coefficients: shared_structs::LightClusterCoefficients::new(
+            NEAR_Z,
+            5.0,
+            0.75,
+            16
+        )
     };
 
     let mut uniforms_buffer = ash_abstractions::Buffer::new(
@@ -871,6 +880,11 @@ fn main() -> anyhow::Result<()> {
                                     } else {
                                         window.set_fullscreen(Some(Fullscreen::Borderless(None)))
                                     }
+                                }
+                            },
+                            VirtualKeyCode::F => {
+                                if is_pressed {
+                                    uniforms.debug_froxels = 1 - uniforms.debug_froxels;
                                 }
                             }
                             VirtualKeyCode::G => {

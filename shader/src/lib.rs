@@ -24,7 +24,7 @@ use shared_structs::{
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles, const_vec3},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
@@ -47,6 +47,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
+    #[spirv(frag_coord)] frag_coord: Vec4,
     output: &mut Vec4,
 ) {
     let material = index(materials, material_id);
@@ -136,8 +137,6 @@ pub fn fragment_transmission(
 
     let diffuse = result.diffuse.lerp(real_transmission, transmission_factor);
 
-    //*output = (normal.0).extend(1.0);
-
     *output = (diffuse + result.specular + emission).extend(1.0);
 }
 
@@ -153,6 +152,7 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(frag_coord)] frag_coord: Vec4,
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
 ) {
@@ -194,9 +194,13 @@ pub fn fragment(
         &acceleration_structure,
     );
 
-    let output = (result.diffuse + result.specular + emission).extend(1.0);
+    let mut output = (result.diffuse + result.specular + emission).extend(1.0);
 
-    //let output = position.extend(1.0);
+    if uniforms.debug_froxels != 0 {
+        output = debug_colour_for_id(uniforms.light_clustering_coefficients.get_depth_slice(
+            frag_coord.z
+        )).extend(1.0);
+    }
 
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;
@@ -397,6 +401,7 @@ fn cull(
     center = transform * center;
     center = (push_constants.view * center.extend(1.0)).truncate();
     // in the view, +z = back so we flip it.
+    // todo: wait, why?
     center.z = -center.z;
 
     let mut radius = packed_bounding_sphere.w;
@@ -486,8 +491,10 @@ pub fn assign_lights_to_froxels(
     *index_mut(froxel_light_indices, global_light_index) = light_id;
 }
 
-/*
-const DEBUG_COLOURS: [Vec3; 13] = [
+const DEBUG_COLOURS: [Vec3; 16] = [
+    const_vec3!([0.0, 0.0, 0.0]),         // black
+    const_vec3!([0.0, 0.0, 0.1647]),      // darkest blue
+    const_vec3!([0.0, 0.0, 0.3647]),      // darker blue
     const_vec3!([0.0, 0.0, 0.6647]),      // dark blue
     const_vec3!([0.0, 0.0, 0.9647]),      // blue
     const_vec3!([0.0, 0.9255, 0.9255]),   // cyan
@@ -504,9 +511,8 @@ const DEBUG_COLOURS: [Vec3; 13] = [
 ];
 
 fn debug_colour_for_id(id: u32) -> Vec3 {
-    DEBUG_COLOURS[(id as usize % DEBUG_COLOURS.len())]
+    *index(&DEBUG_COLOURS, id)
 }
-*/
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(vertex)]
