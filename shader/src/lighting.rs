@@ -15,8 +15,8 @@ pub fn evaluate_lights_transmission(
     view: View,
     position: Vec3,
     normal: Normal,
-    point_lights: &[PointLight],
     uniforms: &Uniforms,
+    light_params: LightParams,
     #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
 ) -> (BrdfResult, Vec3) {
     #[cfg(target_feature = "RayQueryKHR")]
@@ -52,11 +52,11 @@ pub fn evaluate_lights_transmission(
             Light(uniforms.sun_dir.into()),
         );
 
-    let num_lights = point_lights.len() as u32;
-    let mut i = 0;
+    let mut current_light = light_params.light_indices_offset;
+    let end = light_params.end();
 
-    while i < num_lights {
-        let light = index(point_lights, i);
+    while current_light < end {
+        let light = light_params.index(current_light);
 
         let (direction, distance, attenuation) =
             light_direction_and_attenuation(position, light.position.into());
@@ -88,7 +88,7 @@ pub fn evaluate_lights_transmission(
             * attenuation
             * glam_pbr::transmission_btdf(material_params, normal, view, Light(direction));
 
-        i += 1;
+        current_light += 1;
     }
 
     (sum, transmission)
@@ -121,13 +121,31 @@ fn trace_shadow_ray(
     }
 }
 
+pub struct LightParams<'a> {
+    pub num_lights: u32,
+    pub light_indices_offset: u32,
+    pub light_indices: &'a [u32],
+    pub point_lights: &'a [PointLight],
+}
+
+impl<'a> LightParams<'a> {
+    fn index(&'a self, id: u32) -> &'a PointLight {
+        let light_index = *index(self.light_indices, id);
+        index(self.point_lights, light_index)
+    }
+
+    fn end(&self) -> u32 {
+        self.light_indices_offset + self.num_lights
+    }
+}
+
 pub fn evaluate_lights(
     material_params: MaterialParams,
     view: View,
     position: Vec3,
     normal: Normal,
-    point_lights: &[PointLight],
     uniforms: &Uniforms,
+    light_params: LightParams,
     #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
 ) -> BrdfResult {
     #[cfg(target_feature = "RayQueryKHR")]
@@ -155,11 +173,11 @@ pub fn evaluate_lights(
         material_params,
     });
 
-    let num_lights = point_lights.len() as u32;
-    let mut i = 0;
+    let mut current_light = light_params.light_indices_offset;
+    let end = light_params.end();
 
-    while i < num_lights {
-        let light = index(point_lights, i);
+    while current_light < end {
+        let light = light_params.index(current_light);
 
         let (direction, distance, attenuation) =
             light_direction_and_attenuation(position, light.position.into());
@@ -187,7 +205,7 @@ pub fn evaluate_lights(
                 material_params,
             });
 
-        i += 1;
+        current_light += 1;
     }
 
     sum

@@ -50,6 +50,10 @@ fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) 
 
 pub const MAX_IMAGES: u32 = 193;
 pub const NEAR_Z: f32 = 0.01;
+pub const NUM_TILES_X: u32 = 12;
+pub const NUM_TILES_Y: u32 = 8;
+pub const NUM_DEPTH_SLICES: u32 = 16;
+pub const NUM_FROXELS: u32 = NUM_TILES_X * NUM_TILES_Y * NUM_DEPTH_SLICES;
 
 #[derive(StructOpt)]
 struct Opt {
@@ -426,28 +430,30 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let num_froxels = 1024;
+    dbg!(NUM_FROXELS);
+
+    let lights = [
+        PointLight::new(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
+        PointLight::new(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
+    ];
 
     let light_buffers = LightBuffers {
         lights: ash_abstractions::Buffer::new(
             unsafe {
-                cast_slice(&[
-                    PointLight::new(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
-                    PointLight::new(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
-                ])
+                cast_slice(&lights)
             },
             "lights",
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &mut init_resources,
         )?,
         froxel_light_counts: ash_abstractions::Buffer::new_of_size(
-            4 * num_froxels,
+            4 * NUM_FROXELS as u64,
             "froxel light counts",
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
             &mut init_resources,
         )?,
         froxel_light_indices: ash_abstractions::Buffer::new_of_size(
-            4 * num_froxels * shared_structs::MAX_LIGHTS_PER_FROXEL as u64,
+            4 * NUM_FROXELS as u64 * shared_structs::MAX_LIGHTS_PER_FROXEL as u64,
             "froxel light indices",
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &mut init_resources,
@@ -480,7 +486,7 @@ fn main() -> anyhow::Result<()> {
         NEAR_Z,
     );
 
-    let num_tiles = UVec2::new(12, 8);
+    let num_tiles = UVec2::new(NUM_TILES_X, NUM_TILES_Y);
 
     let mut sun_velocity = Vec2::ZERO;
     let mut sun = Sun {
@@ -503,7 +509,7 @@ fn main() -> anyhow::Result<()> {
             NEAR_Z,
             5.0,
             0.75,
-            16
+            NUM_DEPTH_SLICES
         )
     };
 
@@ -1193,6 +1199,7 @@ fn main() -> anyhow::Result<()> {
                             command_buffer,
                             pipelines: &pipelines,
                             draw_buffers: &draw_buffers,
+                            light_buffers: &light_buffers,
                             profiling_ctx: &mut profiling_ctx,
                             model_buffers: &model_buffers,
                             render_passes: &render_passes,
@@ -1207,6 +1214,7 @@ fn main() -> anyhow::Result<()> {
                                 extent,
                                 num_primitives,
                                 num_instances,
+                                num_lights: lights.len() as u32,
                                 push_constants,
                                 view_matrix,
                                 perspective_matrix,
@@ -1316,6 +1324,7 @@ struct RecordParams<'a> {
     command_buffer: vk::CommandBuffer,
     pipelines: &'a Pipelines,
     draw_buffers: &'a DrawBuffers,
+    light_buffers: &'a LightBuffers,
     profiling_ctx: &'a ProfilingContext,
     model_buffers: &'a ModelBuffers,
     render_passes: &'a RenderPasses,
@@ -1333,6 +1342,7 @@ struct DynamicRecordParams {
     extent: vk::Extent2D,
     num_primitives: u32,
     num_instances: u32,
+    num_lights: u32,
     push_constants: PushConstants,
     view_matrix: Mat4,
     perspective_matrix: Mat4,
@@ -1348,6 +1358,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         command_buffer,
         pipelines,
         draw_buffers,
+        light_buffers,
         profiling_ctx,
         render_passes,
         draw_framebuffer,
@@ -1358,6 +1369,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             DynamicRecordParams {
                 num_primitives,
                 num_instances,
+                num_lights,
                 push_constants,
                 view_matrix,
                 perspective_matrix,
@@ -1480,6 +1492,14 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 0,
             );
 
+            device.cmd_fill_buffer(
+                command_buffer,
+                light_buffers.froxel_light_counts.buffer,
+                0,
+                vk::WHOLE_SIZE,
+                0,
+            );
+
             drop(profiling_zone);
         }
 
@@ -1543,6 +1563,23 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             device.cmd_dispatch(command_buffer, dispatch_count(num_instances, 64), 1, 1);
         }
 
+        {
+            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, pipelines.assign_lights_to_froxels);
+
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.lights_pipeline_layout,
+                0,
+                &[
+                    descriptor_sets.lights,
+                ],
+                &[],
+            );
+
+            device.cmd_dispatch(command_buffer, dispatch_count(NUM_FROXELS, 8), dispatch_count(num_lights, 8), 1);
+        }
+
         vk_sync::cmd::pipeline_barrier(
             device,
             command_buffer,
@@ -1561,6 +1598,18 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         );
 
         {
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.frustum_culling_pipeline_layout,
+                0,
+                &[
+                    descriptor_sets.frustum_culling,
+                    descriptor_sets.instance_buffer,
+                ],
+                &[],
+            );
+
             let _profiling_zone = profiling_zone!(
                 "demultiplex draws compute shader",
                 device,

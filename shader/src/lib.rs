@@ -12,7 +12,7 @@ mod tonemapping;
 use asm::atomic_i_increment;
 use lighting::{
     calculate_normal, evaluate_lights, evaluate_lights_transmission, get_emission,
-    get_material_params,
+    get_material_params, LightParams,
 };
 use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 
@@ -46,6 +46,8 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] froxel_light_counts: &[u32],
+    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     #[spirv(frag_coord)] frag_coord: Vec4,
     output: &mut Vec4,
@@ -81,6 +83,16 @@ pub fn fragment_transmission(
 
     let emission = get_emission(material, &texture_sampler);
 
+    let froxel = {
+        let froxel_xy = (frag_coord.xy() / uniforms.tile_size_in_pixels).as_uvec2();
+
+        let froxel_z = uniforms.light_clustering_coefficients.get_depth_slice(
+            frag_coord.z
+        );
+
+        froxel_z * uniforms.num_tiles.x * uniforms.num_tiles.y + froxel_xy.y * uniforms.num_tiles.x + froxel_xy.x
+    };
+
     #[cfg(target_feature = "RayQueryKHR")]
     let acceleration_structure =
         unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
@@ -90,8 +102,13 @@ pub fn fragment_transmission(
         view,
         position,
         normal,
-        point_lights,
         uniforms,
+        LightParams {
+            num_lights: *index(froxel_light_counts, froxel),
+            light_indices_offset: froxel * MAX_LIGHTS_PER_FROXEL,
+            light_indices,
+            point_lights
+        },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
     );
@@ -152,6 +169,8 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] froxel_light_counts: &[u32],
+    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
     #[spirv(frag_coord)] frag_coord: Vec4,
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
@@ -179,17 +198,34 @@ pub fn fragment(
 
     let emission = get_emission(material, &texture_sampler);
 
+    let froxel = {
+        let froxel_xy = (frag_coord.xy() / uniforms.tile_size_in_pixels).as_uvec2();
+
+        let froxel_z = uniforms.light_clustering_coefficients.get_depth_slice(
+            frag_coord.z
+        );
+
+        froxel_z * uniforms.num_tiles.x * uniforms.num_tiles.y + froxel_xy.y * uniforms.num_tiles.x + froxel_xy.x
+    };
+
     #[cfg(target_feature = "RayQueryKHR")]
     let acceleration_structure =
         unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
+
+    let num_lights = *index(froxel_light_counts, froxel);
 
     let result = evaluate_lights(
         material_params,
         view,
         position,
         normal,
-        point_lights,
         uniforms,
+        LightParams {
+            num_lights,
+            light_indices_offset: froxel * MAX_LIGHTS_PER_FROXEL,
+            light_indices,
+            point_lights
+        },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
     );
@@ -197,9 +233,7 @@ pub fn fragment(
     let mut output = (result.diffuse + result.specular + emission).extend(1.0);
 
     if uniforms.debug_froxels != 0 {
-        output = debug_colour_for_id(uniforms.light_clustering_coefficients.get_depth_slice(
-            frag_coord.z
-        )).extend(1.0);
+        output = (debug_colour_for_id(num_lights) + (debug_colour_for_id(froxel) - 0.5 ) * 0.025).extend(1.0);
     }
 
     *hdr_framebuffer = output;
@@ -491,7 +525,7 @@ pub fn assign_lights_to_froxels(
     *index_mut(froxel_light_indices, global_light_index) = light_id;
 }
 
-const DEBUG_COLOURS: [Vec3; 16] = [
+const DEBUG_COLOURS: [Vec3; 15] = [
     const_vec3!([0.0, 0.0, 0.0]),         // black
     const_vec3!([0.0, 0.0, 0.1647]),      // darkest blue
     const_vec3!([0.0, 0.0, 0.3647]),      // darker blue
@@ -507,11 +541,11 @@ const DEBUG_COLOURS: [Vec3; 16] = [
     const_vec3!([0.8392, 0.0, 0.0]),      // red
     const_vec3!([1.0, 0.0, 1.0]),         // magenta
     const_vec3!([0.6, 0.3333, 0.7882]),   // purple
-    const_vec3!([1.0, 1.0, 1.0]),         // white
+    //const_vec3!([1.0, 1.0, 1.0]),         // white
 ];
 
 fn debug_colour_for_id(id: u32) -> Vec3 {
-    *index(&DEBUG_COLOURS, id)
+    *index(&DEBUG_COLOURS, id % DEBUG_COLOURS.len() as u32)
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
