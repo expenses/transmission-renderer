@@ -319,7 +319,7 @@ impl Pipelines {
             depth_stencil_state: Some(ash_abstractions::DepthStencilState {
                 depth_test_enable: true,
                 depth_write_enable: true,
-                depth_compare_op: vk::CompareOp::LESS,
+                depth_compare_op: vk::CompareOp::GREATER,
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
                 &[ash_abstractions::VertexAttribute::Vec3],
@@ -342,7 +342,7 @@ impl Pipelines {
             depth_stencil_state: Some(ash_abstractions::DepthStencilState {
                 depth_test_enable: true,
                 depth_write_enable: true,
-                depth_compare_op: vk::CompareOp::LESS,
+                depth_compare_op: vk::CompareOp::GREATER,
             }),
             vertex_attributes: &ash_abstractions::create_vertex_attribute_descriptions(&[
                 &[ash_abstractions::VertexAttribute::Vec3],

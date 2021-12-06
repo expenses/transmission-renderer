@@ -199,12 +199,12 @@ pub fn fragment(
 
     let emission = get_emission(material, &texture_sampler);
 
+    let froxel_z = uniforms.light_clustering_coefficients.get_depth_slice(
+        frag_coord.z
+    );
+
     let froxel = {
         let froxel_xy = (frag_coord.xy() / uniforms.tile_size_in_pixels).as_uvec2();
-
-        let froxel_z = uniforms.light_clustering_coefficients.get_depth_slice(
-            frag_coord.z
-        );
 
         froxel_z * uniforms.num_tiles.x * uniforms.num_tiles.y + froxel_xy.y * uniforms.num_tiles.x + froxel_xy.x
     };
@@ -235,6 +235,7 @@ pub fn fragment(
 
     if uniforms.debug_froxels != 0 {
         output = (debug_colour_for_id(num_lights) + (debug_colour_for_id(froxel) - 0.5 ) * 0.025).extend(1.0);
+        output = (debug_colour_for_id(froxel_z)).extend(1.0);
     }
 
     *hdr_framebuffer = output;

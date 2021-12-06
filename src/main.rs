@@ -36,15 +36,13 @@ use profiling::ProfilingContext;
 use render_passes::RenderPasses;
 
 fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) -> Mat4 {
-    let t = (vertical_fov / 2.0).tan();
-    let sy = 1.0 / t;
-    let sx = sy / aspect_ratio;
+    let focal_length = 1.0 / (vertical_fov / 2.0).tan();
 
     Mat4::from_cols(
-        Vec4::new(sx, 0.0, 0.0, 0.0),
-        Vec4::new(0.0, -sy, 0.0, 0.0),
-        Vec4::new(0.0, 0.0, -1.0, -1.0),
-        Vec4::new(0.0, 0.0, -z_near, 0.0),
+        Vec4::new(focal_length / aspect_ratio, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, -focal_length, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, -1.0),
+        Vec4::new(0.0, 0.0, z_near, 0.0),
     )
 }
 
@@ -515,10 +513,12 @@ fn main() -> anyhow::Result<()> {
         light_clustering_coefficients: shared_structs::LightClusterCoefficients::new(
             NEAR_Z,
             5.0,
-            0.75,
+            0.5,
             NUM_DEPTH_SLICES
         )
     };
+
+    dbg!(&uniforms);
 
     let mut uniforms_buffer = ash_abstractions::Buffer::new(
         unsafe { bytes_of(&uniforms) },
@@ -1430,7 +1430,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     let draw_clear_values = [
         vk::ClearValue {
             depth_stencil: vk::ClearDepthStencilValue {
-                depth: 1.0,
+                depth: 0.0,
                 stencil: 0,
             },
         },
