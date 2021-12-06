@@ -460,6 +460,13 @@ fn main() -> anyhow::Result<()> {
         )?,
     };
 
+    let froxel_data_buffer = ash_abstractions::Buffer::new_of_size(
+        NUM_FROXELS as u64 * std::mem::size_of::<shared_structs::FroxelData>() as u64,
+        "froxel data buffer",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources
+    )?;
+
     let tonemapping_params = colstodian::tonemap::BakedLottesTonemapperParams::from(
         colstodian::tonemap::LottesTonemapperParams {
             ..Default::default()
@@ -625,57 +632,6 @@ fn main() -> anyhow::Result<()> {
         (None, Vec::new())
     };
 
-    {
-        let _span = tracy_client::span!("Flushing init resources");
-        end_init_resources(init_resources, queue)?;
-    }
-
-    for buffer in buffers_to_cleanup.drain(..) {
-        buffer.cleanup_and_drop(&device, &mut allocator)?;
-    }
-
-    let mut push_constants = shared_structs::PushConstants {
-        // Updated every frame.
-        proj_view: Default::default(),
-        view_position: Default::default(),
-        framebuffer_size: UVec2::new(extent.width, extent.height),
-        acceleration_structure_address: top_level_acceleration_structure
-            .as_ref()
-            .map(|a| a.buffer.device_address(&device))
-            .unwrap_or(0),
-    };
-
-    // Swapchain
-
-    let mut image_count = (surface_caps.min_image_count + 1).max(3);
-    if surface_caps.max_image_count > 0 && image_count > surface_caps.max_image_count {
-        image_count = surface_caps.max_image_count;
-    }
-
-    log::info!("Using {} swapchain images at a time.", image_count);
-
-    let swapchain_loader = SwapchainLoader::new(&instance, &device);
-
-    let mut swapchain_info = *vk::SwapchainCreateInfoKHR::builder()
-        .surface(surface)
-        .min_image_count(image_count)
-        .image_format(surface_format.format)
-        .image_color_space(surface_format.color_space)
-        .image_extent(extent)
-        .image_array_layers(1)
-        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-        .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-        .pre_transform(surface_caps.current_transform)
-        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-        .present_mode(vk::PresentModeKHR::FIFO)
-        .clipped(true)
-        .old_swapchain(vk::SwapchainKHR::null());
-
-    let mut swapchain =
-        ash_abstractions::Swapchain::new(&device, &swapchain_loader, swapchain_info)?;
-
-    let mut swapchain_image_framebuffers =
-        create_swapchain_image_framebuffers(&device, extent, &swapchain, &render_passes)?;
 
     let mut draw_framebuffer = create_draw_framebuffer(
         &device,
@@ -818,12 +774,75 @@ fn main() -> anyhow::Result<()> {
                     .buffer_info(&buffer_info(
                         &acceleration_structure_debugging_uniforms_buffer,
                     )),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.froxel_data)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(
+                        &froxel_data_buffer,
+                    )),
             ],
             &[],
         )
     }
 
     descriptor_sets.update_framebuffers(&device, &hdr_framebuffer, &opaque_sampled_hdr_framebuffer);
+
+    unsafe {
+        record_write_froxel_data(&init_resources, &pipelines, &descriptor_sets);
+    }
+
+    {
+        let _span = tracy_client::span!("Flushing init resources");
+        end_init_resources(init_resources, queue)?;
+    }
+
+    for buffer in buffers_to_cleanup.drain(..) {
+        buffer.cleanup_and_drop(&device, &mut allocator)?;
+    }
+
+    let mut push_constants = shared_structs::PushConstants {
+        // Updated every frame.
+        proj_view: Default::default(),
+        view_position: Default::default(),
+        framebuffer_size: UVec2::new(extent.width, extent.height),
+        acceleration_structure_address: top_level_acceleration_structure
+            .as_ref()
+            .map(|a| a.buffer.device_address(&device))
+            .unwrap_or(0),
+    };
+
+    // Swapchain
+
+    let mut image_count = (surface_caps.min_image_count + 1).max(3);
+    if surface_caps.max_image_count > 0 && image_count > surface_caps.max_image_count {
+        image_count = surface_caps.max_image_count;
+    }
+
+    log::info!("Using {} swapchain images at a time.", image_count);
+
+    let swapchain_loader = SwapchainLoader::new(&instance, &device);
+
+    let mut swapchain_info = *vk::SwapchainCreateInfoKHR::builder()
+        .surface(surface)
+        .min_image_count(image_count)
+        .image_format(surface_format.format)
+        .image_color_space(surface_format.color_space)
+        .image_extent(extent)
+        .image_array_layers(1)
+        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+        .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+        .pre_transform(surface_caps.current_transform)
+        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+        .present_mode(vk::PresentModeKHR::FIFO)
+        .clipped(true)
+        .old_swapchain(vk::SwapchainKHR::null());
+
+    let mut swapchain =
+        ash_abstractions::Swapchain::new(&device, &swapchain_loader, swapchain_info)?;
+
+    let mut swapchain_image_framebuffers =
+        create_swapchain_image_framebuffers(&device, extent, &swapchain, &render_passes)?;
 
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
     let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
@@ -1041,6 +1060,10 @@ fn main() -> anyhow::Result<()> {
                                     ..Default::default()
                                 }],
                             );
+                        }
+
+                        unsafe {
+                            record_write_froxel_data(&init_resources, &pipelines, &descriptor_sets);
                         }
 
                         drop(init_resources);
@@ -1319,6 +1342,27 @@ impl LightBuffers {
     }
 }
 
+unsafe fn record_write_froxel_data(
+    init_resources: &ash_abstractions::InitResources,
+    pipelines: &Pipelines,
+    descriptor_sets: &DescriptorSets,
+) {
+    init_resources.device.cmd_bind_pipeline(init_resources.command_buffer, vk::PipelineBindPoint::COMPUTE, pipelines.write_froxel_data);
+
+    init_resources.device.cmd_bind_descriptor_sets(
+        init_resources.command_buffer,
+        vk::PipelineBindPoint::COMPUTE,
+        pipelines.write_froxel_data_pipeline_layout,
+        0,
+        &[
+            descriptor_sets.froxel_data
+        ],
+        &[],
+    );
+
+    init_resources.device.cmd_dispatch(init_resources.command_buffer, dispatch_count(NUM_FROXELS, 64), 1, 1);
+}
+
 struct RecordParams<'a> {
     device: &'a ash::Device,
     command_buffer: vk::CommandBuffer,
@@ -1573,6 +1617,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 0,
                 &[
                     descriptor_sets.lights,
+                    descriptor_sets.froxel_data
                 ],
                 &[],
             );

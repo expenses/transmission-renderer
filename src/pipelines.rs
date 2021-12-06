@@ -22,6 +22,7 @@ pub struct Pipelines {
     pub frustum_culling: vk::Pipeline,
     pub demultiplex_draws: vk::Pipeline,
     pub assign_lights_to_froxels: vk::Pipeline,
+    pub write_froxel_data: vk::Pipeline,
     pub acceleration_structure_debugging: Option<vk::Pipeline>,
     pub pipeline_layout: vk::PipelineLayout,
     pub tonemap_pipeline_layout: vk::PipelineLayout,
@@ -29,6 +30,7 @@ pub struct Pipelines {
     pub frustum_culling_pipeline_layout: vk::PipelineLayout,
     pub acceleration_structure_debugging_layout: vk::PipelineLayout,
     pub lights_pipeline_layout: vk::PipelineLayout,
+    pub write_froxel_data_pipeline_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -135,6 +137,13 @@ impl Pipelines {
             c_str!("assign_lights_to_froxels"),
         )?;
 
+        let write_froxel_data_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "write_froxel_data")?,
+            vk::ShaderStageFlags::COMPUTE,
+            device,
+            c_str!("write_froxel_data"),
+        )?;
+
         let acceleration_structure_debugging_stage = if enable_ray_tracing {
             Some(ash_abstractions::load_shader_module_as_stage(
                 &read_shader(ray_tracing, "acceleration_structure_debugging")?,
@@ -219,11 +228,23 @@ impl Pipelines {
             )
         }?;
 
+        let write_froxel_data_pipeline_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[
+                        descriptor_set_layouts.froxel_data,
+                    ])
+                    .push_constant_ranges(&[]),
+                None,
+            )
+        }?;
+
         let lights_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
                         descriptor_set_layouts.lights,
+                        descriptor_set_layouts.froxel_data,
                     ])
                     .push_constant_ranges(&[]),
                 None,
@@ -448,7 +469,10 @@ impl Pipelines {
                 .layout(frustum_culling_pipeline_layout),
             *vk::ComputePipelineCreateInfo::builder()
                 .stage(*assign_lights_to_froxels_stage)
-                .layout(lights_pipeline_layout)
+                .layout(lights_pipeline_layout),
+            *vk::ComputePipelineCreateInfo::builder()
+                .stage(*write_froxel_data_stage)
+                .layout(write_froxel_data_pipeline_layout)
         ];
 
         if let Some(stage) = acceleration_structure_debugging_stage.as_ref() {
@@ -475,8 +499,9 @@ impl Pipelines {
             frustum_culling: compute_pipelines[0],
             demultiplex_draws: compute_pipelines[1],
             assign_lights_to_froxels: compute_pipelines[2],
+            write_froxel_data: compute_pipelines[3],
             acceleration_structure_debugging: if acceleration_structure_debugging_stage.is_some() {
-                Some(compute_pipelines[3])
+                Some(compute_pipelines[4])
             } else {
                 None
             },
@@ -486,6 +511,7 @@ impl Pipelines {
             frustum_culling_pipeline_layout,
             acceleration_structure_debugging_layout,
             lights_pipeline_layout,
+            write_froxel_data_pipeline_layout,
         })
     }
 }

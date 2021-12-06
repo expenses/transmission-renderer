@@ -20,6 +20,7 @@ use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRough
 use shared_structs::{
     AccelerationStructureDebuggingUniforms, CullingPushConstants, Instance, MaterialInfo,
     PointLight, PrimitiveInfo, PushConstants, Similarity, Uniforms, MAX_LIGHTS_PER_FROXEL,
+    FroxelData, Plane,
 };
 use spirv_std::{
     self as _,
@@ -500,17 +501,42 @@ pub fn demultiplex_draws(
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
+#[spirv(compute(threads(64)))]
+pub fn write_froxel_data(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] froxel_data: &mut [FroxelData],
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let froxel_id = id.x;
+
+    if froxel_id as usize >= froxel_data.len() {
+        return;
+    }
+
+    let froxel = FroxelData {
+        left_plane: Plane::new(Vec3::ZERO),
+        right_plane: Plane::new(Vec3::ZERO),
+        top_plane: Plane::new(Vec3::ZERO),
+        bottom_plane: Plane::new(Vec3::ZERO),
+        z_near: 0.0,
+        z_far: 1.0
+    };
+
+    *index_mut(froxel_data, froxel_id) = froxel;
+}
+
+#[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(compute(threads(8, 8)))]
 pub fn assign_lights_to_froxels(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
     #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] froxel_light_counts: &mut [u32],
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] froxel_light_indices: &mut [u32],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] froxel_data: &[FroxelData],
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
     let froxel_id = id.x;
     let light_id = id.y;
 
-    if froxel_id as usize >= froxel_light_counts.len() {
+    if froxel_id as usize >= froxel_data.len() {
         return;
     }
 

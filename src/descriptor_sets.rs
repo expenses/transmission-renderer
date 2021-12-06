@@ -7,6 +7,7 @@ pub struct DescriptorSetLayouts {
     pub hdr_framebuffer: vk::DescriptorSetLayout,
     pub frustum_culling: vk::DescriptorSetLayout,
     pub lights: vk::DescriptorSetLayout,
+    pub froxel_data: vk::DescriptorSetLayout,
     pub acceleration_structure_debugging: vk::DescriptorSetLayout,
 }
 
@@ -153,6 +154,20 @@ impl DescriptorSetLayouts {
                     None,
                 )?
             },
+            froxel_data: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(
+                                vk::ShaderStageFlags::COMPUTE,
+                            ),
+                    ]),
+                    None,
+                )?
+            },
             acceleration_structure_debugging: unsafe {
                 device.create_descriptor_set_layout(
                     &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
@@ -181,6 +196,7 @@ pub struct DescriptorSets {
     pub opaque_sampled_hdr_framebuffer: vk::DescriptorSet,
     pub frustum_culling: vk::DescriptorSet,
     pub lights: vk::DescriptorSet,
+    pub froxel_data: vk::DescriptorSet,
     pub acceleration_structure_debugging: vk::DescriptorSet,
     _descriptor_pool: vk::DescriptorPool,
 }
@@ -193,7 +209,7 @@ impl DescriptorSets {
                     .pool_sizes(&[
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(2 + 8 + 3),
+                            .descriptor_count(2 + 8 + 3 + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::UNIFORM_BUFFER)
                             .descriptor_count(3 + 1),
@@ -207,7 +223,7 @@ impl DescriptorSets {
                             .ty(vk::DescriptorType::STORAGE_IMAGE)
                             .descriptor_count(1),
                     ])
-                    .max_sets(7),
+                    .max_sets(8),
                 None,
             )
         }?;
@@ -222,6 +238,7 @@ impl DescriptorSets {
                         layouts.hdr_framebuffer,
                         layouts.frustum_culling,
                         layouts.lights,
+                        layouts.froxel_data,
                         layouts.acceleration_structure_debugging,
                     ])
                     .descriptor_pool(descriptor_pool),
@@ -235,7 +252,8 @@ impl DescriptorSets {
             opaque_sampled_hdr_framebuffer: descriptor_sets[3],
             frustum_culling: descriptor_sets[4],
             lights: descriptor_sets[5],
-            acceleration_structure_debugging: descriptor_sets[6],
+            froxel_data: descriptor_sets[6],
+            acceleration_structure_debugging: descriptor_sets[7],
             _descriptor_pool: descriptor_pool,
         })
     }

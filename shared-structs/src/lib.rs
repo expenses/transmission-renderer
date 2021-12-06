@@ -220,10 +220,54 @@ pub struct CullingPushConstants {
     pub z_near: f32,
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
 #[repr(C)]
-pub struct Frustum {
-    planes: [Vec4; 4],
-    z_slice: Vec2,
+pub struct FroxelData {
+    pub left_plane: Plane,
+    pub right_plane: Plane,
+    pub top_plane: Plane,
+    pub bottom_plane: Plane,
+    pub z_near: f32,
+    pub z_far: f32,
+}
+
+impl FroxelData {
+    fn contains_sphere(&self, mut center: Vec3, radius: f32, view: Mat4) -> bool {
+        center = (view * center.extend(1.0)).truncate();
+        center.z = -center.z;
+
+        let mut visible = 1;
+
+        visible &= (center.z + radius > self.z_near) as u32;
+        visible &= (center.z - radius <= self.z_far) as u32;
+
+        visible &= (self.left_plane.signed_distance(center) < radius) as u32;
+        visible &= (self.right_plane.signed_distance(center) < radius) as u32;
+        visible &= (self.top_plane.signed_distance(center) < radius) as u32;
+        visible &= (self.bottom_plane.signed_distance(center) < radius) as u32;
+
+        visible != 0
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Plane {
+    inner: Vec3A,
+}
+
+impl Plane {
+    pub fn new(plane: Vec3) -> Self {
+        Self {
+            inner: plane.into(),
+        }
+    }
+
+    fn signed_distance(&self, point: Vec3) -> f32 {
+        Vec3::from(self.inner).dot(point)
+    }
 }
 
 pub const MAX_LIGHTS_PER_FROXEL: u32 = 128;
