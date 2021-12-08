@@ -1,6 +1,6 @@
 #![cfg_attr(
     target_arch = "spirv",
-    feature(register_attr, asm),
+    feature(register_attr, asm, asm_const, asm_experimental_arch),
     register_attr(spirv),
     no_std
 )]
@@ -303,7 +303,7 @@ pub fn depth_pre_pass_vertex_alpha_clip(
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(position)] builtin_pos: &mut Vec4,
     out_uv: &mut Vec2,
-    out_material_id: &mut u32,
+    #[spirv(flat)] out_material_id: &mut u32,
 ) {
     let instance = index(instances, instance_index);
     let similarity = instance.transform.unpack();
@@ -343,7 +343,7 @@ pub fn vertex_instanced(
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
     out_uv: &mut Vec2,
-    out_material_id: &mut u32,
+    #[spirv(flat)] out_material_id: &mut u32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
     let instance = index(instances, instance_index);
@@ -371,7 +371,7 @@ pub fn vertex_instanced_with_scale(
     out_position: &mut Vec3,
     out_normal: &mut Vec3,
     out_uv: &mut Vec2,
-    out_material_id: &mut u32,
+    #[spirv(flat)] out_material_id: &mut u32,
     out_scale: &mut f32,
     #[spirv(position)] builtin_pos: &mut Vec4,
 ) {
@@ -453,18 +453,18 @@ fn cull(
     let mut radius = packed_bounding_sphere.w;
     radius *= transform.scale;
 
-    let mut visible = (center.z + radius > push_constants.z_near) as u32;
+    let mut visible = center.z + radius > push_constants.z_near;
 
     // Check that object does not cross over either of the left/right/top/bottom planes by
     // radius distance (exploits frustum symmetry with the abs()).
-    visible &= (center.z * push_constants.frustum_x_xz.y
+    visible &= center.z * push_constants.frustum_x_xz.y
         - center.x.abs() * push_constants.frustum_x_xz.x
-        < radius) as u32;
-    visible &= (center.z * push_constants.frustum_y_yz.y
+        < radius;
+    visible &= center.z * push_constants.frustum_y_yz.y
         - center.y.abs() * push_constants.frustum_y_yz.x
-        < radius) as u32;
+        < radius;
 
-    visible == 0
+    !visible
 }
 
 const NUM_DRAW_BUFFERS: usize = 4;

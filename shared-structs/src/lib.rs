@@ -311,16 +311,11 @@ impl ClusterAabb {
 
         let distance_closest_point = angle.cos() * (vector_len_sq - vector_1_len_sq).sqrt() - vector_1_len * angle.sin();
 
-        let mut cull = 0;
+        let angle_cull = distance_closest_point > radius;
+        let front_cull = vector_1_len > radius + range;
+        let back_cull = vector_1_len < -radius;
 
-        // angle cull
-        cull |= (distance_closest_point > radius) as u32;
-        // front cull
-        cull |= (vector_1_len > radius + range) as u32;
-        // back cull
-        cull |= (vector_1_len < -radius) as u32;
-
-        cull == 1
+        angle_cull || front_cull || back_cull
     }
 }
 
