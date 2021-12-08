@@ -33,28 +33,30 @@ pub struct Uniforms {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct LightClusterCoefficients {
-    pub coefficient_scale: f32,
-    pub coefficient_bias: f32,
-    pub index_scale: f32,
-    pub index_bias: f32,
+    pub z_near: f32,
+    pub z_far: f32,
+    pub scale: f32,
+    pub bias: f32,
 }
 
 impl LightClusterCoefficients {
-    pub fn new(z_near: f32, z_far: f32, z_special_near: f32, max_depth_slices: u32) -> Self {
+    pub fn new(z_near: f32, z_far: f32, num_depth_slices: u32) -> Self {
         Self {
-            // todo: filament uses opengl depth (-1 to 1) as opposed to vulkan depth (0 to 1)
-            // so we set the scale and bias accordingly
-            coefficient_scale: 2.0 * ((z_far / z_near) - 1.0),
-            coefficient_bias: 1.0,
-            index_scale: ((max_depth_slices - 1) as f32 / (z_special_near / z_far).log2()),
-            index_bias: max_depth_slices as f32
+           z_near,
+           z_far,
+           scale: num_depth_slices as f32 / (z_far / z_near).log2(),
+           bias: -(num_depth_slices as f32 * z_near.log2() / (z_far / z_near).log2())
         }
+    }
+
+    fn linear_depth(self, frag_depth: f32) -> f32 {
+        let depth_range = 2.0 * (1.0 - frag_depth) - 1.0;
+        2.0 * self.z_near * self.z_far / (self.z_far + self.z_near - depth_range * (self.z_far - self.z_near))
     }
 
     // https://www.desmos.com/calculator/spahzn1han
     pub fn get_depth_slice(self, frag_depth: f32) -> u32 {
-        let linear_depth = frag_depth * self.coefficient_scale + self.coefficient_bias;
-        (linear_depth.log2() * self.index_scale + self.index_bias).max(0.0) as u32
+        (self.linear_depth(frag_depth).log2() * self.scale + self.bias).max(0.0) as u32
     }
 }
 

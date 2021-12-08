@@ -35,19 +35,27 @@ use pipelines::Pipelines;
 use profiling::ProfilingContext;
 use render_passes::RenderPasses;
 
-fn perspective_infinite_z_vk(vertical_fov: f32, aspect_ratio: f32, z_near: f32) -> Mat4 {
+fn perspective_matrix_reversed(width: u32, height: u32) -> Mat4 {
+    let aspect_ratio = width as f32 / height as f32;
+    let vertical_fov = 59.0_f32.to_radians();
+
     let focal_length = 1.0 / (vertical_fov / 2.0).tan();
+
+    let a = Z_NEAR / (Z_FAR - Z_NEAR);
+    let b = Z_FAR * a;
 
     Mat4::from_cols(
         Vec4::new(focal_length / aspect_ratio, 0.0, 0.0, 0.0),
         Vec4::new(0.0, -focal_length, 0.0, 0.0),
-        Vec4::new(0.0, 0.0, 0.0, -1.0),
-        Vec4::new(0.0, 0.0, z_near, 0.0),
+        Vec4::new(0.0, 0.0, a, -1.0),
+        Vec4::new(0.0, 0.0, b, 0.0),
     )
 }
 
+pub const Z_NEAR: f32 = 0.01;
+pub const Z_FAR: f32 = 500.0;
+
 pub const MAX_IMAGES: u32 = 193;
-pub const NEAR_Z: f32 = 0.01;
 pub const NUM_TILES_X: u32 = 12;
 pub const NUM_TILES_Y: u32 = 8;
 pub const NUM_DEPTH_SLICES: u32 = 16;
@@ -485,10 +493,8 @@ fn main() -> anyhow::Result<()> {
         camera.final_transform.up(),
     );
 
-    let mut perspective_matrix = perspective_infinite_z_vk(
-        59.0_f32.to_radians(),
-        extent.width as f32 / extent.height as f32,
-        NEAR_Z,
+    let mut perspective_matrix = perspective_matrix_reversed(
+        extent.width, extent.height,
     );
 
     let num_tiles = UVec2::new(NUM_TILES_X, NUM_TILES_Y);
@@ -511,9 +517,8 @@ fn main() -> anyhow::Result<()> {
         // https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering
         // which uses opengl and a depth range of -1 to 1.
         light_clustering_coefficients: shared_structs::LightClusterCoefficients::new(
-            NEAR_Z,
-            5.0,
-            0.5,
+            Z_NEAR,
+            Z_FAR,
             NUM_DEPTH_SLICES
         )
     };
@@ -954,10 +959,8 @@ fn main() -> anyhow::Result<()> {
                             Vec2::new(extent.width as f32, extent.height as f32)
                                 / num_tiles.as_vec2();
 
-                        perspective_matrix = perspective_infinite_z_vk(
-                            59.0_f32.to_radians(),
-                            extent.width as f32 / extent.height as f32,
-                            NEAR_Z,
+                        perspective_matrix = perspective_matrix_reversed(
+                            extent.width, extent.height
                         );
 
                         screen_center = winit::dpi::LogicalPosition::new(
@@ -1586,7 +1589,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 view: view_matrix,
                 frustum_x_xz: frustum_x.xz(),
                 frustum_y_yz: frustum_y.yz(),
-                z_near: NEAR_Z,
+                z_near: Z_NEAR,
             }),
         );
 
