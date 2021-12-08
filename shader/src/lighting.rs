@@ -3,7 +3,7 @@ use glam_pbr::{
     basic_brdf, light_direction_and_attenuation, BasicBrdfParams, BrdfResult, IndexOfRefraction,
     Light as LightDir, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, Light , Uniforms};
+use shared_structs::{Light, MaterialInfo, Uniforms};
 use spirv_std::{
     glam::{Mat3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
@@ -73,7 +73,7 @@ pub fn evaluate_lights_transmission(
         #[cfg(not(target_feature = "RayQueryKHR"))]
         let factor = 1.0;
 
-        let light_emission = light.colour_emission_and_falloff_distance.truncate() * factor;
+        let light_emission = light.colour_emission_and_falloff_distance_sq.truncate() * factor;
 
         sum = sum
             + basic_brdf(BasicBrdfParams {
@@ -199,7 +199,7 @@ pub fn evaluate_lights(
             factor *= light.spotlight_factor(direction);
         }
 
-        let light_emission = light.colour_emission_and_falloff_distance.truncate() * factor;
+        let light_emission = light.colour_emission_and_falloff_distance_sq.truncate() * factor;
 
         sum = sum
             + basic_brdf(BasicBrdfParams {

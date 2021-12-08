@@ -56,10 +56,10 @@ pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
 pub const MAX_IMAGES: u32 = 193;
-pub const NUM_TILES_X: u32 = 12;
-pub const NUM_TILES_Y: u32 = 8;
+pub const NUM_CLUSTERS_X: u32 = 12;
+pub const NUM_CLUSTERS_Y: u32 = 8;
 pub const NUM_DEPTH_SLICES: u32 = 16;
-pub const NUM_FROXELS: u32 = NUM_TILES_X * NUM_TILES_Y * NUM_DEPTH_SLICES;
+pub const NUM_CLUSTERS: u32 = NUM_CLUSTERS_X * NUM_CLUSTERS_Y * NUM_DEPTH_SLICES;
 
 #[derive(StructOpt)]
 struct Opt {
@@ -436,43 +436,55 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    dbg!(NUM_FROXELS);
+    dbg!(NUM_CLUSTERS);
 
     let lights = [
         Light::new_point(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
         Light::new_point(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
-        Light::new_spot(Vec3::new(0.0, 4.0, 0.0), Vec3::new(1.0, 1.0, 0.5), 50.0, Vec3::Z, 0.7, 0.8),
-        Light::new_spot(Vec3::new(0.0, 4.0, 0.0), Vec3::new(1.0, 1.0, 0.5), 50.0, -Vec3::Z, 0.7, 0.8),
+        Light::new_spot(
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.5),
+            50.0,
+            Vec3::Z,
+            0.7,
+            0.8,
+        ),
+        Light::new_spot(
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.5),
+            50.0,
+            -Vec3::Z,
+            0.7,
+            0.8,
+        ),
     ];
 
     let light_buffers = LightBuffers {
         lights: ash_abstractions::Buffer::new(
-            unsafe {
-                cast_slice(&lights)
-            },
+            unsafe { cast_slice(&lights) },
             "lights",
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &mut init_resources,
         )?,
-        froxel_light_counts: ash_abstractions::Buffer::new_of_size(
-            4 * NUM_FROXELS as u64,
-            "froxel light counts",
+        cluster_light_counts: ash_abstractions::Buffer::new_of_size(
+            4 * NUM_CLUSTERS as u64,
+            "cluster light counts",
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
             &mut init_resources,
         )?,
-        froxel_light_indices: ash_abstractions::Buffer::new_of_size(
-            4 * NUM_FROXELS as u64 * shared_structs::MAX_LIGHTS_PER_FROXEL as u64,
-            "froxel light indices",
+        cluster_light_indices: ash_abstractions::Buffer::new_of_size(
+            4 * NUM_CLUSTERS as u64 * shared_structs::MAX_LIGHTS_PER_CLUSTER as u64,
+            "cluster light indices",
             vk::BufferUsageFlags::STORAGE_BUFFER,
             &mut init_resources,
         )?,
     };
 
-    let froxel_data_buffer = ash_abstractions::Buffer::new_of_size(
-        NUM_FROXELS as u64 * std::mem::size_of::<shared_structs::FroxelData>() as u64,
-        "froxel data buffer",
+    let cluster_data_buffer = ash_abstractions::Buffer::new_of_size(
+        NUM_CLUSTERS as u64 * std::mem::size_of::<shared_structs::ClusterAabb>() as u64,
+        "cluster data buffer",
         vk::BufferUsageFlags::STORAGE_BUFFER,
-        &mut init_resources
+        &mut init_resources,
     )?;
 
     let tonemapping_params = colstodian::tonemap::BakedLottesTonemapperParams::from(
@@ -495,11 +507,9 @@ fn main() -> anyhow::Result<()> {
         camera.final_transform.up(),
     );
 
-    let mut perspective_matrix = perspective_matrix_reversed(
-        extent.width, extent.height,
-    );
+    let mut perspective_matrix = perspective_matrix_reversed(extent.width, extent.height);
 
-    let num_tiles = UVec2::new(NUM_TILES_X, NUM_TILES_Y);
+    let num_clusters = UVec2::new(NUM_CLUSTERS_X, NUM_CLUSTERS_Y);
 
     let mut sun_velocity = Vec2::ZERO;
     let mut sun = Sun {
@@ -511,18 +521,18 @@ fn main() -> anyhow::Result<()> {
         sun_dir: sun.as_normal().into(),
         sun_intensity: Vec3::splat(3.0).into(),
         ggx_lut_texture_index: ggx_lut_id,
-        num_tiles,
-        tile_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
-            / num_tiles.as_vec2(),
-        debug_froxels: 0,
+        num_clusters,
+        cluster_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
+            / num_clusters.as_vec2(),
+        debug_clusters: 0,
         // todo: these values are a bit nonsense as I based it off the filament implementation:
         // https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering
         // which uses opengl and a depth range of -1 to 1.
         light_clustering_coefficients: shared_structs::LightClusterCoefficients::new(
             Z_NEAR,
             Z_FAR,
-            NUM_DEPTH_SLICES
-        )
+            NUM_DEPTH_SLICES,
+        ),
     };
 
     dbg!(&uniforms);
@@ -638,7 +648,6 @@ fn main() -> anyhow::Result<()> {
     } else {
         (None, Vec::new())
     };
-
 
     let mut draw_framebuffer = create_draw_framebuffer(
         &device,
@@ -768,12 +777,12 @@ fn main() -> anyhow::Result<()> {
                     .dst_set(descriptor_sets.lights)
                     .dst_binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&buffer_info(&light_buffers.froxel_light_counts)),
+                    .buffer_info(&buffer_info(&light_buffers.cluster_light_counts)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.lights)
                     .dst_binding(2)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&buffer_info(&light_buffers.froxel_light_indices)),
+                    .buffer_info(&buffer_info(&light_buffers.cluster_light_indices)),
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.acceleration_structure_debugging)
                     .dst_binding(1)
@@ -782,12 +791,10 @@ fn main() -> anyhow::Result<()> {
                         &acceleration_structure_debugging_uniforms_buffer,
                     )),
                 *vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_sets.froxel_data)
+                    .dst_set(descriptor_sets.cluster_data)
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                    .buffer_info(&buffer_info(
-                        &froxel_data_buffer,
-                    )),
+                    .buffer_info(&buffer_info(&cluster_data_buffer)),
             ],
             &[],
         )
@@ -796,7 +803,13 @@ fn main() -> anyhow::Result<()> {
     descriptor_sets.update_framebuffers(&device, &hdr_framebuffer, &opaque_sampled_hdr_framebuffer);
 
     unsafe {
-        record_write_froxel_data(&init_resources, &pipelines, &descriptor_sets);
+        record_write_cluster_data(
+            &init_resources,
+            &pipelines,
+            &descriptor_sets,
+            perspective_matrix,
+            UVec2::new(extent.width, extent.height),
+        );
     }
 
     {
@@ -913,10 +926,10 @@ fn main() -> anyhow::Result<()> {
                                         window.set_fullscreen(Some(Fullscreen::Borderless(None)))
                                     }
                                 }
-                            },
+                            }
                             VirtualKeyCode::F => {
                                 if is_pressed {
-                                    uniforms.debug_froxels = 1 - uniforms.debug_froxels;
+                                    uniforms.debug_clusters = 1 - uniforms.debug_clusters;
                                 }
                             }
                             VirtualKeyCode::G => {
@@ -957,13 +970,14 @@ fn main() -> anyhow::Result<()> {
 
                         push_constants.framebuffer_size = UVec2::new(extent.width, extent.height);
 
-                        uniforms.tile_size_in_pixels =
+                        uniforms.cluster_size_in_pixels =
                             Vec2::new(extent.width as f32, extent.height as f32)
-                                / num_tiles.as_vec2();
+                                / num_clusters.as_vec2();
 
-                        perspective_matrix = perspective_matrix_reversed(
-                            extent.width, extent.height
-                        );
+                        uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
+
+                        perspective_matrix =
+                            perspective_matrix_reversed(extent.width, extent.height);
 
                         screen_center = winit::dpi::LogicalPosition::new(
                             extent.width as f64 / 2.0,
@@ -1068,7 +1082,13 @@ fn main() -> anyhow::Result<()> {
                         }
 
                         unsafe {
-                            record_write_froxel_data(&init_resources, &pipelines, &descriptor_sets);
+                            record_write_cluster_data(
+                                &init_resources,
+                                &pipelines,
+                                &descriptor_sets,
+                                perspective_matrix,
+                                UVec2::new(extent.width, extent.height),
+                            );
                         }
 
                         drop(init_resources);
@@ -1127,9 +1147,12 @@ fn main() -> anyhow::Result<()> {
                     let move_vec = camera.final_transform.rotation
                         * Vec3::new(right as f32, 0.0, -forwards as f32).clamp_length_max(1.0);
 
+                    let speed = 3.0;
+                    //let speed = 100.0;
+
                     camera
                         .driver_mut::<dolly::drivers::Position>()
-                        .translate(move_vec * delta_time * 3.0);
+                        .translate(move_vec * delta_time * speed);
 
                     camera.update(delta_time);
 
@@ -1330,8 +1353,8 @@ fn main() -> anyhow::Result<()> {
 
 struct LightBuffers {
     lights: ash_abstractions::Buffer,
-    froxel_light_counts: ash_abstractions::Buffer,
-    froxel_light_indices: ash_abstractions::Buffer,
+    cluster_light_counts: ash_abstractions::Buffer,
+    cluster_light_indices: ash_abstractions::Buffer,
 }
 
 impl LightBuffers {
@@ -1341,31 +1364,51 @@ impl LightBuffers {
         allocator: &mut gpu_allocator::vulkan::Allocator,
     ) -> anyhow::Result<()> {
         self.lights.cleanup(device, allocator)?;
-        self.froxel_light_counts.cleanup(device, allocator)?;
-        self.froxel_light_indices.cleanup(device, allocator)?;
+        self.cluster_light_counts.cleanup(device, allocator)?;
+        self.cluster_light_indices.cleanup(device, allocator)?;
         Ok(())
     }
 }
 
-unsafe fn record_write_froxel_data(
+unsafe fn record_write_cluster_data(
     init_resources: &ash_abstractions::InitResources,
     pipelines: &Pipelines,
     descriptor_sets: &DescriptorSets,
+    perspective_matrix: Mat4,
+    screen_dimensions: UVec2,
 ) {
-    init_resources.device.cmd_bind_pipeline(init_resources.command_buffer, vk::PipelineBindPoint::COMPUTE, pipelines.write_froxel_data);
+    init_resources.device.cmd_bind_pipeline(
+        init_resources.command_buffer,
+        vk::PipelineBindPoint::COMPUTE,
+        pipelines.write_cluster_data,
+    );
 
     init_resources.device.cmd_bind_descriptor_sets(
         init_resources.command_buffer,
         vk::PipelineBindPoint::COMPUTE,
-        pipelines.write_froxel_data_pipeline_layout,
+        pipelines.write_cluster_data_pipeline_layout,
         0,
-        &[
-            descriptor_sets.froxel_data
-        ],
+        &[descriptor_sets.main, descriptor_sets.cluster_data],
         &[],
     );
 
-    init_resources.device.cmd_dispatch(init_resources.command_buffer, dispatch_count(NUM_FROXELS, 64), 1, 1);
+    init_resources.device.cmd_push_constants(
+        init_resources.command_buffer,
+        pipelines.write_cluster_data_pipeline_layout,
+        vk::ShaderStageFlags::COMPUTE,
+        0,
+        bytes_of(&shared_structs::WriteClusterDataPushConstants {
+            inverse_perspective: perspective_matrix.inverse(),
+            screen_dimensions,
+        }),
+    );
+
+    init_resources.device.cmd_dispatch(
+        init_resources.command_buffer,
+        dispatch_count(NUM_CLUSTERS_X, 4),
+        dispatch_count(NUM_CLUSTERS_Y, 4),
+        dispatch_count(NUM_DEPTH_SLICES, 4),
+    );
 }
 
 struct RecordParams<'a> {
@@ -1543,7 +1586,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
             device.cmd_fill_buffer(
                 command_buffer,
-                light_buffers.froxel_light_counts.buffer,
+                light_buffers.cluster_light_counts.buffer,
                 0,
                 vk::WHOLE_SIZE,
                 0,
@@ -1613,21 +1656,35 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         }
 
         {
-            device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, pipelines.assign_lights_to_froxels);
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.assign_lights_to_clusters,
+            );
 
             device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
                 pipelines.lights_pipeline_layout,
                 0,
-                &[
-                    descriptor_sets.lights,
-                    descriptor_sets.froxel_data
-                ],
+                &[descriptor_sets.lights, descriptor_sets.cluster_data],
                 &[],
             );
 
-            device.cmd_dispatch(command_buffer, dispatch_count(NUM_FROXELS, 8), dispatch_count(num_lights, 8), 1);
+            device.cmd_push_constants(
+                command_buffer,
+                pipelines.lights_pipeline_layout,
+                vk::ShaderStageFlags::COMPUTE,
+                0,
+                bytes_of(&shared_structs::AssignLightsPushConstants { view_matrix }),
+            );
+
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(NUM_CLUSTERS, 8),
+                dispatch_count(num_lights, 8),
+                1,
+            );
         }
 
         vk_sync::cmd::pipeline_barrier(
@@ -1778,10 +1835,44 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
 
+    /*{
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.cluster_debugging,
+        );
+
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.cluster_debugging_pipeline_layout,
+            0,
+            &[
+                descriptor_sets.cluster_data,
+            ],
+            &[],
+        );
+
+        device.cmd_draw(command_buffer, NUM_CLUSTERS * 8, 1, 0, 0);
+    }*/
+
     device.cmd_bind_pipeline(
         command_buffer,
         vk::PipelineBindPoint::GRAPHICS,
         pipelines.normal,
+    );
+
+    device.cmd_bind_descriptor_sets(
+        command_buffer,
+        vk::PipelineBindPoint::GRAPHICS,
+        pipelines.pipeline_layout,
+        0,
+        &[
+            descriptor_sets.main,
+            descriptor_sets.instance_buffer,
+            descriptor_sets.lights,
+        ],
+        &[],
     );
 
     {
@@ -2408,6 +2499,8 @@ impl Castable for vk::AccelerationStructureInstanceKHR {}
 impl Castable for shared_structs::CullingPushConstants {}
 impl Castable for shared_structs::PrimitiveInfo {}
 impl Castable for shared_structs::AccelerationStructureDebuggingUniforms {}
+impl Castable for shared_structs::WriteClusterDataPushConstants {}
+impl Castable for shared_structs::AssignLightsPushConstants {}
 impl Castable for colstodian::tonemap::BakedLottesTonemapperParams {}
 
 unsafe fn cast_slice<T: Castable>(slice: &[T]) -> &[u8] {

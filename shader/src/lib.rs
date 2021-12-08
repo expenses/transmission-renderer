@@ -18,14 +18,14 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
-    AccelerationStructureDebuggingUniforms, CullingPushConstants, Instance, MaterialInfo,
-    Light, PrimitiveInfo, PushConstants, Similarity, Uniforms, MAX_LIGHTS_PER_FROXEL,
-    FroxelData, Plane,
+    AccelerationStructureDebuggingUniforms, AssignLightsPushConstants, ClusterAabb,
+    CullingPushConstants, Instance, Light, MaterialInfo, PrimitiveInfo, PushConstants, Similarity,
+    Uniforms, WriteClusterDataPushConstants, MAX_LIGHTS_PER_CLUSTER,
 };
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles, const_vec3},
+    glam::{const_vec3, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
@@ -47,7 +47,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
-    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] froxel_light_counts: &[u32],
+    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
     #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     #[spirv(frag_coord)] frag_coord: Vec4,
@@ -84,14 +84,16 @@ pub fn fragment_transmission(
 
     let emission = get_emission(material, &texture_sampler);
 
-    let froxel = {
-        let froxel_xy = (frag_coord.xy() / uniforms.tile_size_in_pixels).as_uvec2();
+    let cluster = {
+        let cluster_xy = (frag_coord.xy() / uniforms.cluster_size_in_pixels).as_uvec2();
 
-        let froxel_z = uniforms.light_clustering_coefficients.get_depth_slice(
-            frag_coord.z
-        );
+        let cluster_z = uniforms
+            .light_clustering_coefficients
+            .get_depth_slice(frag_coord.z);
 
-        froxel_z * uniforms.num_tiles.x * uniforms.num_tiles.y + froxel_xy.y * uniforms.num_tiles.x + froxel_xy.x
+        cluster_z * uniforms.num_clusters.x * uniforms.num_clusters.y
+            + cluster_xy.y * uniforms.num_clusters.x
+            + cluster_xy.x
     };
 
     #[cfg(target_feature = "RayQueryKHR")]
@@ -105,10 +107,10 @@ pub fn fragment_transmission(
         normal,
         uniforms,
         LightParams {
-            num_lights: *index(froxel_light_counts, froxel),
-            light_indices_offset: froxel * MAX_LIGHTS_PER_FROXEL,
+            num_lights: *index(cluster_light_counts, cluster),
+            light_indices_offset: cluster * MAX_LIGHTS_PER_CLUSTER,
             light_indices,
-            lights
+            lights,
         },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
@@ -170,7 +172,7 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
-    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] froxel_light_counts: &[u32],
+    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
     #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
     #[spirv(frag_coord)] frag_coord: Vec4,
     hdr_framebuffer: &mut Vec4,
@@ -199,21 +201,23 @@ pub fn fragment(
 
     let emission = get_emission(material, &texture_sampler);
 
-    let froxel_z = uniforms.light_clustering_coefficients.get_depth_slice(
-        frag_coord.z
-    );
+    let cluster_z = uniforms
+        .light_clustering_coefficients
+        .get_depth_slice(frag_coord.z);
 
-    let froxel = {
-        let froxel_xy = (frag_coord.xy() / uniforms.tile_size_in_pixels).as_uvec2();
+    let cluster = {
+        let cluster_xy = (frag_coord.xy() / uniforms.cluster_size_in_pixels).as_uvec2();
 
-        froxel_z * uniforms.num_tiles.x * uniforms.num_tiles.y + froxel_xy.y * uniforms.num_tiles.x + froxel_xy.x
+        cluster_z * uniforms.num_clusters.x * uniforms.num_clusters.y
+            + cluster_xy.y * uniforms.num_clusters.x
+            + cluster_xy.x
     };
 
     #[cfg(target_feature = "RayQueryKHR")]
     let acceleration_structure =
         unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
 
-    let num_lights = *index(froxel_light_counts, froxel);
+    let num_lights = *index(cluster_light_counts, cluster);
 
     let result = evaluate_lights(
         material_params,
@@ -223,9 +227,9 @@ pub fn fragment(
         uniforms,
         LightParams {
             num_lights,
-            light_indices_offset: froxel * MAX_LIGHTS_PER_FROXEL,
+            light_indices_offset: cluster * MAX_LIGHTS_PER_CLUSTER,
             light_indices,
-            lights
+            lights,
         },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
@@ -233,9 +237,10 @@ pub fn fragment(
 
     let mut output = (result.diffuse + result.specular + emission).extend(1.0);
 
-    if uniforms.debug_froxels != 0 {
-        output = (debug_colour_for_id(num_lights) + (debug_colour_for_id(froxel) - 0.5 ) * 0.025).extend(1.0);
-        output = (debug_colour_for_id(froxel_z)).extend(1.0);
+    if uniforms.debug_clusters != 0 {
+        output = (debug_colour_for_id(num_lights) + (debug_colour_for_id(cluster) - 0.5) * 0.025)
+            .extend(1.0);
+        //output = (debug_colour_for_id(cluster_z)).extend(1.0);
     }
 
     *hdr_framebuffer = output;
@@ -447,8 +452,12 @@ fn cull(
 
     // Check that object does not cross over either of the left/right/top/bottom planes by
     // radius distance (exploits frustum symmetry with the abs()).
-    visible &= (center.z * push_constants.frustum_x_xz.y - center.x.abs() * push_constants.frustum_x_xz.x < radius) as u32;
-    visible &= (center.z * push_constants.frustum_y_yz.y - center.y.abs() * push_constants.frustum_y_yz.x < radius) as u32;
+    visible &= (center.z * push_constants.frustum_x_xz.y
+        - center.x.abs() * push_constants.frustum_x_xz.x
+        < radius) as u32;
+    visible &= (center.z * push_constants.frustum_y_yz.y
+        - center.y.abs() * push_constants.frustum_y_yz.x
+        < radius) as u32;
 
     visible == 0
 }
@@ -502,42 +511,96 @@ pub fn demultiplex_draws(
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(compute(threads(64)))]
-pub fn write_froxel_data(
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] froxel_data: &mut [FroxelData],
+#[spirv(compute(threads(4, 4, 4)))]
+pub fn write_cluster_data(
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] cluster_data: &mut [ClusterAabb],
+    #[spirv(push_constant)] push_constants: &WriteClusterDataPushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
-    let froxel_id = id.x;
+    let cluster_id = id.z * uniforms.num_clusters.x * uniforms.num_clusters.y
+        + id.y * uniforms.num_clusters.x
+        + id.x;
 
-    if froxel_id as usize >= froxel_data.len() {
+    if cluster_id as usize >= cluster_data.len() {
         return;
     }
 
-    let froxel = FroxelData {
-        left_plane: Plane::new(Vec3::ZERO),
-        right_plane: Plane::new(Vec3::ZERO),
-        top_plane: Plane::new(Vec3::ZERO),
-        bottom_plane: Plane::new(Vec3::ZERO),
-        z_near: 0.0,
-        z_far: 1.0
+    let cluster_xy = id.truncate();
+
+    let screen_space_min = cluster_xy.as_vec2() * uniforms.cluster_size_in_pixels;
+    let screen_space_max = (cluster_xy + 1).as_vec2() * uniforms.cluster_size_in_pixels;
+
+    let screen_to_clip = |mut pos: Vec2| {
+        pos /= push_constants.screen_dimensions.as_vec2();
+        pos = pos * 2.0 - 1.0;
+        Vec4::new(pos.x, pos.y, 0.0, 1.0)
     };
 
-    *index_mut(froxel_data, froxel_id) = froxel;
+    let clip_to_view = |mut pos: Vec4| {
+        pos = push_constants.inverse_perspective * pos;
+
+        pos.truncate() / pos.w
+    };
+
+    let view_space_min = clip_to_view(screen_to_clip(screen_space_min));
+    let view_space_max = clip_to_view(screen_to_clip(screen_space_max));
+
+    let z_near = uniforms.light_clustering_coefficients.slice_to_depth(id.z);
+    let z_far = uniforms
+        .light_clustering_coefficients
+        .slice_to_depth(id.z + 1);
+
+    let eye = Vec3::new(0.0, 0.0, 1.0);
+    let min_point_near = line_intersection_to_z_plane(eye, view_space_min, z_near);
+    let min_point_far = line_intersection_to_z_plane(eye, view_space_min, z_far);
+    let max_point_near = line_intersection_to_z_plane(eye, view_space_max, z_near);
+    let max_point_far = line_intersection_to_z_plane(eye, view_space_max, z_far);
+
+    let cluster = ClusterAabb {
+        min: min_point_near
+            .min(min_point_far)
+            .min(max_point_near)
+            .min(max_point_far)
+            .into(),
+        max: min_point_near
+            .max(min_point_far)
+            .max(max_point_near)
+            .max(max_point_far)
+            .into(),
+    };
+
+    *index_mut(cluster_data, cluster_id) = cluster;
+}
+
+// https://github.com/Angelo1211/HybridRenderingEngine/blob/67a03045e7a96df491b3b0f21ef52c453798eafb/assets/shaders/ComputeShaders/clusterShader.comp#L63-L78
+fn line_intersection_to_z_plane(a: Vec3, b: Vec3, z_distance: f32) -> Vec3 {
+    // Because this is a Z based normal this is fixed
+    let normal = Vec3::new(0.0, 0.0, 1.0);
+
+    let a_to_b = b - a;
+
+    // Computing the intersection length for the line and the plane
+    let t = (z_distance - normal.dot(a)) / normal.dot(a_to_b);
+
+    // Computing the actual xyz position of the point along the line
+    a + t * a_to_b
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(compute(threads(8, 8)))]
-pub fn assign_lights_to_froxels(
+pub fn assign_lights_to_clusters(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] lights: &[Light],
-    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] froxel_light_counts: &mut [u32],
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] froxel_light_indices: &mut [u32],
-    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] froxel_data: &[FroxelData],
+    #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] cluster_light_counts: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] cluster_light_indices: &mut [u32],
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] cluster_data: &[ClusterAabb],
+    #[spirv(push_constant)] push_constants: &AssignLightsPushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
-    let froxel_id = id.x;
+    let cluster_id = id.x;
     let light_id = id.y;
 
-    if froxel_id as usize >= froxel_data.len() {
+    if cluster_id as usize >= cluster_data.len() {
         return;
     }
 
@@ -545,11 +608,22 @@ pub fn assign_lights_to_froxels(
         return;
     }
 
-    let light_offset = atomic_i_increment(index_mut(froxel_light_counts, froxel_id));
+    let cluster = index(cluster_data, cluster_id);
+    let light = index(lights, light_id);
 
-    let global_light_index = froxel_id * MAX_LIGHTS_PER_FROXEL + light_offset;
+    let light_position = (push_constants.view_matrix * light.position().extend(1.0)).truncate();
 
-    *index_mut(froxel_light_indices, global_light_index) = light_id;
+    let falloff_distance_sq = light.colour_emission_and_falloff_distance_sq.w;
+
+    if cluster.distance_sq(light_position) > falloff_distance_sq {
+        return;
+    }
+
+    let light_offset = atomic_i_increment(index_mut(cluster_light_counts, cluster_id));
+
+    let global_light_index = cluster_id * MAX_LIGHTS_PER_CLUSTER + light_offset;
+
+    *index_mut(cluster_light_indices, global_light_index) = light_id;
 }
 
 const DEBUG_COLOURS: [Vec3; 15] = [
@@ -568,7 +642,7 @@ const DEBUG_COLOURS: [Vec3; 15] = [
     const_vec3!([0.8392, 0.0, 0.0]),      // red
     const_vec3!([1.0, 0.0, 1.0]),         // magenta
     const_vec3!([0.6, 0.3333, 0.7882]),   // purple
-    //const_vec3!([1.0, 1.0, 1.0]),         // white
+                                          //const_vec3!([1.0, 1.0, 1.0]),         // white
 ];
 
 fn debug_colour_for_id(id: u32) -> Vec3 {
@@ -665,4 +739,45 @@ pub fn acceleration_structure_debugging(
 
         output.write(id.truncate(), colour);
     };
+}
+
+#[cfg(not(target_feature = "RayQueryKHR"))]
+#[spirv(vertex)]
+pub fn cluster_debugging_vs(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] cluster_data: &[ClusterAabb],
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    out_colour: &mut Vec3,
+    #[spirv(position)] builtin_pos: &mut Vec4,
+) {
+    let cluster = index(cluster_data, vertex_index / 8);
+
+    let points = [
+        Vec3::from(cluster.min),
+        Vec3::new(cluster.min.x, cluster.min.y, cluster.max.z),
+        Vec3::from(cluster.min),
+        Vec3::new(cluster.min.x, cluster.max.y, cluster.min.z),
+        Vec3::from(cluster.min),
+        Vec3::new(cluster.max.x, cluster.min.y, cluster.min.z),
+        Vec3::new(cluster.max.x, cluster.max.y, cluster.min.z),
+        Vec3::from(cluster.max),
+    ];
+
+    let position = *index(&points, vertex_index % points.len() as u32);
+
+    *builtin_pos = push_constants.proj_view * position.extend(1.0);
+
+    *out_colour = Vec3::X.lerp(Vec3::Y, (vertex_index % 2) as f32);
+}
+
+#[cfg(not(target_feature = "RayQueryKHR"))]
+#[spirv(fragment)]
+pub fn cluster_debugging_fs(
+    colour: Vec3,
+    hdr_framebuffer: &mut Vec4,
+    opaque_sampled_framebuffer: &mut Vec4,
+) {
+    let output = colour.extend(1.0);
+    *hdr_framebuffer = output;
+    *opaque_sampled_framebuffer = output;
 }

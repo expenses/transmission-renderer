@@ -22,9 +22,9 @@ pub struct Uniforms {
     pub light_clustering_coefficients: LightClusterCoefficients,
     pub sun_dir: Vec3A,
     pub sun_intensity: Vec3A,
-    pub tile_size_in_pixels: Vec2,
-    pub num_tiles: UVec2,
-    pub debug_froxels: u32,
+    pub cluster_size_in_pixels: Vec2,
+    pub num_clusters: UVec2,
+    pub debug_clusters: u32,
     pub ggx_lut_texture_index: u32,
 }
 
@@ -37,26 +37,33 @@ pub struct LightClusterCoefficients {
     pub z_far: f32,
     pub scale: f32,
     pub bias: f32,
+    pub num_depth_slices: u32,
 }
 
 impl LightClusterCoefficients {
     pub fn new(z_near: f32, z_far: f32, num_depth_slices: u32) -> Self {
         Self {
-           z_near,
-           z_far,
-           scale: num_depth_slices as f32 / (z_far / z_near).log2(),
-           bias: -(num_depth_slices as f32 * z_near.log2() / (z_far / z_near).log2())
+            z_near,
+            z_far,
+            num_depth_slices,
+            scale: num_depth_slices as f32 / (z_far / z_near).log2(),
+            bias: -(num_depth_slices as f32 * z_near.log2() / (z_far / z_near).log2()),
         }
     }
 
     fn linear_depth(self, frag_depth: f32) -> f32 {
         let depth_range = 2.0 * (1.0 - frag_depth) - 1.0;
-        2.0 * self.z_near * self.z_far / (self.z_far + self.z_near - depth_range * (self.z_far - self.z_near))
+        2.0 * self.z_near * self.z_far
+            / (self.z_far + self.z_near - depth_range * (self.z_far - self.z_near))
     }
 
     // https://www.desmos.com/calculator/spahzn1han
     pub fn get_depth_slice(self, frag_depth: f32) -> u32 {
         (self.linear_depth(frag_depth).log2() * self.scale + self.bias).max(0.0) as u32
+    }
+
+    pub fn slice_to_depth(self, slice: u32) -> f32 {
+        -self.z_near * (self.z_far / self.z_near).powf(slice as f32 / self.num_depth_slices as f32)
     }
 }
 
@@ -66,13 +73,13 @@ impl LightClusterCoefficients {
 // Really messily packed together :sweat_smile:
 pub struct Light {
     pub position_and_spotlight_epsilon: Vec4,
-    pub colour_emission_and_falloff_distance: Vec4,
+    pub colour_emission_and_falloff_distance_sq: Vec4,
     pub spotlight_direction_and_outer_cosine_angle: Vec4,
 }
 
 impl Light {
-    fn distance_at_strength(intensity: f32, strength: f32) -> f32 {
-        (intensity / strength).sqrt()
+    fn distance_sq_at_strength(intensity: f32, strength: f32) -> f32 {
+        intensity / strength
     }
 
     pub fn position(self) -> Vec3 {
@@ -80,23 +87,32 @@ impl Light {
     }
 
     pub fn new_point(position: Vec3, colour: Vec3, intensity: f32) -> Self {
-        let distance_at_0_1 = Self::distance_at_strength(intensity, 0.1);
+        let distance_sq_at_0_05 = Self::distance_sq_at_strength(intensity, 0.05);
 
         Self {
             position_and_spotlight_epsilon: position.extend(0.0),
-            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1),
+            colour_emission_and_falloff_distance_sq: (colour * intensity)
+                .extend(distance_sq_at_0_05),
             spotlight_direction_and_outer_cosine_angle: Vec4::ZERO,
         }
     }
 
-    pub fn new_spot(position: Vec3, colour: Vec3, intensity: f32, direction: Vec3, inner_angle_rad: f32, outer_angle_rad: f32) -> Self {
-        let distance_at_0_1 = Self::distance_at_strength(intensity, 0.1);
+    pub fn new_spot(
+        position: Vec3,
+        colour: Vec3,
+        intensity: f32,
+        direction: Vec3,
+        inner_angle_rad: f32,
+        outer_angle_rad: f32,
+    ) -> Self {
+        let distance_sq_at_0_05 = Self::distance_sq_at_strength(intensity, 0.05);
 
         let epsilon = inner_angle_rad.cos() - outer_angle_rad.cos();
 
         Self {
             position_and_spotlight_epsilon: position.extend(epsilon),
-            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1),
+            colour_emission_and_falloff_distance_sq: (colour * intensity)
+                .extend(distance_sq_at_0_05),
             spotlight_direction_and_outer_cosine_angle: direction.extend(outer_angle_rad.cos()),
         }
     }
@@ -261,54 +277,23 @@ pub struct CullingPushConstants {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct FroxelData {
-    pub left_plane: Plane,
-    pub right_plane: Plane,
-    pub top_plane: Plane,
-    pub bottom_plane: Plane,
-    pub z_near: f32,
-    pub z_far: f32,
+pub struct ClusterAabb {
+    pub min: Vec3A,
+    pub max: Vec3A,
 }
 
-impl FroxelData {
-    fn contains_sphere(&self, mut center: Vec3, radius: f32, view: Mat4) -> bool {
-        center = (view * center.extend(1.0)).truncate();
-        center.z = -center.z;
+impl ClusterAabb {
+    pub fn distance_sq(self, point: Vec3) -> f32 {
+        // Evaluate the distance on each axis
+        let distances = (Vec3::from(self.min) - point)
+            .max(point - Vec3::from(self.max))
+            .max(Vec3::ZERO);
 
-        let mut visible = 1;
-
-        visible &= (center.z + radius > self.z_near) as u32;
-        visible &= (center.z - radius <= self.z_far) as u32;
-
-        visible &= (self.left_plane.signed_distance(center) < radius) as u32;
-        visible &= (self.right_plane.signed_distance(center) < radius) as u32;
-        visible &= (self.top_plane.signed_distance(center) < radius) as u32;
-        visible &= (self.bottom_plane.signed_distance(center) < radius) as u32;
-
-        visible != 0
+        distances.length_squared()
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct Plane {
-    inner: Vec3A,
-}
-
-impl Plane {
-    pub fn new(plane: Vec3) -> Self {
-        Self {
-            inner: plane.into(),
-        }
-    }
-
-    fn signed_distance(&self, point: Vec3) -> f32 {
-        Vec3::from(self.inner).dot(point)
-    }
-}
-
-pub const MAX_LIGHTS_PER_FROXEL: u32 = 128;
+pub const MAX_LIGHTS_PER_CLUSTER: u32 = 128;
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
@@ -317,4 +302,19 @@ pub struct AccelerationStructureDebuggingUniforms {
     pub view_inverse: Mat4,
     pub proj_inverse: Mat4,
     pub size: UVec2,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct WriteClusterDataPushConstants {
+    pub inverse_perspective: Mat4,
+    pub screen_dimensions: UVec2,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct AssignLightsPushConstants {
+    pub view_matrix: Mat4,
 }
