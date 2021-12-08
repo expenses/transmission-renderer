@@ -258,6 +258,11 @@ impl<'a> TextureSampler<'a> {
         let texture = unsafe { self.textures.index(texture_id as usize) };
         texture.sample(self.sampler, self.uv)
     }
+
+    fn sample_by_lod_0(&self, texture_id: u32) -> Vec4 {
+        let texture = unsafe { self.textures.index(texture_id as usize) };
+        texture.sample_by_lod(self.sampler, self.uv, 0.0)
+    }
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
@@ -620,7 +625,7 @@ pub fn assign_lights_to_clusters(
     }
 
     if light.is_a_spotlight() {
-        // Todo: idk if using the inversed quat from the camera is working 100% here. 
+        // Todo: idk if using the inversed quat from the camera is working 100% here.
         let spotlight_direction = push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
 
         let angle = light.spotlight_direction_and_outer_angle.w;
@@ -695,8 +700,11 @@ pub fn fragment_tonemap(
 pub fn acceleration_structure_debugging(
     #[spirv(global_invocation_id)] id: UVec3,
     #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0)] output: &Image!(2D, format=rgba16f, sampled=false),
-    #[spirv(descriptor_set = 0, binding = 1, uniform)] uniforms: &AccelerationStructureDebuggingUniforms,
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 1, binding = 0)] output: &Image!(2D, format=rgba16f, sampled=false),
+    #[spirv(descriptor_set = 1, binding = 1, uniform)] uniforms: &AccelerationStructureDebuggingUniforms,
 ) {
     let id_xy = id.truncate();
 
@@ -727,7 +735,7 @@ pub fn acceleration_structure_debugging(
     unsafe {
         ray.initialize(
             &acceleration_structure,
-            RayFlags::OPAQUE,
+            RayFlags::NONE,
             0xff,
             origin,
             0.01,
@@ -735,7 +743,27 @@ pub fn acceleration_structure_debugging(
             1000.0,
         );
 
-        while ray.proceed() {}
+        while ray.proceed() {
+            let material_id = ray.get_candidate_intersection_instance_custom_index();
+
+            let material = index(materials, material_id);
+
+            let texture_sampler = TextureSampler {
+                uv: Vec2::ZERO,
+                textures,
+                sampler: *sampler,
+            };
+
+            let mut diffuse = material.diffuse_factor;
+
+            if material.textures.diffuse != -1 {
+                diffuse *= texture_sampler.sample_by_lod_0(material.textures.diffuse as u32)
+            }
+
+            if diffuse.w >= material.alpha_clipping_cutoff {
+                asm!("OpRayQueryConfirmIntersectionKHR {}", in(reg) ray);
+            }
+        }
 
         let colour = match ray.get_committed_intersection_type() {
             CommittedIntersection::None => Vec3::ZERO,

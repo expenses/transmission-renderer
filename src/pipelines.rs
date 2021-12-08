@@ -236,7 +236,7 @@ impl Pipelines {
         let acceleration_structure_debugging_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.acceleration_structure_debugging])
+                    .set_layouts(&[descriptor_set_layouts.main, descriptor_set_layouts.acceleration_structure_debugging])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),

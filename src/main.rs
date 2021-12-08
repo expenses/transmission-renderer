@@ -2136,7 +2136,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             vk::PipelineBindPoint::COMPUTE,
             pipelines.acceleration_structure_debugging_layout,
             0,
-            &[descriptor_sets.acceleration_structure_debugging],
+            &[descriptor_sets.main, descriptor_sets.acceleration_structure_debugging],
             &[],
         );
 
@@ -2721,7 +2721,7 @@ fn acceleration_structure_instance(
                 instance.transform.unpack().as_mat4(),
             ),
         },
-        instance_custom_index_and_mask: Packed24_8::new(0, 0xff).0,
+        instance_custom_index_and_mask: Packed24_8::new(instance.material_id, 0xff).0,
         instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
         acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
             device_handle: bottom_levels[instance.primitive_id as usize]

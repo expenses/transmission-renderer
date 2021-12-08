@@ -104,7 +104,7 @@ fn trace_shadow_ray(
     unsafe {
         ray.initialize(
             acceleration_structure,
-            RayFlags::OPAQUE,
+            RayFlags::NONE,
             0xff,
             origin,
             0.001,
@@ -112,7 +112,11 @@ fn trace_shadow_ray(
             max_t,
         );
 
-        while ray.proceed() {}
+        while ray.proceed() {
+            let material_index = ray.get_candidate_intersection_instance_custom_index();
+
+            asm!("OpRayQueryConfirmIntersectionKHR {}", in(reg) ray);
+        }
 
         match ray.get_committed_intersection_type() {
             CommittedIntersection::None => 1.0,

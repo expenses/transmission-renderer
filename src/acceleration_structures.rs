@@ -28,7 +28,7 @@ pub(crate) fn build_acceleration_structures_from_primitives(
         .geometry(vk::AccelerationStructureGeometryDataKHR {
             triangles: *triangles_data,
         })
-        .flags(vk::GeometryFlagsKHR::OPAQUE);
+        .flags(vk::GeometryFlagsKHR::empty());
 
     let geometries = &[*geometry];
 
@@ -124,7 +124,7 @@ pub fn build_top_level_acceleration_structure_from_instances(
         .geometry(vk::AccelerationStructureGeometryDataKHR {
             instances: *instances_data,
         })
-        .flags(vk::GeometryFlagsKHR::OPAQUE);
+        .flags(vk::GeometryFlagsKHR::empty());
 
     let range =
         *vk::AccelerationStructureBuildRangeInfoKHR::builder().primitive_count(num_instances);
@@ -209,7 +209,7 @@ pub fn update_top_level_acceleration_structure_from_instances(
         .geometry(vk::AccelerationStructureGeometryDataKHR {
             instances: *instances_data,
         })
-        .flags(vk::GeometryFlagsKHR::OPAQUE);
+        .flags(vk::GeometryFlagsKHR::empty());
 
     let range =
         *vk::AccelerationStructureBuildRangeInfoKHR::builder().primitive_count(num_instances);
