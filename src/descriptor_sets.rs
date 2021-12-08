@@ -9,6 +9,7 @@ pub struct DescriptorSetLayouts {
     pub lights: vk::DescriptorSetLayout,
     pub cluster_data: vk::DescriptorSetLayout,
     pub acceleration_structure_debugging: vk::DescriptorSetLayout,
+    pub particles: vk::DescriptorSetLayout,
 }
 
 impl DescriptorSetLayouts {
@@ -187,6 +188,20 @@ impl DescriptorSetLayouts {
                     None,
                 )?
             },
+            particles: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
+                        *vk::DescriptorSetLayoutBinding::builder()
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .descriptor_count(1)
+                            .stage_flags(
+                                vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX,
+                            ),
+                    ]),
+                    None,
+                )?
+            },
         })
     }
 }
@@ -200,6 +215,7 @@ pub struct DescriptorSets {
     pub lights: vk::DescriptorSet,
     pub cluster_data: vk::DescriptorSet,
     pub acceleration_structure_debugging: vk::DescriptorSet,
+    pub particles: vk::DescriptorSet,
     _descriptor_pool: vk::DescriptorPool,
 }
 
@@ -211,7 +227,7 @@ impl DescriptorSets {
                     .pool_sizes(&[
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(2 + 8 + 3 + 1),
+                            .descriptor_count(2 + 8 + 3 + 1 + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::UNIFORM_BUFFER)
                             .descriptor_count(3 + 1),
@@ -225,7 +241,7 @@ impl DescriptorSets {
                             .ty(vk::DescriptorType::STORAGE_IMAGE)
                             .descriptor_count(1),
                     ])
-                    .max_sets(8),
+                    .max_sets(9),
                 None,
             )
         }?;
@@ -242,6 +258,7 @@ impl DescriptorSets {
                         layouts.lights,
                         layouts.cluster_data,
                         layouts.acceleration_structure_debugging,
+                        layouts.particles,
                     ])
                     .descriptor_pool(descriptor_pool),
             )
@@ -256,6 +273,7 @@ impl DescriptorSets {
             lights: descriptor_sets[5],
             cluster_data: descriptor_sets[6],
             acceleration_structure_debugging: descriptor_sets[7],
+            particles: descriptor_sets[8],
             _descriptor_pool: descriptor_pool,
         })
     }

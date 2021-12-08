@@ -350,3 +350,19 @@ pub struct AssignLightsPushConstants {
     pub view_matrix: Mat4,
     pub view_rotation: Quat,
 }
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Particle {
+    pub position: Vec3A,
+    pub start_frame: u32,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct ParticleSimPushConstants {
+    pub current_frame: u32,
+    pub delta_time: f32,
+}

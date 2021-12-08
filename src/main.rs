@@ -105,6 +105,7 @@ fn main() -> anyhow::Result<()> {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_title("Transmission Renderer")
+        .with_inner_size(winit::dpi::LogicalSize::new(1280, 720))
         .build(&event_loop)?;
 
     let entry = unsafe { ash::Entry::new() }?;
@@ -497,6 +498,25 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    let particles = (0 .. 100_000)
+        .map(|_| {
+            shared_structs::Particle {
+                position: Vec3::new(rng.gen_range(-10.0..10.0), rng.gen_range(0.0..10.0), rng.gen_range(-10.0..10.0)).into(),
+                start_frame: 0,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let particles_buffer = ash_abstractions::Buffer::new(
+        unsafe { cast_slice(&particles) },
+        "particles buffer",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        &mut init_resources,
+    )?;
+
     let tonemapping_params = colstodian::tonemap::BakedLottesTonemapperParams::from(
         colstodian::tonemap::LottesTonemapperParams {
             ..Default::default()
@@ -805,6 +825,11 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&buffer_info(&cluster_data_buffer)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.particles)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&particles_buffer)),
             ],
             &[],
         )
@@ -900,6 +925,7 @@ fn main() -> anyhow::Result<()> {
     drop(entire_setup_span);
 
     let mut toggle = false;
+    let mut current_frame = 0;
 
     event_loop.run(move |event, _, control_flow| {
         let loop_closure = || -> anyhow::Result<()> {
@@ -1292,7 +1318,9 @@ fn main() -> anyhow::Result<()> {
                                 perspective_matrix,
                                 opaque_mip_levels,
                                 tonemapping_params,
-                                camera_rotation: camera.final_transform.rotation
+                                camera_rotation: camera.final_transform.rotation,
+                                num_particles: particles.len() as u32,
+                                current_frame,
                             },
                         })?;
 
@@ -1328,6 +1356,8 @@ fn main() -> anyhow::Result<()> {
                     profiling_ctx.collect(&device)?;
 
                     tracy_client::finish_continuous_frame!();
+
+                    current_frame += 1;
                 },
                 Event::LoopDestroyed => {
                     unsafe {
@@ -1463,6 +1493,8 @@ struct DynamicRecordParams {
     opaque_mip_levels: u32,
     tonemapping_params: colstodian::tonemap::BakedLottesTonemapperParams,
     camera_rotation: Quat,
+    num_particles: u32,
+    current_frame: u32,
 }
 
 unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
@@ -1492,6 +1524,8 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 opaque_mip_levels,
                 tonemapping_params,
                 camera_rotation,
+                num_particles,
+                current_frame,
             },
         model_buffers,
         hdr_framebuffer,
@@ -1711,6 +1745,41 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             );
         }
 
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.particle_sim,
+            );
+
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.particle_sim_pipeline_layout,
+                0,
+                &[descriptor_sets.particles],
+                &[],
+            );
+
+            device.cmd_push_constants(
+                command_buffer,
+                pipelines.particle_sim_pipeline_layout,
+                vk::ShaderStageFlags::COMPUTE,
+                0,
+                bytes_of(&shared_structs::ParticleSimPushConstants {
+                    delta_time: 1.0 / 60.0,
+                    current_frame
+                }),
+            );
+
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(num_particles, 64),
+                1,
+                1,
+            );
+        }
+
         vk_sync::cmd::pipeline_barrier(
             device,
             command_buffer,
@@ -1879,6 +1948,27 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
         device.cmd_draw(command_buffer, NUM_CLUSTERS * 8, 1, 0, 0);
     }*/
+
+    {
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.particle_rendering,
+        );
+
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.particle_rendering_pipeline_layout,
+            0,
+            &[
+                descriptor_sets.particles,
+            ],
+            &[],
+        );
+
+        device.cmd_draw(command_buffer, num_particles, 1, 0, 0);
+    }
 
     device.cmd_bind_pipeline(
         command_buffer,
@@ -2525,6 +2615,8 @@ impl Castable for shared_structs::PrimitiveInfo {}
 impl Castable for shared_structs::AccelerationStructureDebuggingUniforms {}
 impl Castable for shared_structs::WriteClusterDataPushConstants {}
 impl Castable for shared_structs::AssignLightsPushConstants {}
+impl Castable for shared_structs::Particle {}
+impl Castable for shared_structs::ParticleSimPushConstants {}
 impl Castable for colstodian::tonemap::BakedLottesTonemapperParams {}
 
 unsafe fn cast_slice<T: Castable>(slice: &[T]) -> &[u8] {

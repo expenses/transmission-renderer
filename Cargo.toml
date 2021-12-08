@@ -25,6 +25,7 @@ colstodian = { git = "https://github.com/termhn/colstodian" }
 tracy-client = { git = "https://github.com/expenses/rust_tracy_client", branch = "dodgy-high-level-bindings" }
 c_str_macro = "1.0.3"
 structopt = "0.3.25"
+rand = "0.8.4"
 
 [profile.dev.package."*"]
 opt-level = 3

@@ -20,7 +20,7 @@ use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRough
 use shared_structs::{
     AccelerationStructureDebuggingUniforms, AssignLightsPushConstants, ClusterAabb,
     CullingPushConstants, Instance, Light, MaterialInfo, PrimitiveInfo, PushConstants, Similarity,
-    Uniforms, WriteClusterDataPushConstants, MAX_LIGHTS_PER_CLUSTER,
+    Uniforms, WriteClusterDataPushConstants, MAX_LIGHTS_PER_CLUSTER, ParticleSimPushConstants, Particle,
 };
 use spirv_std::{
     self as _,
@@ -620,7 +620,7 @@ pub fn assign_lights_to_clusters(
     }
 
     if light.is_a_spotlight() {
-        // Todo: idk if using the inversed quat from the camera is working 100% here. 
+        // Todo: idk if using the inversed quat from the camera is working 100% here.
         let spotlight_direction = push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
 
         let angle = light.spotlight_direction_and_outer_angle.w;
@@ -784,7 +784,7 @@ pub fn cluster_debugging_vs(
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(fragment)]
-pub fn cluster_debugging_fs(
+pub fn solid_colour(
     colour: Vec3,
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
@@ -792,4 +792,45 @@ pub fn cluster_debugging_fs(
     let output = colour.extend(1.0);
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;
+}
+
+#[cfg(not(target_feature = "RayQueryKHR"))]
+#[spirv(compute(threads(64)))]
+pub fn particle_sim(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] particles: &mut [Particle],
+    #[spirv(push_constant)] push_constants: &ParticleSimPushConstants,
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let particle_id = id.x;
+
+    if particle_id as usize >= particles.len() {
+        return;
+    }
+
+    let particle = index_mut(particles, particle_id);
+
+    particle.position.y -= 1.0 * push_constants.delta_time;
+
+    if particle.position.y < 0.0 {
+        particle.position.y = 10.0;
+        particle.start_frame = push_constants.current_frame;
+    }
+}
+
+#[cfg(not(target_feature = "RayQueryKHR"))]
+#[spirv(vertex)]
+pub fn particle_vs(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] particles: &[Particle],
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    out_colour: &mut Vec3,
+    #[spirv(position)] builtin_pos: &mut Vec4,
+    #[spirv(point_size)] point_size: &mut f32,
+) {
+    let particle = index(particles, vertex_index);
+
+    *builtin_pos = push_constants.proj_view * particle.position.extend(1.0);
+
+    *out_colour = Vec3::ONE;
+    *point_size = 2.0;
 }
