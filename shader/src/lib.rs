@@ -619,6 +619,18 @@ pub fn assign_lights_to_clusters(
         return;
     }
 
+    if light.is_a_spotlight() {
+        // Todo: idk if using the inversed quat from the camera is working 100% here. 
+        let spotlight_direction = push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
+
+        let angle = light.spotlight_direction_and_outer_angle.w;
+        let range = light.colour_emission_and_falloff_distance_sq.w;
+
+        if cluster.cull_spotlight(light_position, spotlight_direction, angle, range) {
+            return
+        }
+    }
+
     let light_offset = atomic_i_increment(index_mut(cluster_light_counts, cluster_id));
 
     let global_light_index = cluster_id * MAX_LIGHTS_PER_CLUSTER + light_offset;

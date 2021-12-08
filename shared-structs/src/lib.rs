@@ -74,10 +74,15 @@ impl LightClusterCoefficients {
 pub struct Light {
     pub position_and_spotlight_epsilon: Vec4,
     pub colour_emission_and_falloff_distance_sq: Vec4,
-    pub spotlight_direction_and_outer_cosine_angle: Vec4,
+    pub spotlight_direction_and_outer_angle: Vec4,
 }
 
 impl Light {
+    pub fn set_spotlight_direction(&mut self, direction: Vec3) {
+        let outer_angle = self.spotlight_direction_and_outer_angle.w;
+        self.spotlight_direction_and_outer_angle = direction.extend(outer_angle);
+    }
+
     fn distance_sq_at_strength(intensity: f32, strength: f32) -> f32 {
         intensity / strength
     }
@@ -93,7 +98,7 @@ impl Light {
             position_and_spotlight_epsilon: position.extend(0.0),
             colour_emission_and_falloff_distance_sq: (colour * intensity)
                 .extend(distance_sq_at_0_05),
-            spotlight_direction_and_outer_cosine_angle: Vec4::ZERO,
+            spotlight_direction_and_outer_angle: Vec4::ZERO,
         }
     }
 
@@ -113,23 +118,23 @@ impl Light {
             position_and_spotlight_epsilon: position.extend(epsilon),
             colour_emission_and_falloff_distance_sq: (colour * intensity)
                 .extend(distance_sq_at_0_05),
-            spotlight_direction_and_outer_cosine_angle: direction.extend(outer_angle_rad.cos()),
+            spotlight_direction_and_outer_angle: direction.extend(outer_angle_rad),
         }
     }
 
     pub fn is_a_spotlight(self) -> bool {
-        self.spotlight_direction_and_outer_cosine_angle.w != 0.0
+        self.spotlight_direction_and_outer_angle.w != 0.0
     }
 
     pub fn spotlight_factor(self, direction_to_light: Vec3) -> f32 {
-        let spotlight_direction = self.spotlight_direction_and_outer_cosine_angle.truncate();
+        let spotlight_direction = self.spotlight_direction_and_outer_angle.truncate();
 
         let theta = (-direction_to_light).dot(spotlight_direction);
 
-        let outer_cosine_angle = self.spotlight_direction_and_outer_cosine_angle.w;
+        let outer_angle = self.spotlight_direction_and_outer_angle.w;
         let epsilon = self.position_and_spotlight_epsilon.w;
 
-        ((theta - outer_cosine_angle) / epsilon).max(0.0)
+        ((theta - outer_angle.cos()) / epsilon).max(0.0)
     }
 }
 
@@ -291,6 +296,32 @@ impl ClusterAabb {
 
         distances.length_squared()
     }
+
+    // https://simoncoenen.com/blog/programming/graphics/SpotlightCulling
+    pub fn cull_spotlight(self, origin: Vec3, direction: Vec3, angle: f32, range: f32) -> bool {
+        let center = (self.min + self.max) / 2.0;
+        let radius = self.max.distance(center);
+
+        let vector = Vec3::from(center) - origin;
+
+        let vector_len_sq = vector.dot(vector);
+
+        let vector_1_len = vector.dot(direction);
+        let vector_1_len_sq = vector_1_len * vector_1_len;
+
+        let distance_closest_point = angle.cos() * (vector_len_sq - vector_1_len_sq).sqrt() - vector_1_len * angle.sin();
+
+        let mut cull = 0;
+
+        // angle cull
+        cull |= (distance_closest_point > radius) as u32;
+        // front cull
+        cull |= (vector_1_len > radius + range) as u32;
+        // back cull
+        cull |= (vector_1_len < -radius) as u32;
+
+        cull == 1
+    }
 }
 
 pub const MAX_LIGHTS_PER_CLUSTER: u32 = 128;
@@ -317,4 +348,5 @@ pub struct WriteClusterDataPushConstants {
 #[repr(C)]
 pub struct AssignLightsPushConstants {
     pub view_matrix: Mat4,
+    pub view_rotation: Quat,
 }

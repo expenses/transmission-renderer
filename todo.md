@@ -1,3 +1,1 @@
-- Froxel light clustering
-- Test on egpu
 - implement welzl's algorithm for the smallest circle.

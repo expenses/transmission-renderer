@@ -56,8 +56,8 @@ pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
 pub const MAX_IMAGES: u32 = 193;
-pub const NUM_CLUSTERS_X: u32 = 12;
-pub const NUM_CLUSTERS_Y: u32 = 8;
+pub const NUM_CLUSTERS_X: u32 = 24;
+pub const NUM_CLUSTERS_Y: u32 = 16;
 pub const NUM_DEPTH_SLICES: u32 = 16;
 pub const NUM_CLUSTERS: u32 = NUM_CLUSTERS_X * NUM_CLUSTERS_Y * NUM_DEPTH_SLICES;
 
@@ -438,14 +438,16 @@ fn main() -> anyhow::Result<()> {
 
     dbg!(NUM_CLUSTERS);
 
-    let lights = [
+    let mut spotlight_angle = 0.0;
+
+    let mut lights = [
         Light::new_point(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
         Light::new_point(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
         Light::new_spot(
             Vec3::new(0.0, 4.0, 0.0),
             Vec3::new(1.0, 1.0, 0.5),
             50.0,
-            Vec3::Z,
+            Quat::from_rotation_y(spotlight_angle) * Vec3::Z,
             0.7,
             0.8,
         ),
@@ -453,13 +455,13 @@ fn main() -> anyhow::Result<()> {
             Vec3::new(0.0, 4.0, 0.0),
             Vec3::new(1.0, 1.0, 0.5),
             50.0,
-            -Vec3::Z,
+            Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z,
             0.7,
             0.8,
         ),
     ];
 
-    let light_buffers = LightBuffers {
+    let mut light_buffers = LightBuffers {
         lights: ash_abstractions::Buffer::new(
             unsafe { cast_slice(&lights) },
             "lights",
@@ -1211,6 +1213,15 @@ fn main() -> anyhow::Result<()> {
                         0,
                     )?;
 
+                    spotlight_angle += 0.01;
+
+                    lights[2].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle) * Vec3::Z);
+                    lights[3].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z);
+                    light_buffers.lights.write_mapped(
+                        unsafe { cast_slice(&lights[2..]) },
+                        std::mem::size_of::<Light>() * 2,
+                    )?;
+
                     window.request_redraw();
                 }
                 Event::RedrawRequested(_) => unsafe {
@@ -1271,6 +1282,7 @@ fn main() -> anyhow::Result<()> {
                                 perspective_matrix,
                                 opaque_mip_levels,
                                 tonemapping_params,
+                                camera_rotation: camera.final_transform.rotation
                             },
                         })?;
 
@@ -1440,6 +1452,7 @@ struct DynamicRecordParams {
     perspective_matrix: Mat4,
     opaque_mip_levels: u32,
     tonemapping_params: colstodian::tonemap::BakedLottesTonemapperParams,
+    camera_rotation: Quat,
 }
 
 unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
@@ -1468,6 +1481,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 extent,
                 opaque_mip_levels,
                 tonemapping_params,
+                camera_rotation,
             },
         model_buffers,
         hdr_framebuffer,
@@ -1676,7 +1690,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 pipelines.lights_pipeline_layout,
                 vk::ShaderStageFlags::COMPUTE,
                 0,
-                bytes_of(&shared_structs::AssignLightsPushConstants { view_matrix }),
+                bytes_of(&shared_structs::AssignLightsPushConstants { view_matrix, view_rotation: camera_rotation.inverse() }),
             );
 
             device.cmd_dispatch(
