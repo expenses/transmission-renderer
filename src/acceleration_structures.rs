@@ -134,7 +134,10 @@ pub fn build_top_level_acceleration_structure_from_instances(
     let mut geometry_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
         .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
         .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-        .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+        .flags(
+            vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE
+                | vk::BuildAccelerationStructureFlagsKHR::ALLOW_UPDATE,
+        )
         .geometries(geometries);
 
     let build_sizes = unsafe {
@@ -184,6 +187,83 @@ pub fn build_top_level_acceleration_structure_from_instances(
     buffers_to_cleanup.push(scratch_buffer);
 
     Ok(acceleration_structure)
+}
+
+pub fn update_top_level_acceleration_structure_from_instances(
+    instances_buffer: &ash_abstractions::Buffer,
+    num_instances: u32,
+    acceleration_structure_properties: &vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
+    acceleration_structure_loader: &AccelerationStructureLoader,
+    acceleration_structure_to_update: &AccelerationStructure,
+    init_resources: &mut ash_abstractions::InitResources,
+    buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
+) -> anyhow::Result<()> {
+    let instances_data = vk::AccelerationStructureGeometryInstancesDataKHR::builder().data(
+        vk::DeviceOrHostAddressConstKHR {
+            device_address: instances_buffer.device_address(init_resources.device),
+        },
+    );
+
+    let geometry = vk::AccelerationStructureGeometryKHR::builder()
+        .geometry_type(vk::GeometryTypeKHR::INSTANCES)
+        .geometry(vk::AccelerationStructureGeometryDataKHR {
+            instances: *instances_data,
+        })
+        .flags(vk::GeometryFlagsKHR::OPAQUE);
+
+    let range =
+        *vk::AccelerationStructureBuildRangeInfoKHR::builder().primitive_count(num_instances);
+
+    let geometries = &[*geometry];
+
+    let mut geometry_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
+        .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
+        .mode(vk::BuildAccelerationStructureModeKHR::UPDATE)
+        .flags(
+            vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE
+                | vk::BuildAccelerationStructureFlagsKHR::ALLOW_UPDATE,
+        )
+        .geometries(geometries)
+        .src_acceleration_structure(acceleration_structure_to_update.object)
+        .dst_acceleration_structure(acceleration_structure_to_update.object);
+
+    let build_sizes = unsafe {
+        acceleration_structure_loader.get_acceleration_structure_build_sizes(
+            vk::AccelerationStructureBuildTypeKHR::DEVICE,
+            &geometry_info,
+            &[num_instances],
+        )
+    };
+
+    let scratch_buffer = ash_abstractions::Buffer::new_of_size_with_alignment(
+        build_sizes.build_scratch_size,
+        "Scratch buffer for the instances",
+        vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+        acceleration_structure_properties.min_acceleration_structure_scratch_offset_alignment
+            as u64,
+        init_resources,
+    )?;
+
+    geometry_info = geometry_info.scratch_data(vk::DeviceOrHostAddressKHR {
+        device_address: scratch_buffer.device_address(init_resources.device),
+    });
+    let geometry_info = *geometry_info;
+
+    let range = &[range][..];
+    let range = &[range][..];
+    let geometry_infos = &[geometry_info];
+
+    unsafe {
+        acceleration_structure_loader.cmd_build_acceleration_structures(
+            init_resources.command_buffer,
+            geometry_infos,
+            range,
+        );
+    }
+
+    buffers_to_cleanup.push(scratch_buffer);
+
+    Ok(())
 }
 
 pub struct AccelerationStructure {

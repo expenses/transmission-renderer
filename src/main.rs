@@ -28,6 +28,7 @@ mod render_passes;
 use acceleration_structures::{
     build_acceleration_structures_from_primitives,
     build_top_level_acceleration_structure_from_instances,
+    update_top_level_acceleration_structure_from_instances, AccelerationStructure,
 };
 use descriptor_sets::{DescriptorSetLayouts, DescriptorSets};
 use model_loading::{load_gltf, ImageManager};
@@ -81,9 +82,12 @@ struct Opt {
     ///
     #[structopt(long)]
     ray_tracing: bool,
-    // Used for testing light clustering and culling
+    /// Used for testing light clustering and culling
     #[structopt(long)]
-    spotlights: bool
+    spotlights: bool,
+    ///
+    #[structopt(long)]
+    rotate_model: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -370,7 +374,7 @@ fn main() -> anyhow::Result<()> {
     let num_instances = model_staging_buffers.instances.len() as u32;
     let num_primitives = model_staging_buffers.primitives.len() as u32;
 
-    let model_buffers = model_staging_buffers.upload(&mut init_resources)?;
+    let mut model_buffers = model_staging_buffers.upload(&mut init_resources)?;
 
     // todo: reduce this it model.num_opaque + model2.num_opaque
 
@@ -448,25 +452,27 @@ fn main() -> anyhow::Result<()> {
         Light::new_point(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
     ];
 
+    let mut spotlights = [
+        Light::new_spot(
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.5),
+            50.0,
+            Quat::from_rotation_y(spotlight_angle) * Vec3::Z,
+            0.7,
+            0.8,
+        ),
+        Light::new_spot(
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.5),
+            50.0,
+            Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z,
+            0.7,
+            0.8,
+        ),
+    ];
+
     if opt.spotlights {
-        lights.extend_from_slice(&[
-            Light::new_spot(
-                Vec3::new(0.0, 4.0, 0.0),
-                Vec3::new(1.0, 1.0, 0.5),
-                50.0,
-                Quat::from_rotation_y(spotlight_angle) * Vec3::Z,
-                0.7,
-                0.8,
-            ),
-            Light::new_spot(
-                Vec3::new(0.0, 4.0, 0.0),
-                Vec3::new(1.0, 1.0, 0.5),
-                50.0,
-                Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z,
-                0.7,
-                0.8,
-            ),
-        ]);
+        lights.extend_from_slice(&spotlights);
     }
 
     let mut light_buffers = LightBuffers {
@@ -568,7 +574,7 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
-    let (top_level_acceleration_structure, acceleration_structures) = if opt.ray_tracing {
+    let mut acceleration_structure_data = if opt.ray_tracing {
         let acceleration_structure_loader = AccelerationStructureLoader::new(&instance, &device);
 
         let acceleration_structure_properties = {
@@ -612,19 +618,8 @@ fn main() -> anyhow::Result<()> {
                 let primitive = &model_staging_buffers.primitives[instance.primitive_id as usize];
                 primitive.draw_buffer_index < 2
             })
-            .map(|instance| vk::AccelerationStructureInstanceKHR {
-                transform: vk::TransformMatrixKHR {
-                    matrix: transpose_matrix_for_acceleration_structure_instance(
-                        instance.transform.unpack().as_mat4(),
-                    ),
-                },
-                instance_custom_index_and_mask: Packed24_8::new(0, 0xff).0,
-                instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
-                acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
-                    device_handle: acceleration_structures[instance.primitive_id as usize]
-                        .buffer
-                        .device_address(&device),
-                },
+            .map(|&instance| {
+                acceleration_structure_instance(instance, &acceleration_structures, &device)
             })
             .collect::<Vec<_>>();
 
@@ -639,25 +634,31 @@ fn main() -> anyhow::Result<()> {
             &mut init_resources,
         )?;
 
+        let num_instances = acceleration_structure_instances.len() as u32;
+
         let top_level_acceleration_structure =
             build_top_level_acceleration_structure_from_instances(
                 &acceleration_structure_instances_buffer,
-                acceleration_structure_instances.len() as u32,
+                num_instances,
                 &acceleration_structure_properties,
                 &acceleration_structure_loader,
                 &mut init_resources,
                 &mut buffers_to_cleanup,
             )?;
 
-        buffers_to_cleanup.push(acceleration_structure_instances_buffer);
-
-        (
-            Some(top_level_acceleration_structure),
-            acceleration_structures,
-        )
+        Some(AccelerationStructureData {
+            top_level: top_level_acceleration_structure,
+            bottom_levels: acceleration_structures,
+            instances: acceleration_structure_instances_buffer,
+            loader: acceleration_structure_loader,
+            properties: acceleration_structure_properties,
+            num_instances,
+        })
     } else {
-        (None, Vec::new())
+        None
     };
+
+    let mut instances = model_staging_buffers.instances;
 
     let mut draw_framebuffer = create_draw_framebuffer(
         &device,
@@ -836,9 +837,9 @@ fn main() -> anyhow::Result<()> {
         proj_view: Default::default(),
         view_position: Default::default(),
         framebuffer_size: UVec2::new(extent.width, extent.height),
-        acceleration_structure_address: top_level_acceleration_structure
+        acceleration_structure_address: acceleration_structure_data
             .as_ref()
-            .map(|a| a.buffer.device_address(&device))
+            .map(|data| data.top_level.buffer.device_address(&device))
             .unwrap_or(0),
     };
 
@@ -900,6 +901,8 @@ fn main() -> anyhow::Result<()> {
     drop(entire_setup_span);
 
     let mut toggle = false;
+    let mut model_rotation = 0.0;
+    let instances_to_rotate = instances.len() - 1..instances.len();
 
     event_loop.run(move |event, _, control_flow| {
         let loop_closure = || -> anyhow::Result<()> {
@@ -1224,12 +1227,46 @@ fn main() -> anyhow::Result<()> {
                     if opt.spotlights {
                         spotlight_angle += 0.01;
 
-                        lights[2].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle) * Vec3::Z);
-                        lights[3].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z);
+                        spotlights[0].set_spotlight_direction(
+                            Quat::from_rotation_y(spotlight_angle) * Vec3::Z,
+                        );
+                        spotlights[1].set_spotlight_direction(
+                            Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z,
+                        );
                         light_buffers.lights.write_mapped(
-                            unsafe { cast_slice(&lights[2..]) },
+                            unsafe { cast_slice(&spotlights) },
                             std::mem::size_of::<Light>() * 2,
                         )?;
+                    }
+
+                    if opt.rotate_model {
+                        let instances_offset = instances_to_rotate.clone().start;
+                        instances[instances_offset].transform.rotation =
+                            Quat::from_rotation_y(model_rotation);
+                        model_buffers.instances.write_mapped(
+                            unsafe { cast_slice(&instances[instances_to_rotate.clone()]) },
+                            std::mem::size_of::<Instance>() * instances_offset,
+                        )?;
+
+                        if let Some(acceleration_structure_data) =
+                            acceleration_structure_data.as_mut()
+                        {
+                            let instance = instances[instances_offset];
+
+                            acceleration_structure_data.instances.write_mapped(
+                                unsafe {
+                                    bytes_of(&acceleration_structure_instance(
+                                        instance,
+                                        &acceleration_structure_data.bottom_levels,
+                                        &device,
+                                    ))
+                                },
+                                std::mem::size_of::<vk::AccelerationStructureInstanceKHR>()
+                                    * instances_offset,
+                            )?;
+                        }
+
+                        model_rotation -= 0.0025;
                     }
 
                     window.request_redraw();
@@ -1242,6 +1279,10 @@ fn main() -> anyhow::Result<()> {
                     device.reset_fences(&[render_fence])?;
 
                     device.reset_command_pool(command_pool, vk::CommandPoolResetFlags::empty())?;
+
+                    for buffer in buffers_to_cleanup.drain(..) {
+                        buffer.cleanup_and_drop(&device, &mut allocator)?;
+                    }
 
                     let swapchain_image_index = match swapchain_loader.acquire_next_image(
                         swapchain.swapchain,
@@ -1265,6 +1306,28 @@ fn main() -> anyhow::Result<()> {
                             &vk::CommandBufferBeginInfo::builder()
                                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                         )?;
+
+                        if opt.rotate_model {
+                            if let Some(acceleration_structure_data) =
+                                acceleration_structure_data.as_ref()
+                            {
+                                update_top_level_acceleration_structure_from_instances(
+                                    &acceleration_structure_data.instances,
+                                    acceleration_structure_data.num_instances,
+                                    &acceleration_structure_data.properties,
+                                    &acceleration_structure_data.loader,
+                                    &acceleration_structure_data.top_level,
+                                    &mut ash_abstractions::InitResources {
+                                        command_buffer,
+                                        device: &device,
+                                        allocator: &mut allocator,
+                                        debug_utils_loader: Some(&debug_utils_loader),
+                                    },
+                                    // todo: use a persistent scratch buffer instead of recreating one per frame.
+                                    &mut buffers_to_cleanup,
+                                )?;
+                            }
+                        }
 
                         record(RecordParams {
                             device: &device,
@@ -1292,7 +1355,7 @@ fn main() -> anyhow::Result<()> {
                                 perspective_matrix,
                                 opaque_mip_levels,
                                 tonemapping_params,
-                                camera_rotation: camera.final_transform.rotation
+                                camera_rotation: camera.final_transform.rotation,
                             },
                         })?;
 
@@ -1346,18 +1409,17 @@ fn main() -> anyhow::Result<()> {
                         acceleration_structure_debugging_uniforms_buffer
                             .cleanup(&device, &mut allocator)?;
 
-                        for acceleration_structure in &acceleration_structures {
-                            acceleration_structure
-                                .buffer
-                                .cleanup(&device, &mut allocator)?;
-                        }
-
-                        if let Some(acceleration_structure) =
-                            top_level_acceleration_structure.as_ref()
+                        if let Some(acceleration_structure_data) =
+                            acceleration_structure_data.as_ref()
                         {
-                            acceleration_structure
+                            acceleration_structure_data
+                                .top_level
                                 .buffer
                                 .cleanup(&device, &mut allocator)?;
+
+                            for bottom_level in &acceleration_structure_data.bottom_levels {
+                                bottom_level.buffer.cleanup(&device, &mut allocator)?;
+                            }
                         }
                     }
                 }
@@ -1700,7 +1762,10 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 pipelines.lights_pipeline_layout,
                 vk::ShaderStageFlags::COMPUTE,
                 0,
-                bytes_of(&shared_structs::AssignLightsPushConstants { view_matrix, view_rotation: camera_rotation.inverse() }),
+                bytes_of(&shared_structs::AssignLightsPushConstants {
+                    view_matrix,
+                    view_rotation: camera_rotation.inverse(),
+                }),
             );
 
             device.cmd_dispatch(
@@ -2633,5 +2698,35 @@ impl Sun {
             self.pitch.sin(),
             self.pitch.cos() * self.yaw.cos(),
         )
+    }
+}
+
+struct AccelerationStructureData {
+    top_level: AccelerationStructure,
+    bottom_levels: Vec<AccelerationStructure>,
+    instances: ash_abstractions::Buffer,
+    loader: AccelerationStructureLoader,
+    properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
+    num_instances: u32,
+}
+
+fn acceleration_structure_instance(
+    instance: Instance,
+    bottom_levels: &[AccelerationStructure],
+    device: &ash::Device,
+) -> vk::AccelerationStructureInstanceKHR {
+    vk::AccelerationStructureInstanceKHR {
+        transform: vk::TransformMatrixKHR {
+            matrix: transpose_matrix_for_acceleration_structure_instance(
+                instance.transform.unpack().as_mat4(),
+            ),
+        },
+        instance_custom_index_and_mask: Packed24_8::new(0, 0xff).0,
+        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
+        acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
+            device_handle: bottom_levels[instance.primitive_id as usize]
+                .buffer
+                .device_address(device),
+        },
     }
 }
