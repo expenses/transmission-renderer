@@ -79,8 +79,11 @@ struct Opt {
     #[structopt(long)]
     external_model: bool,
     ///
-    #[structopt(short, long)]
+    #[structopt(long)]
     ray_tracing: bool,
+    // Used for testing light clustering and culling
+    #[structopt(long)]
+    spotlights: bool
 }
 
 fn main() -> anyhow::Result<()> {
@@ -440,26 +443,31 @@ fn main() -> anyhow::Result<()> {
 
     let mut spotlight_angle = 0.0;
 
-    let mut lights = [
+    let mut lights = vec![
         Light::new_point(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
         Light::new_point(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
-        Light::new_spot(
-            Vec3::new(0.0, 4.0, 0.0),
-            Vec3::new(1.0, 1.0, 0.5),
-            50.0,
-            Quat::from_rotation_y(spotlight_angle) * Vec3::Z,
-            0.7,
-            0.8,
-        ),
-        Light::new_spot(
-            Vec3::new(0.0, 4.0, 0.0),
-            Vec3::new(1.0, 1.0, 0.5),
-            50.0,
-            Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z,
-            0.7,
-            0.8,
-        ),
     ];
+
+    if opt.spotlights {
+        lights.extend_from_slice(&[
+            Light::new_spot(
+                Vec3::new(0.0, 4.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.5),
+                50.0,
+                Quat::from_rotation_y(spotlight_angle) * Vec3::Z,
+                0.7,
+                0.8,
+            ),
+            Light::new_spot(
+                Vec3::new(0.0, 4.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.5),
+                50.0,
+                Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z,
+                0.7,
+                0.8,
+            ),
+        ]);
+    }
 
     let mut light_buffers = LightBuffers {
         lights: ash_abstractions::Buffer::new(
@@ -1213,14 +1221,16 @@ fn main() -> anyhow::Result<()> {
                         0,
                     )?;
 
-                    spotlight_angle += 0.01;
+                    if opt.spotlights {
+                        spotlight_angle += 0.01;
 
-                    lights[2].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle) * Vec3::Z);
-                    lights[3].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z);
-                    light_buffers.lights.write_mapped(
-                        unsafe { cast_slice(&lights[2..]) },
-                        std::mem::size_of::<Light>() * 2,
-                    )?;
+                        lights[2].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle) * Vec3::Z);
+                        lights[3].set_spotlight_direction(Quat::from_rotation_y(spotlight_angle + PI) * Vec3::Z);
+                        light_buffers.lights.write_mapped(
+                            unsafe { cast_slice(&lights[2..]) },
+                            std::mem::size_of::<Light>() * 2,
+                        )?;
+                    }
 
                     window.request_redraw();
                 }
