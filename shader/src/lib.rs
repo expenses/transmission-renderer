@@ -19,7 +19,7 @@ use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     AccelerationStructureDebuggingUniforms, CullingPushConstants, Instance, MaterialInfo,
-    PointLight, PrimitiveInfo, PushConstants, Similarity, Uniforms, MAX_LIGHTS_PER_FROXEL,
+    Light, PrimitiveInfo, PushConstants, Similarity, Uniforms, MAX_LIGHTS_PER_FROXEL,
     FroxelData, Plane,
 };
 use spirv_std::{
@@ -46,7 +46,7 @@ pub fn fragment_transmission(
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
     #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] froxel_light_counts: &[u32],
     #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
@@ -108,7 +108,7 @@ pub fn fragment_transmission(
             num_lights: *index(froxel_light_counts, froxel),
             light_indices_offset: froxel * MAX_LIGHTS_PER_FROXEL,
             light_indices,
-            point_lights
+            lights
         },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
@@ -169,7 +169,7 @@ pub fn fragment(
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
     #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] froxel_light_counts: &[u32],
     #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
     #[spirv(frag_coord)] frag_coord: Vec4,
@@ -225,7 +225,7 @@ pub fn fragment(
             num_lights,
             light_indices_offset: froxel * MAX_LIGHTS_PER_FROXEL,
             light_indices,
-            point_lights
+            lights
         },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
@@ -528,7 +528,7 @@ pub fn write_froxel_data(
 #[cfg(not(target_feature = "RayQueryKHR"))]
 #[spirv(compute(threads(8, 8)))]
 pub fn assign_lights_to_froxels(
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] point_lights: &[PointLight],
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] lights: &[Light],
     #[spirv(descriptor_set = 0, binding = 1, storage_buffer)] froxel_light_counts: &mut [u32],
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] froxel_light_indices: &mut [u32],
     #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] froxel_data: &[FroxelData],
@@ -541,7 +541,7 @@ pub fn assign_lights_to_froxels(
         return;
     }
 
-    if light_id as usize >= point_lights.len() {
+    if light_id as usize >= lights.len() {
         return;
     }
 

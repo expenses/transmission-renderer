@@ -16,7 +16,7 @@ use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
-use shared_structs::{Instance, PointLight, PushConstants, Similarity};
+use shared_structs::{Instance, Light, PushConstants, Similarity};
 
 mod acceleration_structures;
 mod descriptor_sets;
@@ -439,8 +439,10 @@ fn main() -> anyhow::Result<()> {
     dbg!(NUM_FROXELS);
 
     let lights = [
-        PointLight::new(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
-        PointLight::new(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
+        Light::new_point(Vec3::new(0.0, 0.8, 0.0), Vec3::X, 5.0),
+        Light::new_point(Vec3::new(8.0, 0.8, 0.0), Vec3::Y, 10.0),
+        Light::new_spot(Vec3::new(0.0, 4.0, 0.0), Vec3::new(1.0, 1.0, 0.5), 50.0, Vec3::Z, 0.7, 0.8),
+        Light::new_spot(Vec3::new(0.0, 4.0, 0.0), Vec3::new(1.0, 1.0, 0.5), 50.0, -Vec3::Z, 0.7, 0.8),
     ];
 
     let light_buffers = LightBuffers {
@@ -2397,7 +2399,7 @@ impl Castable for u32 {}
 impl Castable for Vec2 {}
 impl Castable for Vec3 {}
 impl Castable for shared_structs::Instance {}
-impl Castable for shared_structs::PointLight {}
+impl Castable for shared_structs::Light {}
 impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::Uniforms {}
 impl Castable for shared_structs::PushConstants {}

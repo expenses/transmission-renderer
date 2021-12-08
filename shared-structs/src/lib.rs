@@ -60,24 +60,60 @@ impl LightClusterCoefficients {
     }
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy)]
 #[repr(C)]
-pub struct PointLight {
-    pub position: Vec3A,
+// Really messily packed together :sweat_smile:
+pub struct Light {
+    pub position_and_spotlight_epsilon: Vec4,
     pub colour_emission_and_falloff_distance: Vec4,
+    pub spotlight_direction_and_outer_cosine_angle: Vec4,
 }
 
-impl PointLight {
-    pub fn new(position: Vec3, colour: Vec3, intensity: f32) -> Self {
-        fn distance_at_strength(intensity: f32, strength: f32) -> f32 {
-            (intensity / strength).sqrt()
-        }
+impl Light {
+    fn distance_at_strength(intensity: f32, strength: f32) -> f32 {
+        (intensity / strength).sqrt()
+    }
 
-        let distance_at_0_1 = distance_at_strength(intensity, 0.1);
+    pub fn position(self) -> Vec3 {
+        self.position_and_spotlight_epsilon.truncate()
+    }
+
+    pub fn new_point(position: Vec3, colour: Vec3, intensity: f32) -> Self {
+        let distance_at_0_1 = Self::distance_at_strength(intensity, 0.1);
 
         Self {
-            position: position.into(),
+            position_and_spotlight_epsilon: position.extend(0.0),
             colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1),
+            spotlight_direction_and_outer_cosine_angle: Vec4::ZERO,
         }
+    }
+
+    pub fn new_spot(position: Vec3, colour: Vec3, intensity: f32, direction: Vec3, inner_angle_rad: f32, outer_angle_rad: f32) -> Self {
+        let distance_at_0_1 = Self::distance_at_strength(intensity, 0.1);
+
+        let epsilon = inner_angle_rad.cos() - outer_angle_rad.cos();
+
+        Self {
+            position_and_spotlight_epsilon: position.extend(epsilon),
+            colour_emission_and_falloff_distance: (colour * intensity).extend(distance_at_0_1),
+            spotlight_direction_and_outer_cosine_angle: direction.extend(outer_angle_rad.cos()),
+        }
+    }
+
+    pub fn is_a_spotlight(self) -> bool {
+        self.spotlight_direction_and_outer_cosine_angle.w != 0.0
+    }
+
+    pub fn spotlight_factor(self, direction_to_light: Vec3) -> f32 {
+        let spotlight_direction = self.spotlight_direction_and_outer_cosine_angle.truncate();
+
+        let theta = (-direction_to_light).dot(spotlight_direction);
+
+        let outer_cosine_angle = self.spotlight_direction_and_outer_cosine_angle.w;
+        let epsilon = self.position_and_spotlight_epsilon.w;
+
+        ((theta - outer_cosine_angle) / epsilon).max(0.0)
     }
 }
 

@@ -1,9 +1,9 @@
 use crate::{index, TextureSampler};
 use glam_pbr::{
     basic_brdf, light_direction_and_attenuation, BasicBrdfParams, BrdfResult, IndexOfRefraction,
-    Light, MaterialParams, Normal, PerceptualRoughness, View,
+    Light as LightDir, MaterialParams, Normal, PerceptualRoughness, View,
 };
-use shared_structs::{MaterialInfo, PointLight, Uniforms};
+use shared_structs::{MaterialInfo, Light , Uniforms};
 use spirv_std::{
     glam::{Mat3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
@@ -37,7 +37,7 @@ pub fn evaluate_lights_transmission(
     let sun_intensity = Vec3::from(uniforms.sun_intensity) * factor;
 
     let mut sum = basic_brdf(BasicBrdfParams {
-        light: Light(uniforms.sun_dir.into()),
+        light: LightDir(uniforms.sun_dir.into()),
         light_intensity: sun_intensity,
         normal,
         view,
@@ -49,7 +49,7 @@ pub fn evaluate_lights_transmission(
             material_params,
             normal,
             view,
-            Light(uniforms.sun_dir.into()),
+            LightDir(uniforms.sun_dir.into()),
         );
 
     let mut current_light = light_params.light_indices_offset;
@@ -59,7 +59,7 @@ pub fn evaluate_lights_transmission(
         let light = light_params.index(current_light);
 
         let (direction, distance, attenuation) =
-            light_direction_and_attenuation(position, light.position.into());
+            light_direction_and_attenuation(position, light.position());
 
         #[cfg(target_feature = "RayQueryKHR")]
         let factor = trace_shadow_ray(
@@ -77,7 +77,7 @@ pub fn evaluate_lights_transmission(
 
         sum = sum
             + basic_brdf(BasicBrdfParams {
-                light: Light(direction),
+                light: LightDir(direction),
                 light_intensity: light_emission * attenuation,
                 normal,
                 view,
@@ -86,7 +86,7 @@ pub fn evaluate_lights_transmission(
 
         transmission += light_emission
             * attenuation
-            * glam_pbr::transmission_btdf(material_params, normal, view, Light(direction));
+            * glam_pbr::transmission_btdf(material_params, normal, view, LightDir(direction));
 
         current_light += 1;
     }
@@ -125,13 +125,13 @@ pub struct LightParams<'a> {
     pub num_lights: u32,
     pub light_indices_offset: u32,
     pub light_indices: &'a [u32],
-    pub point_lights: &'a [PointLight],
+    pub lights: &'a [Light],
 }
 
 impl<'a> LightParams<'a> {
-    fn index(&'a self, id: u32) -> &'a PointLight {
+    fn index(&'a self, id: u32) -> &'a Light {
         let light_index = *index(self.light_indices, id);
-        index(self.point_lights, light_index)
+        index(self.lights, light_index)
     }
 
     fn end(&self) -> u32 {
@@ -166,7 +166,7 @@ pub fn evaluate_lights(
     let factor = 1.0;
 
     let mut sum = basic_brdf(BasicBrdfParams {
-        light: Light(uniforms.sun_dir.into()),
+        light: LightDir(uniforms.sun_dir.into()),
         light_intensity: Vec3::from(uniforms.sun_intensity) * factor,
         normal,
         view,
@@ -180,25 +180,30 @@ pub fn evaluate_lights(
         let light = light_params.index(current_light);
 
         let (direction, distance, attenuation) =
-            light_direction_and_attenuation(position, light.position.into());
+            light_direction_and_attenuation(position, light.position());
+
+        let mut factor = 1.0;
 
         #[cfg(target_feature = "RayQueryKHR")]
-        let factor = trace_shadow_ray(
-            shadow_ray,
-            acceleration_structure,
-            position,
-            direction,
-            distance,
-        );
+        {
+            factor *= trace_shadow_ray(
+                shadow_ray,
+                acceleration_structure,
+                position,
+                direction,
+                distance,
+            );
+        }
 
-        #[cfg(not(target_feature = "RayQueryKHR"))]
-        let factor = 1.0;
+        if light.is_a_spotlight() {
+            factor *= light.spotlight_factor(direction);
+        }
 
         let light_emission = light.colour_emission_and_falloff_distance.truncate() * factor;
 
         sum = sum
             + basic_brdf(BasicBrdfParams {
-                light: Light(direction),
+                light: LightDir(direction),
                 light_intensity: light_emission * attenuation,
                 normal,
                 view,
