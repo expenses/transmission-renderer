@@ -19,6 +19,9 @@ impl DescriptorSetLayouts {
             vk::DescriptorBindingFlags::empty(),
             vk::DescriptorBindingFlags::empty(),
             vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
+            vk::DescriptorBindingFlags::empty(),
         ];
         let mut bindless_flags =
             vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(flags);
@@ -55,6 +58,21 @@ impl DescriptorSetLayouts {
                                 .descriptor_type(vk::DescriptorType::SAMPLER)
                                 .descriptor_count(1)
                                 .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(5)
+                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(6)
+                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                            *vk::DescriptorSetLayoutBinding::builder()
+                                .binding(7)
+                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                                .descriptor_count(1)
+                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
                         ])
                         .push_next(&mut bindless_flags),
                     None,
@@ -211,7 +229,7 @@ impl DescriptorSets {
                     .pool_sizes(&[
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(2 + 8 + 3 + 1),
+                            .descriptor_count(5 + 8 + 3 + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::UNIFORM_BUFFER)
                             .descriptor_count(3 + 1),

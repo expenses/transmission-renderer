@@ -614,12 +614,13 @@ fn main() -> anyhow::Result<()> {
         let acceleration_structure_instances = model_staging_buffers
             .instances
             .iter()
-            .filter(|instance| {
+            .enumerate()
+            .filter(|(_, instance)| {
                 let primitive = &model_staging_buffers.primitives[instance.primitive_id as usize];
                 primitive.draw_buffer_index < 2
             })
-            .map(|&instance| {
-                acceleration_structure_instance(instance, &acceleration_structures, &device)
+            .map(|(instance_id, &instance)| {
+                acceleration_structure_instance(instance_id as u32, instance, &acceleration_structures, &device)
             })
             .collect::<Vec<_>>();
 
@@ -735,6 +736,21 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(4)
                     .descriptor_type(vk::DescriptorType::SAMPLER)
                     .image_info(&[*vk::DescriptorImageInfo::builder().sampler(clamp_sampler)]),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.main)
+                    .dst_binding(5)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&model_buffers.index)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.main)
+                    .dst_binding(6)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&model_buffers.uv)),
+                *vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets.main)
+                    .dst_binding(7)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&buffer_info(&model_buffers.primitives)),
                 // Instance buffer
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.instance_buffer)
@@ -1256,6 +1272,7 @@ fn main() -> anyhow::Result<()> {
                             acceleration_structure_data.instances.write_mapped(
                                 unsafe {
                                     bytes_of(&acceleration_structure_instance(
+                                        instances_offset as u32,
                                         instance,
                                         &acceleration_structure_data.bottom_levels,
                                         &device,
@@ -2136,7 +2153,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             vk::PipelineBindPoint::COMPUTE,
             pipelines.acceleration_structure_debugging_layout,
             0,
-            &[descriptor_sets.main, descriptor_sets.acceleration_structure_debugging],
+            &[descriptor_sets.main, descriptor_sets.acceleration_structure_debugging, descriptor_sets.instance_buffer],
             &[],
         );
 
@@ -2507,13 +2524,13 @@ impl ModelStagingBuffers {
             uv: ash_abstractions::Buffer::new(
                 unsafe { cast_slice(&self.uv) },
                 "uv buffer",
-                vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER,
                 init_resources,
             )?,
             index: ash_abstractions::Buffer::new(
                 unsafe { cast_slice(&self.index) },
                 "index buffer",
-                vk::BufferUsageFlags::INDEX_BUFFER | ray_tracing_flags,
+                vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER | ray_tracing_flags,
                 init_resources,
             )?,
             instances: ash_abstractions::Buffer::new(
@@ -2711,6 +2728,7 @@ struct AccelerationStructureData {
 }
 
 fn acceleration_structure_instance(
+    instance_id: u32,
     instance: Instance,
     bottom_levels: &[AccelerationStructure],
     device: &ash::Device,
@@ -2721,7 +2739,7 @@ fn acceleration_structure_instance(
                 instance.transform.unpack().as_mat4(),
             ),
         },
-        instance_custom_index_and_mask: Packed24_8::new(instance.material_id, 0xff).0,
+        instance_custom_index_and_mask: Packed24_8::new(instance_id, 0xff).0,
         instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
         acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
             device_handle: bottom_levels[instance.primitive_id as usize]

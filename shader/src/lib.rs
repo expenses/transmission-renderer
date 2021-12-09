@@ -30,6 +30,7 @@ use spirv_std::{
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
 };
+use core::ops::{Add, Mul};
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
 
@@ -703,8 +704,12 @@ pub fn acceleration_structure_debugging(
     #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
+    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] indices: &[u32],
+    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] uvs: &[Vec2],
+    #[spirv(descriptor_set = 0, binding = 7, storage_buffer)] primitives: &[PrimitiveInfo],
     #[spirv(descriptor_set = 1, binding = 0)] output: &Image!(2D, format=rgba16f, sampled=false),
     #[spirv(descriptor_set = 1, binding = 1, uniform)] uniforms: &AccelerationStructureDebuggingUniforms,
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] instances: &[Instance],
 ) {
     let id_xy = id.truncate();
 
@@ -730,6 +735,10 @@ pub fn acceleration_structure_debugging(
         AccelerationStructure, CommittedIntersection, RayFlags, RayQuery,
     };
 
+    let model_buffers = ModelBuffers {
+        indices, uvs
+    };
+
     spirv_std::ray_query!(let mut ray);
 
     unsafe {
@@ -743,13 +752,21 @@ pub fn acceleration_structure_debugging(
             1000.0,
         );
 
-        while ray.proceed() {
-            let material_id = ray.get_candidate_intersection_instance_custom_index();
+        let mut colour = Vec3::ZERO;
 
-            let material = index(materials, material_id);
+        while ray.proceed() {
+            let instance_id = ray.get_candidate_intersection_instance_custom_index();
+            let instance = index(instances, instance_id);
+            let material = index(materials, instance.material_id);
+            let primitive_info = index(primitives, instance.primitive_id);
+
+            let triangle_index = ray.get_candidate_intersection_primitive_index();
+            let indices = model_buffers.get_indices_for_primitive(triangle_index + primitive_info.first_index / 3);
+            let barycentric_coords = barycentric_coords_from_hits(ray.get_candidate_intersection_barycentrics());
+            let interpolated_uv = model_buffers.interpolate_uv(indices, barycentric_coords);
 
             let texture_sampler = TextureSampler {
-                uv: Vec2::ZERO,
+                uv: interpolated_uv,
                 textures,
                 sampler: *sampler,
             };
@@ -761,21 +778,20 @@ pub fn acceleration_structure_debugging(
             }
 
             if diffuse.w >= material.alpha_clipping_cutoff {
-                asm!("OpRayQueryConfirmIntersectionKHR {}", in(reg) ray);
+                ray.confirm_intersection();
+
+                colour = diffuse.truncate();
             }
         }
 
+        /*
         let colour = match ray.get_committed_intersection_type() {
             CommittedIntersection::None => Vec3::ZERO,
             _ => {
-                let barycentrics: Vec2 = ray.get_committed_intersection_barycentrics();
-                Vec3::new(
-                    1.0 - barycentrics.x - barycentrics.y,
-                    barycentrics.x,
-                    barycentrics.y,
-                )
+                barycentric_coords_from_hits(ray.get_committed_intersection_barycentrics())
             }
         };
+        */
 
         output.write(id.truncate(), colour);
     };
@@ -820,4 +836,46 @@ pub fn cluster_debugging_fs(
     let output = colour.extend(1.0);
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;
+}
+
+struct ModelBuffers<'a> {
+    indices: &'a [u32],
+    uvs: &'a [Vec2]
+}
+
+impl<'a> ModelBuffers<'a> {
+    fn get_indices_for_primitive(&self, primitive_index: u32) -> UVec3 {
+        let index_offset = primitive_index * 3;
+
+        UVec3::new(
+            *index(self.indices, index_offset),
+            *index(self.indices, index_offset + 1),
+            *index(self.indices, index_offset + 2)
+        )
+    }
+
+    fn interpolate_uv(&self, indices: UVec3, barycentric_coords: Vec3) -> Vec2 {
+        let uv_0 = *index(self.uvs, indices.x);
+        let uv_1 = *index(self.uvs, indices.y);
+        let uv_2 = *index(self.uvs, indices.z);
+
+        interpolate(uv_0, uv_1, uv_2, barycentric_coords)
+    }
+}
+
+fn barycentric_coords_from_hits(hit_attributes: Vec2) -> Vec3 {
+    Vec3::new(
+        1.0 - hit_attributes.x - hit_attributes.y,
+        hit_attributes.x,
+        hit_attributes.y,
+    )
+}
+
+fn interpolate<T: Mul<f32, Output = T> + Add<T, Output = T>>(
+    a: T,
+    b: T,
+    c: T,
+    barycentric_coords: Vec3,
+) -> T {
+    a * barycentric_coords.x + b * barycentric_coords.y + c * barycentric_coords.z
 }

@@ -114,8 +114,7 @@ fn trace_shadow_ray(
 
         while ray.proceed() {
             let material_index = ray.get_candidate_intersection_instance_custom_index();
-
-            asm!("OpRayQueryConfirmIntersectionKHR {}", in(reg) ray);
+            ray.confirm_intersection();
         }
 
         match ray.get_committed_intersection_type() {
