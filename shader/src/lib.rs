@@ -8,6 +8,9 @@
 mod asm;
 mod lighting;
 mod tonemapping;
+mod noise;
+
+use noise::BlueNoiseSampler;
 
 use asm::atomic_i_increment;
 use lighting::{
@@ -25,7 +28,7 @@ use shared_structs::{
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{const_vec3, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    glam::{const_vec3, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
@@ -218,6 +221,14 @@ pub fn fragment(
     let acceleration_structure =
         unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
 
+    let mut blue_noise_sampler = BlueNoiseSampler {
+        textures,
+        sampler: *sampler,
+        uniforms,
+        frag_coord: frag_coord.xy(),
+        iteration: 0,
+    };
+
     let num_lights = *index(cluster_light_counts, cluster);
 
     let result = evaluate_lights(
@@ -234,6 +245,8 @@ pub fn fragment(
         },
         #[cfg(target_feature = "RayQueryKHR")]
         &acceleration_structure,
+        #[cfg(target_feature = "RayQueryKHR")]
+        &mut blue_noise_sampler
     );
 
     let mut output = (result.diffuse + result.specular + emission).extend(1.0);
@@ -246,6 +259,31 @@ pub fn fragment(
 
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;
+}
+
+fn sample_animated_blue_noise(frag_coord: Vec2, iteration: u32, textures: &Textures, sampler: &Sampler, uniforms: &Uniforms) -> Vec2 {
+    let offset = UVec2::new(13, 41);
+    let texture_size = Vec2::splat(64.0);
+
+    let first_offset = iteration * 2 * offset;
+    let second_offset = (iteration * 2 + 1) * offset;
+
+    let first_sample = sample(textures, *sampler, (frag_coord + first_offset.as_vec2()) / texture_size, uniforms.blue_noise_texture_index).x;
+    let second_sample = sample(textures, *sampler, (frag_coord + second_offset.as_vec2()) / texture_size, uniforms.blue_noise_texture_index).x;
+
+    animate_blue_noise(Vec2::new(first_sample, second_sample), uniforms.frame_index)
+}
+
+fn animate_blue_noise(blue_noise: Vec2, frame_index: u32) -> Vec2 {
+    // The fractional part of the golden ratio
+    let golden_ratio_fract = 0.618033988749;
+    (blue_noise + (frame_index % 32) as f32 * golden_ratio_fract).fract()
+}
+
+fn sample(textures: &Textures, sampler: Sampler, uv: Vec2, texture_id: u32) -> Vec4 {
+    TextureSampler {
+        textures, sampler, uv
+    }.sample(texture_id)
 }
 
 struct TextureSampler<'a> {

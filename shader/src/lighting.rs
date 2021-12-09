@@ -1,4 +1,4 @@
-use crate::{index, TextureSampler};
+use crate::{index, TextureSampler, noise::BlueNoiseSampler};
 use glam_pbr::{
     basic_brdf, light_direction_and_attenuation, BasicBrdfParams, BrdfResult, IndexOfRefraction,
     Light as LightDir, MaterialParams, Normal, PerceptualRoughness, View,
@@ -150,6 +150,7 @@ pub fn evaluate_lights(
     uniforms: &Uniforms,
     light_params: LightParams,
     #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
+    #[cfg(target_feature = "RayQueryKHR")] blue_noise_sampler: &mut BlueNoiseSampler,
 ) -> BrdfResult {
     #[cfg(target_feature = "RayQueryKHR")]
     spirv_std::ray_query!(let mut shadow_ray);
@@ -159,7 +160,7 @@ pub fn evaluate_lights(
         shadow_ray,
         acceleration_structure,
         position,
-        uniforms.sun_dir.into(),
+        blue_noise_sampler.sample_directional_light(0.05, uniforms.sun_dir.into()),
         10_000.0,
     )
     // todo: ambient lighting via probes or idk!

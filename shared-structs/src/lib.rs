@@ -26,6 +26,8 @@ pub struct Uniforms {
     pub num_clusters: UVec2,
     pub debug_clusters: u32,
     pub ggx_lut_texture_index: u32,
+    pub blue_noise_texture_index: u32,
+    pub frame_index: u32,
 }
 
 // https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering

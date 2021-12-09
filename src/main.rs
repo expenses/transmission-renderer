@@ -292,41 +292,81 @@ fn main() -> anyhow::Result<()> {
     let mut image_manager = ImageManager::default();
     let mut buffers_to_cleanup = Vec::new();
 
-    let ggx_lut_id = {
-        let _span = tracy_client::span!("Loading ggx_lut.png");
+    let (ggx_lut_texture_index, blue_noise_texture_index) = {
 
         use image::GenericImageView;
 
-        let decoded_image = image::load_from_memory_with_format(
-            include_bytes!("../ggx_lut.png"),
-            image::ImageFormat::Png,
-        )?;
+        let ggx_lut_texture_index = {
+            let _span = tracy_client::span!("Loading ggx_lut.png");
 
-        let rgba_image = decoded_image.to_rgba8();
+            let decoded_image = image::load_from_memory_with_format(
+                include_bytes!("../blue_noise_64x64.png"),
+                image::ImageFormat::Png,
+            )?;
 
-        let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
-            &ash_abstractions::LoadImageDescriptor {
-                bytes: &*rgba_image,
-                extent: vk::Extent3D {
-                    width: decoded_image.width(),
-                    height: decoded_image.height(),
-                    depth: 1,
+            let rgba_image = decoded_image.to_rgba8();
+
+            let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
+                &ash_abstractions::LoadImageDescriptor {
+                    bytes: &*rgba_image,
+                    extent: vk::Extent3D {
+                        width: decoded_image.width(),
+                        height: decoded_image.height(),
+                        depth: 1,
+                    },
+                    view_ty: vk::ImageViewType::TYPE_2D,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                    name: "ggx lut",
+                    next_accesses: &[
+                        vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    mip_levels: 1,
                 },
-                view_ty: vk::ImageViewType::TYPE_2D,
-                format: vk::Format::R8G8B8A8_UNORM,
-                name: "ggx lut",
-                next_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-                ],
-                next_layout: vk_sync::ImageLayout::Optimal,
-                mip_levels: 1,
-            },
-            &mut init_resources,
-        )?;
+                &mut init_resources,
+            )?;
 
-        buffers_to_cleanup.push(staging_buffer);
+            buffers_to_cleanup.push(staging_buffer);
 
-        image_manager.push_image(image)
+            image_manager.push_image(image)
+        };
+
+        let blue_noise_texture_index = {
+            let _span = tracy_client::span!("Loading blue_noise_64x64.png");
+
+            let decoded_image = image::load_from_memory_with_format(
+                include_bytes!("../blue_noise_64x64.png"),
+                image::ImageFormat::Png,
+            )?;
+
+            let rgba_image = decoded_image.to_rgba8();
+
+            let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
+                &ash_abstractions::LoadImageDescriptor {
+                    bytes: &*rgba_image,
+                    extent: vk::Extent3D {
+                        width: decoded_image.width(),
+                        height: decoded_image.height(),
+                        depth: 1,
+                    },
+                    view_ty: vk::ImageViewType::TYPE_2D,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                    name: "blue noise",
+                    next_accesses: &[
+                        vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    mip_levels: 1,
+                },
+                &mut init_resources,
+            )?;
+
+            buffers_to_cleanup.push(staging_buffer);
+
+            image_manager.push_image(image)
+        };
+
+        (ggx_lut_texture_index, blue_noise_texture_index)
     };
 
     let window_size = window.inner_size();
@@ -536,7 +576,7 @@ fn main() -> anyhow::Result<()> {
     let mut uniforms = shared_structs::Uniforms {
         sun_dir: sun.as_normal().into(),
         sun_intensity: Vec3::splat(3.0).into(),
-        ggx_lut_texture_index: ggx_lut_id,
+        ggx_lut_texture_index,
         num_clusters,
         cluster_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
             / num_clusters.as_vec2(),
@@ -549,6 +589,8 @@ fn main() -> anyhow::Result<()> {
             Z_FAR,
             NUM_DEPTH_SLICES,
         ),
+        blue_noise_texture_index,
+        frame_index: 0,
     };
 
     dbg!(&uniforms);
@@ -1408,6 +1450,8 @@ fn main() -> anyhow::Result<()> {
                     profiling_ctx.collect(&device)?;
 
                     tracy_client::finish_continuous_frame!();
+
+                    uniforms.frame_index += 1;
                 },
                 Event::LoopDestroyed => {
                     unsafe {
