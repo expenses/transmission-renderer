@@ -151,23 +151,11 @@ pub fn evaluate_lights(
     light_params: LightParams,
     #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
     #[cfg(target_feature = "RayQueryKHR")] blue_noise_sampler: &mut BlueNoiseSampler,
+    sun_shadow_value: f32,
 ) -> BrdfResult {
-    #[cfg(target_feature = "RayQueryKHR")]
-    spirv_std::ray_query!(let mut shadow_ray);
-
-    #[cfg(target_feature = "RayQueryKHR")]
-    let factor = trace_shadow_ray(
-        shadow_ray,
-        acceleration_structure,
-        position,
-        blue_noise_sampler.sample_directional_light(0.05, uniforms.sun_dir.into()),
-        10_000.0,
-    )
-    // todo: ambient lighting via probes or idk!
-    .max(0.1);
-
-    #[cfg(not(target_feature = "RayQueryKHR"))]
-    let factor = 1.0;
+    let factor = sun_shadow_value
+        // todo: ambient lighting via probes or idk!
+        .max(0.1);
 
     let mut sum = basic_brdf(BasicBrdfParams {
         light: LightDir(uniforms.sun_dir.into()),
@@ -176,6 +164,9 @@ pub fn evaluate_lights(
         view,
         material_params,
     });
+
+    #[cfg(target_feature = "RayQueryKHR")]
+    spirv_std::ray_query!(let mut shadow_ray);
 
     let mut current_light = light_params.light_indices_offset;
     let end = light_params.end();

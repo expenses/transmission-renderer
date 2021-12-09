@@ -4,7 +4,7 @@ use ash::vk;
 pub struct DescriptorSetLayouts {
     pub main: vk::DescriptorSetLayout,
     pub instance_buffer: vk::DescriptorSetLayout,
-    pub hdr_framebuffer: vk::DescriptorSetLayout,
+    pub single_sampled_image: vk::DescriptorSetLayout,
     pub frustum_culling: vk::DescriptorSetLayout,
     pub lights: vk::DescriptorSetLayout,
     pub cluster_data: vk::DescriptorSetLayout,
@@ -78,7 +78,7 @@ impl DescriptorSetLayouts {
                     None,
                 )?
             },
-            hdr_framebuffer: unsafe {
+            single_sampled_image: unsafe {
                 device.create_descriptor_set_layout(
                     &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
                         *vk::DescriptorSetLayoutBinding::builder()
@@ -218,6 +218,7 @@ pub struct DescriptorSets {
     pub lights: vk::DescriptorSet,
     pub cluster_data: vk::DescriptorSet,
     pub acceleration_structure_debugging: vk::DescriptorSet,
+    pub sun_shadow_buffer: vk::DescriptorSet,
     _descriptor_pool: vk::DescriptorPool,
 }
 
@@ -235,7 +236,7 @@ impl DescriptorSets {
                             .descriptor_count(3 + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(MAX_IMAGES),
+                            .descriptor_count(MAX_IMAGES + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLER)
                             .descriptor_count(3),
@@ -243,7 +244,7 @@ impl DescriptorSets {
                             .ty(vk::DescriptorType::STORAGE_IMAGE)
                             .descriptor_count(1),
                     ])
-                    .max_sets(8),
+                    .max_sets(9),
                 None,
             )
         }?;
@@ -254,12 +255,13 @@ impl DescriptorSets {
                     .set_layouts(&[
                         layouts.main,
                         layouts.instance_buffer,
-                        layouts.hdr_framebuffer,
-                        layouts.hdr_framebuffer,
+                        layouts.single_sampled_image,
+                        layouts.single_sampled_image,
                         layouts.frustum_culling,
                         layouts.lights,
                         layouts.cluster_data,
                         layouts.acceleration_structure_debugging,
+                        layouts.single_sampled_image,
                     ])
                     .descriptor_pool(descriptor_pool),
             )
@@ -274,6 +276,7 @@ impl DescriptorSets {
             lights: descriptor_sets[5],
             cluster_data: descriptor_sets[6],
             acceleration_structure_debugging: descriptor_sets[7],
+            sun_shadow_buffer: descriptor_sets[8],
             _descriptor_pool: descriptor_pool,
         })
     }
@@ -283,6 +286,7 @@ impl DescriptorSets {
         device: &ash::Device,
         hdr_framebuffer: &ash_abstractions::Image,
         opaque_sampled_hdr_framebuffer: &ash_abstractions::Image,
+        sun_shadow_buffer: &ash_abstractions::Image,
     ) {
         unsafe {
             device.update_descriptor_sets(
@@ -308,6 +312,13 @@ impl DescriptorSets {
                         .image_info(&[*vk::DescriptorImageInfo::builder()
                             .image_view(hdr_framebuffer.view)
                             .image_layout(vk::ImageLayout::GENERAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(self.sun_shadow_buffer)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(sun_shadow_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                 ],
                 &[],
             );

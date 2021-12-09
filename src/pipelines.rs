@@ -25,6 +25,8 @@ pub struct Pipelines {
     pub write_cluster_data: vk::Pipeline,
     pub cluster_debugging: vk::Pipeline,
     pub acceleration_structure_debugging: Option<vk::Pipeline>,
+    pub sun_shadow: Option<vk::Pipeline>,
+    pub depth_pre_pass_pipeline_layout: vk::PipelineLayout,
     pub pipeline_layout: vk::PipelineLayout,
     pub tonemap_pipeline_layout: vk::PipelineLayout,
     pub transmission_pipeline_layout: vk::PipelineLayout,
@@ -171,7 +173,34 @@ impl Pipelines {
             None
         };
 
+        let sun_shadow_stage = if enable_ray_tracing {
+            Some(ash_abstractions::load_shader_module_as_stage(
+                &read_shader(ray_tracing, "sun_shadow")?,
+                vk::ShaderStageFlags::FRAGMENT,
+                device,
+                c_str!("sun_shadow"),
+            )?)
+        } else {
+            None
+        };
+
         let pipeline_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[
+                        descriptor_set_layouts.main,
+                        descriptor_set_layouts.instance_buffer,
+                        descriptor_set_layouts.lights,
+                        descriptor_set_layouts.single_sampled_image,
+                    ])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                None,
+            )
+        }?;
+
+        let depth_pre_pass_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
@@ -193,7 +222,7 @@ impl Pipelines {
                         descriptor_set_layouts.main,
                         descriptor_set_layouts.instance_buffer,
                         descriptor_set_layouts.lights,
-                        descriptor_set_layouts.hdr_framebuffer,
+                        descriptor_set_layouts.single_sampled_image,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -221,7 +250,7 @@ impl Pipelines {
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
                         descriptor_set_layouts.main,
-                        descriptor_set_layouts.hdr_framebuffer,
+                        descriptor_set_layouts.single_sampled_image,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::FRAGMENT)
@@ -450,7 +479,7 @@ impl Pipelines {
 
         let depth_pre_pass_desc = depth_pre_pass_baked.as_pipeline_create_info(
             depth_pre_pass_stage,
-            pipeline_layout,
+            depth_pre_pass_pipeline_layout,
             render_passes.depth_pre_pass,
             0,
         );
@@ -463,7 +492,7 @@ impl Pipelines {
         let depth_pre_pass_alpha_clip_desc = depth_pre_pass_alpha_clip_baked
             .as_pipeline_create_info(
                 depth_pre_pass_alpha_clip_stages,
-                pipeline_layout,
+                depth_pre_pass_pipeline_layout,
                 render_passes.depth_pre_pass,
                 0,
             );
@@ -513,19 +542,59 @@ impl Pipelines {
             0,
         );
 
+        let sun_shadow_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::BACK,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: Some(ash_abstractions::DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: false,
+                depth_compare_op: vk::CompareOp::EQUAL,
+            }),
+            vertex_attributes: &full_vertex_attributes,
+            vertex_bindings: &full_vertex_bindings,
+            colour_attachments: &[
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+            ],
+        };
+
+        let sun_shadow_baked = sun_shadow_pipeline_desc.as_baked();
+
+        let mut sun_shadow_stages = vec![];
+
+        let sun_shadow_desc = if let Some(stage) = sun_shadow_stage {
+            sun_shadow_stages.extend_from_slice(&[*vertex_instanced_stage, *stage]);
+
+            Some(sun_shadow_baked.as_pipeline_create_info(
+                &sun_shadow_stages, depth_pre_pass_pipeline_layout, render_passes.sun_shadow, 0
+            ))
+        } else {
+            None
+        };
+
+        let mut pipeline_descs = vec![
+            *normal_pipeline_desc,
+            *depth_pre_pass_desc,
+            *depth_pre_pass_alpha_clip_desc,
+            *depth_pre_pass_transmissive_desc,
+            *depth_pre_pass_transmissive_alpha_clip_desc,
+            *transmission_pipeline_desc,
+            *tonemap_pipeline_desc,
+            *cluster_debugging_pipeline_desc,
+        ];
+
+        if let Some(desc) = sun_shadow_desc {
+            pipeline_descs.push(*desc);
+        }
+
         let pipelines = unsafe {
             device.create_graphics_pipelines(
                 pipeline_cache,
-                &[
-                    *normal_pipeline_desc,
-                    *depth_pre_pass_desc,
-                    *depth_pre_pass_alpha_clip_desc,
-                    *depth_pre_pass_transmissive_desc,
-                    *depth_pre_pass_transmissive_alpha_clip_desc,
-                    *transmission_pipeline_desc,
-                    *tonemap_pipeline_desc,
-                    *cluster_debugging_pipeline_desc,
-                ],
+                &pipeline_descs,
                 None,
             )
         }
@@ -568,15 +637,21 @@ impl Pipelines {
             transmission: pipelines[5],
             tonemap: pipelines[6],
             cluster_debugging: pipelines[7],
+            sun_shadow: if enable_ray_tracing {
+                Some(pipelines[8])
+            } else {
+                None
+            },
             frustum_culling: compute_pipelines[0],
             demultiplex_draws: compute_pipelines[1],
             assign_lights_to_clusters: compute_pipelines[2],
             write_cluster_data: compute_pipelines[3],
-            acceleration_structure_debugging: if acceleration_structure_debugging_stage.is_some() {
+            acceleration_structure_debugging: if enable_ray_tracing {
                 Some(compute_pipelines[4])
             } else {
                 None
             },
+            depth_pre_pass_pipeline_layout,
             pipeline_layout,
             tonemap_pipeline_layout,
             transmission_pipeline_layout,

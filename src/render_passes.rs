@@ -6,6 +6,7 @@ pub struct RenderPasses {
     pub draw: vk::RenderPass,
     pub transmission: vk::RenderPass,
     pub tonemap: vk::RenderPass,
+    pub sun_shadow: vk::RenderPass,
 }
 
 impl RenderPasses {
@@ -28,6 +29,10 @@ impl RenderPasses {
         let depth_attachment_ref = *vk::AttachmentReference::builder()
             .attachment(0)
             .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+        let single_attachment_ref = [*vk::AttachmentReference::builder()
+            .attachment(0)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
         let depth_pre_pass_subpasses = [
             *vk::SubpassDescription::builder()
@@ -71,10 +76,6 @@ impl RenderPasses {
                 //.initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .final_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
         ];
-
-        let depth_attachment_ref = *vk::AttachmentReference::builder()
-            .attachment(0)
-            .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
         let hdr_framebuffer_refs = [
             *vk::AttachmentReference::builder()
@@ -124,27 +125,23 @@ impl RenderPasses {
             *vk::AttachmentDescription::builder()
                 .format(surface_format)
                 .samples(vk::SampleCountFlags::TYPE_1)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .final_layout(vk::ImageLayout::PRESENT_SRC_KHR),
         ];
 
-        let swapchain_image_ref = [*vk::AttachmentReference::builder()
-            .attachment(0)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
-        let tonemap_subpasses = [
-            // Tonemapping pass
+        let single_subpass = [
             *vk::SubpassDescription::builder()
                 .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&swapchain_image_ref),
+                .color_attachments(&single_attachment_ref),
         ];
 
         let tonemap_render_pass = unsafe {
             device.create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&tonemap_attachments)
-                    .subpasses(&tonemap_subpasses),
+                    .subpasses(&single_subpass),
                 None,
             )
         }?;
@@ -155,7 +152,7 @@ impl RenderPasses {
                 .format(vk::Format::D32_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::LOAD)
-                .store_op(vk::AttachmentStoreOp::STORE)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
                 .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
                 .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // HDR framebuffer
@@ -167,10 +164,6 @@ impl RenderPasses {
                 .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
         ];
-
-        let depth_attachment_ref = *vk::AttachmentReference::builder()
-            .attachment(0)
-            .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
         let hdr_framebuffer_ref = [*vk::AttachmentReference::builder()
             .attachment(1)
@@ -191,30 +184,65 @@ impl RenderPasses {
             )
         }?;
 
-        ash_abstractions::set_object_name(
-            device,
-            debug_utils_loader,
-            draw_render_pass,
-            "draw render pass",
-        )?;
-        ash_abstractions::set_object_name(
-            device,
-            debug_utils_loader,
-            tonemap_render_pass,
-            "tonemap render pass",
-        )?;
-        ash_abstractions::set_object_name(
-            device,
-            debug_utils_loader,
-            transmission_render_pass,
-            "transmission render pass",
-        )?;
+        let sun_shadow_attachment = [
+            // Depth buffer
+            *vk::AttachmentDescription::builder()
+                .format(vk::Format::D32_SFLOAT)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::LOAD)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+            // Sun buffer
+            *vk::AttachmentDescription::builder()
+                .format(vk::Format::R8G8B8A8_UNORM)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+        ];
+
+        let sun_shadow_buffer_ref = [*vk::AttachmentReference::builder()
+            .attachment(1)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
+
+        let sun_shadow_subpass = [
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&sun_shadow_buffer_ref)
+                .depth_stencil_attachment(&depth_attachment_ref),
+        ];
+
+        let sun_shadow_render_pass = unsafe {
+            device.create_render_pass(
+                &vk::RenderPassCreateInfo::builder()
+                    .attachments(&sun_shadow_attachment)
+                    .subpasses(&sun_shadow_subpass),
+                None,
+            )
+        }?;
+
+        let set_name = |render_pass, name| {
+            ash_abstractions::set_object_name(
+                device,
+                debug_utils_loader,
+                render_pass,
+                name
+            )
+        };
+
+        set_name(draw_render_pass, "draw render pass")?;
+        set_name(depth_pre_pass_render_pass, "depth pre pass render pass")?;
+        set_name(tonemap_render_pass, "tonemap render pass")?;
+        set_name(transmission_render_pass, "transmission render pass")?;
+        set_name(sun_shadow_render_pass, "sun shadow render pass")?;
 
         Ok(Self {
             depth_pre_pass: depth_pre_pass_render_pass,
             draw: draw_render_pass,
             tonemap: tonemap_render_pass,
             transmission: transmission_render_pass,
+            sun_shadow: sun_shadow_render_pass,
         })
     }
 }

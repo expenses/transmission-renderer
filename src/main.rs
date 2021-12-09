@@ -421,6 +421,9 @@ fn main() -> anyhow::Result<()> {
     let draw_buffers = DrawBuffers::new(max_draw_counts, &mut init_resources)?;
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+
+    let mut sun_shadow_buffer = create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
+
     let mut hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
         extent.height,
@@ -712,14 +715,22 @@ fn main() -> anyhow::Result<()> {
         &depthbuffer,
     )?;
 
-    let mut depth_framebuffer = create_depth_framebuffer(
+    let mut depth_framebuffer = create_single_attachment_framebuffer(
         &device,
         extent,
         render_passes.depth_pre_pass,
         &depthbuffer,
     )?;
 
-    let mut transmission_framebuffer = create_transmission_framebuffer(
+    let mut sun_shadow_framebuffer = create_framebuffer_with_depth(
+        &device,
+        extent,
+        render_passes.sun_shadow,
+        &sun_shadow_buffer,
+        &depthbuffer,
+    )?;
+
+    let mut transmission_framebuffer = create_framebuffer_with_depth(
         &device,
         extent,
         render_passes.transmission,
@@ -876,7 +887,7 @@ fn main() -> anyhow::Result<()> {
         )
     }
 
-    descriptor_sets.update_framebuffers(&device, &hdr_framebuffer, &opaque_sampled_hdr_framebuffer);
+    descriptor_sets.update_framebuffers(&device, &hdr_framebuffer, &opaque_sampled_hdr_framebuffer, &sun_shadow_buffer);
 
     unsafe {
         record_write_cluster_data(
@@ -1102,6 +1113,8 @@ fn main() -> anyhow::Result<()> {
                         depthbuffer =
                             create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
 
+                        sun_shadow_buffer = create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
+
                         hdr_framebuffer = create_hdr_framebuffer(
                             extent.width,
                             extent.height,
@@ -1189,6 +1202,7 @@ fn main() -> anyhow::Result<()> {
                             &device,
                             &hdr_framebuffer,
                             &opaque_sampled_hdr_framebuffer,
+                            &sun_shadow_buffer
                         );
 
                         swapchain_image_framebuffers = create_swapchain_image_framebuffers(
@@ -1206,13 +1220,20 @@ fn main() -> anyhow::Result<()> {
                             opaque_sampled_hdr_framebuffer_top_mip_view,
                             &depthbuffer,
                         )?;
-                        depth_framebuffer = create_depth_framebuffer(
+                        depth_framebuffer = create_single_attachment_framebuffer(
                             &device,
                             extent,
                             render_passes.depth_pre_pass,
                             &depthbuffer,
                         )?;
-                        transmission_framebuffer = create_transmission_framebuffer(
+                        sun_shadow_framebuffer = create_framebuffer_with_depth(
+                            &device,
+                            extent,
+                            render_passes.sun_shadow,
+                            &sun_shadow_buffer,
+                            &depthbuffer,
+                        )?;
+                        transmission_framebuffer = create_framebuffer_with_depth(
                             &device,
                             extent,
                             render_passes.transmission,
@@ -1412,6 +1433,7 @@ fn main() -> anyhow::Result<()> {
                             render_passes: &render_passes,
                             draw_framebuffer,
                             depth_framebuffer,
+                            sun_shadow_framebuffer,
                             tonemap_framebuffer,
                             transmission_framebuffer,
                             descriptor_sets: &descriptor_sets,
@@ -1581,6 +1603,7 @@ struct RecordParams<'a> {
     render_passes: &'a RenderPasses,
     draw_framebuffer: vk::Framebuffer,
     depth_framebuffer: vk::Framebuffer,
+    sun_shadow_framebuffer: vk::Framebuffer,
     transmission_framebuffer: vk::Framebuffer,
     tonemap_framebuffer: vk::Framebuffer,
     hdr_framebuffer: &'a ash_abstractions::Image,
@@ -1616,6 +1639,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         render_passes,
         draw_framebuffer,
         depth_framebuffer,
+        sun_shadow_framebuffer,
         transmission_framebuffer,
         tonemap_framebuffer,
         toggle,
@@ -1666,7 +1690,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         },
     ];
 
-    let tonemap_clear_values = [vk::ClearValue {
+    let black_clear_value = [vk::ClearValue {
         color: vk::ClearColorValue {
             float32: [0.0, 0.0, 0.0, 1.0],
         },
@@ -1689,6 +1713,26 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .render_area(area)
         .clear_values(&depth_pre_pass_clear_values);
 
+    let sun_shadow_clear_values = [
+        vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: 0.0,
+                stencil: 0,
+            },
+        },
+        vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [1.0; 4],
+            },
+        }
+    ];
+
+    let sun_shadow_render_pass_info = vk::RenderPassBeginInfo::builder()
+        .render_pass(render_passes.sun_shadow)
+        .framebuffer(sun_shadow_framebuffer)
+        .render_area(area)
+        .clear_values(&sun_shadow_clear_values);
+
     let transmission_render_pass_info = vk::RenderPassBeginInfo::builder()
         .render_pass(render_passes.transmission)
         .framebuffer(transmission_framebuffer)
@@ -1698,7 +1742,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .render_pass(render_passes.tonemap)
         .framebuffer(tonemap_framebuffer)
         .render_area(area)
-        .clear_values(&tonemap_clear_values);
+        .clear_values(&black_clear_value);
 
     let viewport = *vk::Viewport::builder()
         .x(0.0)
@@ -1932,7 +1976,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     device.cmd_bind_descriptor_sets(
         command_buffer,
         vk::PipelineBindPoint::GRAPHICS,
-        pipelines.pipeline_layout,
+        pipelines.depth_pre_pass_pipeline_layout,
         0,
         &[
             descriptor_sets.main,
@@ -1944,7 +1988,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_push_constants(
         command_buffer,
-        pipelines.pipeline_layout,
+        pipelines.depth_pre_pass_pipeline_layout,
         vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
         0,
         bytes_of(&push_constants),
@@ -2018,6 +2062,37 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_begin_render_pass(
         command_buffer,
+        &sun_shadow_render_pass_info,
+        vk::SubpassContents::INLINE
+    );
+
+    if let Some(pipeline) = pipelines.sun_shadow {
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipeline,
+        );
+
+        {
+            let _profiling_zone = profiling_zone!("sun shadow opaque", device, command_buffer, profiling_ctx);
+            draw_buffers
+                .opaque
+                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+        }
+
+        {
+            let _profiling_zone =
+                profiling_zone!("sun shadow alpha clipped", device, command_buffer, profiling_ctx);
+            draw_buffers
+                .alpha_clip
+                .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
+        }
+    }
+
+    device.cmd_end_render_pass(command_buffer);
+
+    device.cmd_begin_render_pass(
+        command_buffer,
         &draw_render_pass_info,
         vk::SubpassContents::INLINE,
     );
@@ -2058,6 +2133,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             descriptor_sets.main,
             descriptor_sets.instance_buffer,
             descriptor_sets.lights,
+            descriptor_sets.sun_shadow_buffer,
         ],
         &[],
     );
@@ -2339,18 +2415,18 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_transmission_framebuffer(
+fn create_framebuffer_with_depth(
     device: &ash::Device,
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
-    hdr_framebuffer: &ash_abstractions::Image,
+    image: &ash_abstractions::Image,
     depthbuffer: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
-                .attachments(&[depthbuffer.view, hdr_framebuffer.view])
+                .attachments(&[depthbuffer.view, image.view])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -2384,18 +2460,18 @@ fn create_draw_framebuffer(
     }?)
 }
 
-fn create_depth_framebuffer(
+fn create_single_attachment_framebuffer(
     device: &ash::Device,
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
-    depthbuffer: &ash_abstractions::Image,
+    image: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
                 .attachments(&[
-                    depthbuffer.view,
+                    image.view,
                 ])
                 .width(extent.width)
                 .height(extent.height)
@@ -2404,7 +2480,6 @@ fn create_depth_framebuffer(
         )
     }?)
 }
-
 
 fn create_swapchain_image_framebuffers(
     device: &ash::Device,
@@ -2446,6 +2521,26 @@ fn create_depthbuffer(
             format: vk::Format::D32_SFLOAT,
             usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             next_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
+            next_layout: vk_sync::ImageLayout::Optimal,
+        },
+        init_resources,
+    )
+}
+
+fn create_sun_shadow_buffer(
+    width: u32,
+    height: u32,
+    init_resources: &mut ash_abstractions::InitResources,
+) -> anyhow::Result<ash_abstractions::Image> {
+    ash_abstractions::Image::new(
+        &ash_abstractions::ImageDescriptor {
+            width,
+            height,
+            name: "sun shadow buffer",
+            mip_levels: 1,
+            format: vk::Format::R8G8B8A8_UNORM,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
