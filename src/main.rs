@@ -712,6 +712,13 @@ fn main() -> anyhow::Result<()> {
         &depthbuffer,
     )?;
 
+    let mut depth_framebuffer = create_depth_framebuffer(
+        &device,
+        extent,
+        render_passes.depth_pre_pass,
+        &depthbuffer,
+    )?;
+
     let mut transmission_framebuffer = create_transmission_framebuffer(
         &device,
         extent,
@@ -1199,6 +1206,12 @@ fn main() -> anyhow::Result<()> {
                             opaque_sampled_hdr_framebuffer_top_mip_view,
                             &depthbuffer,
                         )?;
+                        depth_framebuffer = create_depth_framebuffer(
+                            &device,
+                            extent,
+                            render_passes.depth_pre_pass,
+                            &depthbuffer,
+                        )?;
                         transmission_framebuffer = create_transmission_framebuffer(
                             &device,
                             extent,
@@ -1398,6 +1411,7 @@ fn main() -> anyhow::Result<()> {
                             model_buffers: &model_buffers,
                             render_passes: &render_passes,
                             draw_framebuffer,
+                            depth_framebuffer,
                             tonemap_framebuffer,
                             transmission_framebuffer,
                             descriptor_sets: &descriptor_sets,
@@ -1566,6 +1580,7 @@ struct RecordParams<'a> {
     model_buffers: &'a ModelBuffers,
     render_passes: &'a RenderPasses,
     draw_framebuffer: vk::Framebuffer,
+    depth_framebuffer: vk::Framebuffer,
     transmission_framebuffer: vk::Framebuffer,
     tonemap_framebuffer: vk::Framebuffer,
     hdr_framebuffer: &'a ash_abstractions::Image,
@@ -1600,6 +1615,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         profiling_ctx,
         render_passes,
         draw_framebuffer,
+        depth_framebuffer,
         transmission_framebuffer,
         tonemap_framebuffer,
         toggle,
@@ -1621,6 +1637,15 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         opaque_sampled_hdr_framebuffer,
         descriptor_sets,
     } = params;
+
+    let depth_pre_pass_clear_values = [
+        vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: 0.0,
+                stencil: 0,
+            },
+        },
+    ];
 
     let draw_clear_values = [
         vk::ClearValue {
@@ -1657,6 +1682,12 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .framebuffer(draw_framebuffer)
         .render_area(area)
         .clear_values(&draw_clear_values);
+
+    let depth_pre_pass_render_pass_info = vk::RenderPassBeginInfo::builder()
+        .render_pass(render_passes.depth_pre_pass)
+        .framebuffer(depth_framebuffer)
+        .render_area(area)
+        .clear_values(&depth_pre_pass_clear_values);
 
     let transmission_render_pass_info = vk::RenderPassBeginInfo::builder()
         .render_pass(render_passes.transmission)
@@ -1891,7 +1922,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     device.cmd_begin_render_pass(
         command_buffer,
-        &draw_render_pass_info,
+        &depth_pre_pass_render_pass_info,
         vk::SubpassContents::INLINE,
     );
 
@@ -1983,7 +2014,13 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         }
     }
 
-    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+    device.cmd_end_render_pass(command_buffer);
+
+    device.cmd_begin_render_pass(
+        command_buffer,
+        &draw_render_pass_info,
+        vk::SubpassContents::INLINE,
+    );
 
     /*{
         device.cmd_bind_pipeline(
@@ -2346,6 +2383,28 @@ fn create_draw_framebuffer(
         )
     }?)
 }
+
+fn create_depth_framebuffer(
+    device: &ash::Device,
+    extent: vk::Extent2D,
+    render_pass: vk::RenderPass,
+    depthbuffer: &ash_abstractions::Image,
+) -> anyhow::Result<vk::Framebuffer> {
+    Ok(unsafe {
+        device.create_framebuffer(
+            &vk::FramebufferCreateInfo::builder()
+                .render_pass(render_pass)
+                .attachments(&[
+                    depthbuffer.view,
+                ])
+                .width(extent.width)
+                .height(extent.height)
+                .layers(1),
+            None,
+        )
+    }?)
+}
+
 
 fn create_swapchain_image_framebuffers(
     device: &ash::Device,

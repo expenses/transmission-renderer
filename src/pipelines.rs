@@ -444,14 +444,14 @@ impl Pipelines {
         let stages = &[*vertex_instanced_stage, *fragment_stage];
 
         let normal_pipeline_desc =
-            normal_baked.as_pipeline_create_info(stages, pipeline_layout, render_passes.draw, 1);
+            normal_baked.as_pipeline_create_info(stages, pipeline_layout, render_passes.draw, 0);
 
         let depth_pre_pass_stage = &[*vertex_depth_pre_pass_stage];
 
         let depth_pre_pass_desc = depth_pre_pass_baked.as_pipeline_create_info(
             depth_pre_pass_stage,
             pipeline_layout,
-            render_passes.draw,
+            render_passes.depth_pre_pass,
             0,
         );
 
@@ -464,7 +464,7 @@ impl Pipelines {
             .as_pipeline_create_info(
                 depth_pre_pass_alpha_clip_stages,
                 pipeline_layout,
-                render_passes.draw,
+                render_passes.depth_pre_pass,
                 0,
             );
 
@@ -493,7 +493,7 @@ impl Pipelines {
             depth_pre_pass_stage,
             pipeline_layout,
             render_passes.draw,
-            2,
+            1,
         );
 
         let depth_pre_pass_transmissive_alpha_clip_desc = depth_pre_pass_alpha_clip_baked
@@ -501,7 +501,7 @@ impl Pipelines {
                 depth_pre_pass_alpha_clip_stages,
                 pipeline_layout,
                 render_passes.draw,
-                2,
+                1,
             );
 
         let cluster_debugging_stages = &[*cluster_debugging_vs_stage, *cluster_debugging_fs_stage];
@@ -510,7 +510,7 @@ impl Pipelines {
             cluster_debugging_stages,
             cluster_debugging_pipeline_layout,
             render_passes.draw,
-            1,
+            0,
         );
 
         let pipelines = unsafe {

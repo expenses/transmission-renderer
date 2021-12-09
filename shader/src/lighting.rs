@@ -94,7 +94,7 @@ pub fn evaluate_lights_transmission(
     (sum, transmission)
 }
 
-fn trace_shadow_ray(
+pub(crate) fn trace_shadow_ray(
     ray: &mut RayQuery,
     acceleration_structure: &AccelerationStructure,
     origin: Vec3,
