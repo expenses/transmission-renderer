@@ -1259,10 +1259,6 @@ fn main() -> anyhow::Result<()> {
                         let instances_offset = instances_to_rotate.clone().start;
                         instances[instances_offset].transform.rotation =
                             Quat::from_rotation_y(model_rotation);
-                        model_buffers.instances.write_mapped(
-                            unsafe { cast_slice(&instances[instances_to_rotate.clone()]) },
-                            std::mem::size_of::<Instance>() * instances_offset,
-                        )?;
 
                         if let Some(acceleration_structure_data) =
                             acceleration_structure_data.as_mut()
@@ -1316,6 +1312,14 @@ fn main() -> anyhow::Result<()> {
 
                     let tonemap_framebuffer =
                         swapchain_image_framebuffers[swapchain_image_index as usize];
+
+                    if opt.rotate_model {
+                        let instances_offset = instances_to_rotate.clone().start;
+                        model_buffers.instances.write_mapped(
+                            cast_slice(&instances[instances_to_rotate.clone()]),
+                            std::mem::size_of::<Instance>() * instances_offset,
+                        )?;
+                    }
 
                     {
                         device.begin_command_buffer(
@@ -1798,7 +1802,7 @@ unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             command_buffer,
             Some(vk_sync::GlobalBarrier {
                 previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther, vk_sync::AccessType::FragmentShaderReadOther],
             }),
             &[],
             &[],
