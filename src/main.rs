@@ -56,7 +56,7 @@ fn perspective_matrix_reversed(width: u32, height: u32) -> Mat4 {
 pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
-pub const MAX_IMAGES: u32 = 193;
+pub const MAX_IMAGES: u32 = 189;
 pub const NUM_CLUSTERS_X: u32 = 24;
 pub const NUM_CLUSTERS_Y: u32 = 16;
 pub const NUM_DEPTH_SLICES: u32 = 16;
