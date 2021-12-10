@@ -69,7 +69,7 @@ dependencies = [
 [[package]]
 name = "ash-opinionated-abstractions"
 version = "0.1.0"
-source = "git+https://github.com/expenses/ash-opinionated-abstractions#c27d43aa63251f7cac6eb2471fa75e72eea95c56"
+source = "git+https://github.com/expenses/ash-opinionated-abstractions#8591c309dc616f7919d238ca58ddbd747736c7a4"
 dependencies = [
  "anyhow",
  "ash",
@@ -1598,9 +1598,9 @@ checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
 
 [[package]]
 name = "vk-sync-fork"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dec4933d9b2bc41211cb06994a367c20cf33d39b0450b3763a2c502956036c92"
+checksum = "46549b08cdc0ce292a35c77ece31f0a2046b6b95db78f208b17017ac69bbaba2"
 dependencies = [
  "ash",
 ]

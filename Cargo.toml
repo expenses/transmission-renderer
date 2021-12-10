@@ -16,7 +16,7 @@ image = { version = "*", default-features = false }
 gpu-allocator = "0.10.0"
 ash-abstractions = { package = "ash-opinionated-abstractions", git = "https://github.com/expenses/ash-opinionated-abstractions" }
 winit = "0.25.0"
-vk-sync = { package = "vk-sync-fork", version = "0.2.1" }
+vk-sync = { package = "vk-sync-fork", version = "0.2.2" }
 simplelog = "0.11.0"
 log = "0.4.14"
 shared-structs = { path = "shared-structs" }
