@@ -57,67 +57,67 @@ impl Pipelines {
         };
 
         let fragment_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(maybe_ray_tracing, "fragment")?,
+            &read_shader(maybe_ray_tracing, "fragment_opaque")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("fragment"),
+            c_str!("fragment::opaque"),
         )?;
 
         let fragment_transmission_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(maybe_ray_tracing, "fragment_transmission")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("fragment_transmission"),
+            c_str!("fragment::transmission"),
         )?;
 
         let vertex_instanced_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "vertex_instanced")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("vertex_instanced"),
+            c_str!("vertex::instanced"),
         )?;
 
         let vertex_instanced_with_scale_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "vertex_instanced_with_scale")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("vertex_instanced_with_scale"),
+            c_str!("vertex::instanced_with_scale"),
         )?;
 
         let vertex_depth_pre_pass_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(normal, "depth_pre_pass_instanced")?,
+            &read_shader(normal, "depth_pre_pass_vertex")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("depth_pre_pass_instanced"),
+            c_str!("depth_pre_pass::vertex"),
         )?;
 
         let vertex_depth_pre_pass_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("depth_pre_pass_vertex_alpha_clip"),
+            c_str!("depth_pre_pass::vertex_alpha_clip"),
         )?;
 
         let fragment_depth_pre_pass_alpha_clip_stage =
             ash_abstractions::load_shader_module_as_stage(
-                &read_shader(normal, "depth_pre_pass_alpha_clip")?,
+                &read_shader(normal, "depth_pre_pass_fragment_alpha_clip")?,
                 vk::ShaderStageFlags::FRAGMENT,
                 device,
-                c_str!("depth_pre_pass_alpha_clip"),
+                c_str!("depth_pre_pass::fragment_alpha_clip"),
             )?;
 
         let fullscreen_tri_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(normal, "fullscreen_tri")?,
+            &read_shader(normal, "vertex_fullscreen_tri")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("fullscreen_tri"),
+            c_str!("vertex::fullscreen_tri"),
         )?;
 
         let fragment_tonemap_stage = ash_abstractions::load_shader_module_as_stage(
             &read_shader(normal, "fragment_tonemap")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("fragment_tonemap"),
+            c_str!("fragment::tonemap"),
         )?;
 
         let frustum_culling_stage = ash_abstractions::load_shader_module_as_stage(
@@ -149,25 +149,25 @@ impl Pipelines {
         )?;
 
         let cluster_debugging_vs_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(normal, "cluster_debugging_vs")?,
+            &read_shader(normal, "debugging_cluster_debugging_vs")?,
             vk::ShaderStageFlags::VERTEX,
             device,
-            c_str!("cluster_debugging_vs"),
+            c_str!("debugging::cluster_debugging_vs"),
         )?;
 
         let cluster_debugging_fs_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(normal, "cluster_debugging_fs")?,
+            &read_shader(normal, "debugging_cluster_debugging_fs")?,
             vk::ShaderStageFlags::FRAGMENT,
             device,
-            c_str!("cluster_debugging_fs"),
+            c_str!("debugging::cluster_debugging_fs"),
         )?;
 
         let acceleration_structure_debugging_stage = if enable_ray_tracing {
             Some(ash_abstractions::load_shader_module_as_stage(
-                &read_shader(ray_tracing, "acceleration_structure_debugging")?,
+                &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
                 vk::ShaderStageFlags::COMPUTE,
                 device,
-                c_str!("acceleration_structure_debugging"),
+                c_str!("debugging::acceleration_structure_debugging"),
             )?)
         } else {
             None
@@ -175,10 +175,10 @@ impl Pipelines {
 
         let sun_shadow_stage = if enable_ray_tracing {
             Some(ash_abstractions::load_shader_module_as_stage(
-                &read_shader(ray_tracing, "sun_shadow")?,
+                &read_shader(ray_tracing, "fragment_sun_shadow")?,
                 vk::ShaderStageFlags::FRAGMENT,
                 device,
-                c_str!("sun_shadow"),
+                c_str!("fragment::sun_shadow"),
             )?)
         } else {
             None
