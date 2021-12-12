@@ -2544,7 +2544,7 @@ fn create_sun_shadow_buffer(
             mip_levels: 1,
             format: vk::Format::R8G8B8A8_UNORM,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
-            next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+            next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,

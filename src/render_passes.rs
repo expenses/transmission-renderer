@@ -99,7 +99,9 @@ impl RenderPasses {
         ];
 
         // https://themaister.net/blog/2019/08/14/yet-another-blog-explaining-vulkan-synchronization/
-        // says I can ignore external subpass dependencies.
+        // says I can ignore external subpass dependencies *.
+        //
+        // * unless they need to transition layouts!
         let draw_subpass_dependencices = [
             *vk::SubpassDependency::builder()
                 .src_subpass(0)
@@ -108,6 +110,13 @@ impl RenderPasses {
                 .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ)
                 .dst_stage_mask(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS)
                 .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE),
+            /* *vk::SubpassDependency::builder()
+                .src_subpass(1)
+                .dst_subpass(vk::SUBPASS_EXTERNAL)
+                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags::TRANSFER)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ), */
         ];
 
         let draw_render_pass = unsafe {
@@ -153,16 +162,16 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::LOAD)
                 .store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+                .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // HDR framebuffer
             *vk::AttachmentDescription::builder()
                 .format(vk::Format::R16G16B16A16_SFLOAT)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::LOAD)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+                .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         ];
 
         let hdr_framebuffer_ref = [*vk::AttachmentReference::builder()
@@ -174,12 +183,22 @@ impl RenderPasses {
             .color_attachments(&hdr_framebuffer_ref)
             .depth_stencil_attachment(&depth_attachment_ref)];
 
+        let transmission_subpass_dependency = [
+            *vk::SubpassDependency::builder()
+                .src_subpass(0)
+                .dst_subpass(vk::SUBPASS_EXTERNAL)
+                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ),
+        ];
 
         let transmission_render_pass = unsafe {
             device.create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&transmission_attachments)
-                    .subpasses(&transmission_subpass),
+                    .subpasses(&transmission_subpass)
+                    .dependencies(&transmission_subpass_dependency),
                 None,
             )
         }?;
@@ -199,6 +218,7 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
+                .initial_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         ];
 
@@ -213,11 +233,22 @@ impl RenderPasses {
                 .depth_stencil_attachment(&depth_attachment_ref),
         ];
 
+        let sun_shadow_subpass_dependencies = [
+            *vk::SubpassDependency::builder()
+                .src_subpass(0)
+                .dst_subpass(vk::SUBPASS_EXTERNAL)
+                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ),
+        ];
+
         let sun_shadow_render_pass = unsafe {
             device.create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&sun_shadow_attachment)
-                    .subpasses(&sun_shadow_subpass),
+                    .subpasses(&sun_shadow_subpass)
+                    .dependencies(&sun_shadow_subpass_dependencies),
                 None,
             )
         }?;
