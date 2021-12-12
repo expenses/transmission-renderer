@@ -440,45 +440,11 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     );
 
     if let (Some(defer_render_pass_info), Some(g_buffer)) = (defer_render_pass_info, g_buffer) {
-        device.cmd_begin_render_pass(
-            command_buffer,
-            &defer_render_pass_info,
-            vk::SubpassContents::INLINE,
+        record_deferred(
+            device, command_buffer, &defer_render_pass_info,
+            pipelines,
+            draw_buffers,
         );
-
-        {
-            {
-                device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    pipelines.defer_opaque,
-                );
-
-                draw_buffers.opaque.record(
-                    device,
-                    &draw_buffers.draw_counts_buffer,
-                    0,
-                    command_buffer,
-                );
-            }
-
-            {
-                device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    pipelines.defer_alpha_clip,
-                );
-
-                draw_buffers.alpha_clip.record(
-                    device,
-                    &draw_buffers.draw_counts_buffer,
-                    1,
-                    command_buffer,
-                );
-            }
-        }
-
-        device.cmd_end_render_pass(command_buffer);
 
         device.cmd_begin_render_pass(
             command_buffer,
@@ -488,135 +454,20 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
         device.cmd_end_render_pass(command_buffer);
 
-        device.cmd_begin_render_pass(
-            command_buffer,
-            &draw_render_pass_info,
-            vk::SubpassContents::INLINE,
+        record_render_deferred(
+            device, command_buffer, &draw_render_pass_info,
+            pipelines,
+            descriptor_sets,
+            g_buffer,
         );
-
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.deferred_render,
-        );
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.deferred_render_pipeline_layout,
-            0,
-            &[
-                descriptor_sets.main,
-                g_buffer.descriptor_set,
-                descriptor_sets.lights,
-                descriptor_sets.sun_shadow_buffer,
-            ],
-            &[],
-        );
-        device.cmd_draw(command_buffer, 3, 1, 0, 0);
-
-        device.cmd_end_render_pass(command_buffer);
     } else {
-        device.cmd_begin_render_pass(
-            command_buffer,
-            &draw_render_pass_info,
-            vk::SubpassContents::INLINE,
+        record_forwards(
+            device, command_buffer, &draw_render_pass_info,
+            profiling_ctx,
+            pipelines,
+            descriptor_sets,
+            draw_buffers,
         );
-
-        {
-            let _depth_profiling_zone =
-                profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
-
-            {
-                let _profiling_zone = profiling_zone!(
-                    "depth pre pass opaque",
-                    device,
-                    command_buffer,
-                    profiling_ctx
-                );
-
-                device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    pipelines.depth_pre_pass,
-                );
-
-                draw_buffers.opaque.record(
-                    device,
-                    &draw_buffers.draw_counts_buffer,
-                    0,
-                    command_buffer,
-                );
-            }
-
-            {
-                let _profiling_zone = profiling_zone!(
-                    "depth pre pass alpha clipped",
-                    device,
-                    command_buffer,
-                    profiling_ctx
-                );
-
-                device.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    pipelines.depth_pre_pass_alpha_clip,
-                );
-
-                draw_buffers.alpha_clip.record(
-                    device,
-                    &draw_buffers.draw_counts_buffer,
-                    1,
-                    command_buffer,
-                );
-            }
-        }
-
-        device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
-
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.normal,
-            );
-
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.forwards_pipeline_layout,
-                0,
-                &[
-                    descriptor_sets.main,
-                    descriptor_sets.instance_buffer,
-                    descriptor_sets.lights,
-                ],
-                &[],
-            );
-
-            {
-                let _profiling_zone =
-                    profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
-                draw_buffers.opaque.record(
-                    device,
-                    &draw_buffers.draw_counts_buffer,
-                    0,
-                    command_buffer,
-                );
-            }
-
-            {
-                let _profiling_zone =
-                    profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
-                draw_buffers.alpha_clip.record(
-                    device,
-                    &draw_buffers.draw_counts_buffer,
-                    1,
-                    command_buffer,
-                );
-            }
-        }
-
-        device.cmd_end_render_pass(command_buffer);
     }
 
     {
@@ -639,123 +490,14 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         );
     }
 
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &transmission_render_pass_info,
-        vk::SubpassContents::INLINE,
+    record_transmissive(
+        device, command_buffer, &transmission_render_pass_info,
+        profiling_ctx,
+        pipelines,
+        descriptor_sets,
+        draw_buffers,
+        &push_constants,
     );
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "depth pre pass transmissive",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.depth_pre_pass_pipeline_layout,
-            0,
-            &[descriptor_sets.main, descriptor_sets.instance_buffer],
-            &[],
-        );
-
-        device.cmd_push_constants(
-            command_buffer,
-            pipelines.depth_pre_pass_pipeline_layout,
-            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-            0,
-            bytes_of(&push_constants),
-        );
-
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass_transmissive,
-            );
-
-            draw_buffers.transmission.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                2,
-                command_buffer,
-            );
-        }
-
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass_transmissive_alpha_clip,
-            );
-
-            draw_buffers.transmission_alpha_clip.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                3,
-                command_buffer,
-            );
-        }
-    }
-
-    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
-
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.transmission_pipeline_layout,
-        0,
-        &[
-            descriptor_sets.main,
-            descriptor_sets.instance_buffer,
-            descriptor_sets.lights,
-            descriptor_sets.opaque_sampled_hdr_framebuffer,
-        ],
-        &[],
-    );
-
-    device.cmd_bind_pipeline(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.transmission,
-    );
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "opaque transmissive objects",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        draw_buffers.transmission.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            2,
-            command_buffer,
-        );
-    }
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "alpha clip transmissive objects",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        draw_buffers.transmission_alpha_clip.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            3,
-            command_buffer,
-        );
-    }
-
-    device.cmd_end_render_pass(command_buffer);
 
     if let Some(pipeline) = pipelines
         .acceleration_structure_debugging
@@ -939,4 +681,326 @@ pub(crate) unsafe fn record_write_cluster_data(
         dispatch_count(NUM_CLUSTERS_Y, 4),
         dispatch_count(NUM_DEPTH_SLICES, 4),
     );
+}
+
+unsafe fn record_forwards(
+    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    draw_render_pass_info: &vk::RenderPassBeginInfo,
+    profiling_ctx: &ProfilingContext,
+    pipelines: &Pipelines,
+    descriptor_sets: &DescriptorSets,
+    draw_buffers: &DrawBuffers,
+) {
+    device.cmd_begin_render_pass(
+        command_buffer,
+        draw_render_pass_info,
+        vk::SubpassContents::INLINE,
+    );
+
+    {
+        let _depth_profiling_zone =
+            profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
+
+        {
+            let _profiling_zone = profiling_zone!(
+                "depth pre pass opaque",
+                device,
+                command_buffer,
+                profiling_ctx
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.depth_pre_pass,
+            );
+
+            draw_buffers.opaque.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                0,
+                command_buffer,
+            );
+        }
+
+        {
+            let _profiling_zone = profiling_zone!(
+                "depth pre pass alpha clipped",
+                device,
+                command_buffer,
+                profiling_ctx
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.depth_pre_pass_alpha_clip,
+            );
+
+            draw_buffers.alpha_clip.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                1,
+                command_buffer,
+            );
+        }
+    }
+
+    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+
+    {
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.normal,
+        );
+
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.forwards_pipeline_layout,
+            0,
+            &[
+                descriptor_sets.main,
+                descriptor_sets.instance_buffer,
+                descriptor_sets.lights,
+            ],
+            &[],
+        );
+
+        {
+            let _profiling_zone =
+                profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
+            draw_buffers.opaque.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                0,
+                command_buffer,
+            );
+        }
+
+        {
+            let _profiling_zone =
+                profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
+            draw_buffers.alpha_clip.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                1,
+                command_buffer,
+            );
+        }
+    }
+
+    device.cmd_end_render_pass(command_buffer);
+}
+
+unsafe fn record_deferred(
+    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    defer_render_pass_info: &vk::RenderPassBeginInfo,
+    pipelines: &Pipelines,
+    draw_buffers: &DrawBuffers,
+) {
+    device.cmd_begin_render_pass(
+        command_buffer,
+        &defer_render_pass_info,
+        vk::SubpassContents::INLINE,
+    );
+
+    {
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.defer_opaque,
+            );
+
+            draw_buffers.opaque.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                0,
+                command_buffer,
+            );
+        }
+
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.defer_alpha_clip,
+            );
+
+            draw_buffers.alpha_clip.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                1,
+                command_buffer,
+            );
+        }
+    }
+
+    device.cmd_end_render_pass(command_buffer);
+}
+
+unsafe fn record_render_deferred(
+    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    draw_render_pass_info: &vk::RenderPassBeginInfo,
+    pipelines: &Pipelines,
+    descriptor_sets: &DescriptorSets,
+    g_buffer: &GBuffer,
+) {
+    device.cmd_begin_render_pass(
+        command_buffer,
+        &draw_render_pass_info,
+        vk::SubpassContents::INLINE,
+    );
+
+    device.cmd_bind_pipeline(
+        command_buffer,
+        vk::PipelineBindPoint::GRAPHICS,
+        pipelines.deferred_render,
+    );
+    device.cmd_bind_descriptor_sets(
+        command_buffer,
+        vk::PipelineBindPoint::GRAPHICS,
+        pipelines.deferred_render_pipeline_layout,
+        0,
+        &[
+            descriptor_sets.main,
+            g_buffer.descriptor_set,
+            descriptor_sets.lights,
+            descriptor_sets.sun_shadow_buffer,
+        ],
+        &[],
+    );
+    device.cmd_draw(command_buffer, 3, 1, 0, 0);
+
+    device.cmd_end_render_pass(command_buffer);
+}
+
+unsafe fn record_transmissive(
+    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    transmission_render_pass_info: &vk::RenderPassBeginInfo,
+    profiling_ctx: &ProfilingContext,
+    pipelines: &Pipelines,
+    descriptor_sets: &DescriptorSets,
+    draw_buffers: &DrawBuffers,
+    push_constants: &PushConstants,
+) {
+    device.cmd_begin_render_pass(
+        command_buffer,
+        transmission_render_pass_info,
+        vk::SubpassContents::INLINE,
+    );
+
+    {
+        let _profiling_zone = profiling_zone!(
+            "depth pre pass transmissive",
+            device,
+            command_buffer,
+            profiling_ctx
+        );
+
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.depth_pre_pass_pipeline_layout,
+            0,
+            &[descriptor_sets.main, descriptor_sets.instance_buffer],
+            &[],
+        );
+
+        device.cmd_push_constants(
+            command_buffer,
+            pipelines.depth_pre_pass_pipeline_layout,
+            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+            0,
+            bytes_of(push_constants),
+        );
+
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.depth_pre_pass_transmissive,
+            );
+
+            draw_buffers.transmission.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                2,
+                command_buffer,
+            );
+        }
+
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.depth_pre_pass_transmissive_alpha_clip,
+            );
+
+            draw_buffers.transmission_alpha_clip.record(
+                device,
+                &draw_buffers.draw_counts_buffer,
+                3,
+                command_buffer,
+            );
+        }
+    }
+
+    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+
+    device.cmd_bind_descriptor_sets(
+        command_buffer,
+        vk::PipelineBindPoint::GRAPHICS,
+        pipelines.transmission_pipeline_layout,
+        0,
+        &[
+            descriptor_sets.main,
+            descriptor_sets.instance_buffer,
+            descriptor_sets.lights,
+            descriptor_sets.opaque_sampled_hdr_framebuffer,
+        ],
+        &[],
+    );
+
+    device.cmd_bind_pipeline(
+        command_buffer,
+        vk::PipelineBindPoint::GRAPHICS,
+        pipelines.transmission,
+    );
+
+    {
+        let _profiling_zone = profiling_zone!(
+            "opaque transmissive objects",
+            device,
+            command_buffer,
+            profiling_ctx
+        );
+
+        draw_buffers.transmission.record(
+            device,
+            &draw_buffers.draw_counts_buffer,
+            2,
+            command_buffer,
+        );
+    }
+
+    {
+        let _profiling_zone = profiling_zone!(
+            "alpha clip transmissive objects",
+            device,
+            command_buffer,
+            profiling_ctx
+        );
+
+        draw_buffers.transmission_alpha_clip.record(
+            device,
+            &draw_buffers.draw_counts_buffer,
+            3,
+            command_buffer,
+        );
+    }
+
+    device.cmd_end_render_pass(command_buffer);
 }
