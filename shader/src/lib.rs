@@ -13,11 +13,13 @@ mod vertex;
 mod debugging;
 mod fragment;
 mod depth_pre_pass;
+mod deferred;
 
 pub use vertex::*;
 pub use fragment::*;
 pub use debugging::*;
 pub use depth_pre_pass::*;
+pub use deferred::*;
 
 use noise::BlueNoiseSampler;
 
@@ -37,7 +39,7 @@ use shared_structs::{
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{const_vec3, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    glam::{const_vec3, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,

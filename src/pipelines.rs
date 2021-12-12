@@ -12,29 +12,33 @@ fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 pub struct Pipelines {
-    pub normal: vk::Pipeline,
-    pub depth_pre_pass: vk::Pipeline,
-    pub depth_pre_pass_alpha_clip: vk::Pipeline,
-    pub depth_pre_pass_transmissive: vk::Pipeline,
-    pub depth_pre_pass_transmissive_alpha_clip: vk::Pipeline,
-    pub transmission: vk::Pipeline,
-    pub tonemap: vk::Pipeline,
-    pub frustum_culling: vk::Pipeline,
-    pub demultiplex_draws: vk::Pipeline,
-    pub assign_lights_to_clusters: vk::Pipeline,
-    pub write_cluster_data: vk::Pipeline,
-    pub cluster_debugging: vk::Pipeline,
-    pub acceleration_structure_debugging: Option<vk::Pipeline>,
-    pub sun_shadow: Option<vk::Pipeline>,
-    pub depth_pre_pass_pipeline_layout: vk::PipelineLayout,
-    pub pipeline_layout: vk::PipelineLayout,
-    pub tonemap_pipeline_layout: vk::PipelineLayout,
-    pub transmission_pipeline_layout: vk::PipelineLayout,
-    pub frustum_culling_pipeline_layout: vk::PipelineLayout,
-    pub acceleration_structure_debugging_layout: vk::PipelineLayout,
-    pub lights_pipeline_layout: vk::PipelineLayout,
-    pub write_cluster_data_pipeline_layout: vk::PipelineLayout,
-    pub cluster_debugging_pipeline_layout: vk::PipelineLayout,
+    pub(crate) normal: vk::Pipeline,
+    pub(crate) depth_pre_pass: vk::Pipeline,
+    pub(crate) depth_pre_pass_alpha_clip: vk::Pipeline,
+    pub(crate) depth_pre_pass_transmissive: vk::Pipeline,
+    pub(crate) depth_pre_pass_transmissive_alpha_clip: vk::Pipeline,
+    pub(crate) transmission: vk::Pipeline,
+    pub(crate) tonemap: vk::Pipeline,
+    pub(crate) frustum_culling: vk::Pipeline,
+    pub(crate) demultiplex_draws: vk::Pipeline,
+    pub(crate) assign_lights_to_clusters: vk::Pipeline,
+    pub(crate) write_cluster_data: vk::Pipeline,
+    pub(crate) cluster_debugging: vk::Pipeline,
+    pub(crate) deferred_render: vk::Pipeline,
+    pub(crate) defer_opaque: vk::Pipeline,
+    pub(crate) defer_alpha_clip: vk::Pipeline,
+    pub(crate) acceleration_structure_debugging: Option<vk::Pipeline>,
+    pub(crate) sun_shadow: Option<vk::Pipeline>,
+    pub(crate) depth_pre_pass_pipeline_layout: vk::PipelineLayout,
+    pub(crate) forwards_pipeline_layout: vk::PipelineLayout,
+    pub(crate) tonemap_pipeline_layout: vk::PipelineLayout,
+    pub(crate) transmission_pipeline_layout: vk::PipelineLayout,
+    pub(crate) frustum_culling_pipeline_layout: vk::PipelineLayout,
+    pub(crate) acceleration_structure_debugging_layout: vk::PipelineLayout,
+    pub(crate) lights_pipeline_layout: vk::PipelineLayout,
+    pub(crate) write_cluster_data_pipeline_layout: vk::PipelineLayout,
+    pub(crate) cluster_debugging_pipeline_layout: vk::PipelineLayout,
+    pub(crate) deferred_render_pipeline_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -68,6 +72,13 @@ impl Pipelines {
             vk::ShaderStageFlags::FRAGMENT,
             device,
             c_str!("fragment::transmission"),
+        )?;
+
+        let deferred_render_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(maybe_ray_tracing, "deferred_render")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("deferred::render"),
         )?;
 
         let vertex_instanced_stage = ash_abstractions::load_shader_module_as_stage(
@@ -162,6 +173,20 @@ impl Pipelines {
             c_str!("debugging::cluster_debugging_fs"),
         )?;
 
+        let defer_opaque_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "deferred_defer_opaque")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("deferred::defer_opaque"),
+        )?;
+
+        let defer_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "deferred_defer_alpha_clip")?,
+            vk::ShaderStageFlags::FRAGMENT,
+            device,
+            c_str!("deferred::defer_alpha_clip"),
+        )?;
+
         let acceleration_structure_debugging_stage = if enable_ray_tracing {
             Some(ash_abstractions::load_shader_module_as_stage(
                 &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
@@ -184,14 +209,13 @@ impl Pipelines {
             None
         };
 
-        let pipeline_layout = unsafe {
+        let forwards_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
                         descriptor_set_layouts.main,
                         descriptor_set_layouts.instance_buffer,
                         descriptor_set_layouts.lights,
-                        descriptor_set_layouts.single_sampled_image,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -206,7 +230,6 @@ impl Pipelines {
                     .set_layouts(&[
                         descriptor_set_layouts.main,
                         descriptor_set_layouts.instance_buffer,
-                        descriptor_set_layouts.lights,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -317,6 +340,22 @@ impl Pipelines {
             )
         }?;
 
+        let deferred_render_pipeline_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[
+                        descriptor_set_layouts.main,
+                        descriptor_set_layouts.g_buffer,
+                        descriptor_set_layouts.lights,
+                        descriptor_set_layouts.single_sampled_image,
+                    ])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                None,
+            )
+        }?;
+
         let full_vertex_attributes = ash_abstractions::create_vertex_attribute_descriptions(&[
             &[ash_abstractions::VertexAttribute::Vec3],
             &[ash_abstractions::VertexAttribute::Vec3],
@@ -349,6 +388,35 @@ impl Pipelines {
             vertex_attributes: &full_vertex_attributes,
             vertex_bindings: &full_vertex_bindings,
             colour_attachments: &[
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+            ],
+        };
+
+        let defer_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::BACK,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: Some(ash_abstractions::DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                depth_compare_op: vk::CompareOp::GREATER,
+            }),
+            vertex_attributes: &full_vertex_attributes,
+            vertex_bindings: &full_vertex_bindings,
+            colour_attachments: &[
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
                 *vk::PipelineColorBlendAttachmentState::builder()
                     .color_write_mask(vk::ColorComponentFlags::all())
                     .blend_enable(false),
@@ -440,6 +508,22 @@ impl Pipelines {
                 .blend_enable(false)],
         };
 
+        let deferred_render_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
+            primitive_state: ash_abstractions::PrimitiveState {
+                cull_mode: vk::CullModeFlags::NONE,
+                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                polygon_mode: vk::PolygonMode::FILL,
+            },
+            depth_stencil_state: None,
+            vertex_attributes: &[],
+            vertex_bindings: &[],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false), *vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)],
+        };
+
         let cluster_debugging_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
             primitive_state: ash_abstractions::PrimitiveState {
                 cull_mode: vk::CullModeFlags::NONE,
@@ -469,18 +553,20 @@ impl Pipelines {
         let transmission_baked = transmission_pipeline_desc.as_baked();
         let tonemap_pipeline_baked = tonemap_pipeline_desc.as_baked();
         let cluster_debugging_baked = cluster_debugging_pipeline_desc.as_baked();
+        let deferred_render_baked = deferred_render_pipeline_desc.as_baked();
+        let defer_baked = defer_pipeline_desc.as_baked();
 
         let stages = &[*vertex_instanced_stage, *fragment_stage];
 
         let normal_pipeline_desc =
-            normal_baked.as_pipeline_create_info(stages, pipeline_layout, render_passes.draw, 0);
+            normal_baked.as_pipeline_create_info(stages, forwards_pipeline_layout, render_passes.draw_forwards, 1);
 
         let depth_pre_pass_stage = &[*vertex_depth_pre_pass_stage];
 
         let depth_pre_pass_desc = depth_pre_pass_baked.as_pipeline_create_info(
             depth_pre_pass_stage,
             depth_pre_pass_pipeline_layout,
-            render_passes.depth_pre_pass,
+            render_passes.draw_forwards,
             0,
         );
 
@@ -493,7 +579,7 @@ impl Pipelines {
             .as_pipeline_create_info(
                 depth_pre_pass_alpha_clip_stages,
                 depth_pre_pass_pipeline_layout,
-                render_passes.depth_pre_pass,
+                render_passes.draw_forwards,
                 0,
             );
 
@@ -506,7 +592,7 @@ impl Pipelines {
             transmission_stages,
             transmission_pipeline_layout,
             render_passes.transmission,
-            0,
+            1,
         );
 
         let tonemap_stages = &[*fullscreen_tri_stage, *fragment_tonemap_stage];
@@ -520,17 +606,17 @@ impl Pipelines {
 
         let depth_pre_pass_transmissive_desc = depth_pre_pass_baked.as_pipeline_create_info(
             depth_pre_pass_stage,
-            pipeline_layout,
-            render_passes.draw,
-            1,
+            depth_pre_pass_pipeline_layout,
+            render_passes.transmission,
+            0,
         );
 
         let depth_pre_pass_transmissive_alpha_clip_desc = depth_pre_pass_alpha_clip_baked
             .as_pipeline_create_info(
                 depth_pre_pass_alpha_clip_stages,
-                pipeline_layout,
-                render_passes.draw,
-                1,
+                depth_pre_pass_pipeline_layout,
+                render_passes.transmission,
+                0,
             );
 
         let cluster_debugging_stages = &[*cluster_debugging_vs_stage, *cluster_debugging_fs_stage];
@@ -538,8 +624,35 @@ impl Pipelines {
         let cluster_debugging_pipeline_desc = cluster_debugging_baked.as_pipeline_create_info(
             cluster_debugging_stages,
             cluster_debugging_pipeline_layout,
-            render_passes.draw,
+            render_passes.draw_forwards,
             0,
+        );
+
+        let deferred_render_stages = &[*fullscreen_tri_stage, *deferred_render_stage];
+
+        let deferred_render_pipeline_desc = deferred_render_baked.as_pipeline_create_info(
+            deferred_render_stages,
+            deferred_render_pipeline_layout,
+            render_passes.draw_deferred,
+            0
+        );
+
+        let defer_opaque_stages = &[*vertex_instanced_stage, *defer_opaque_stage];
+
+        let defer_opaque_pipeline_desc = defer_baked.as_pipeline_create_info(
+            defer_opaque_stages,
+            depth_pre_pass_pipeline_layout,
+            render_passes.defer,
+            0
+        );
+
+        let defer_alpha_clip_stages = &[*vertex_instanced_stage, *defer_alpha_clip_stage];
+
+        let defer_alpha_clip_pipeline_desc = defer_baked.as_pipeline_create_info(
+            defer_alpha_clip_stages,
+            depth_pre_pass_pipeline_layout,
+            render_passes.defer,
+            0
         );
 
         let sun_shadow_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -585,6 +698,9 @@ impl Pipelines {
             *transmission_pipeline_desc,
             *tonemap_pipeline_desc,
             *cluster_debugging_pipeline_desc,
+            *deferred_render_pipeline_desc,
+            *defer_opaque_pipeline_desc,
+            *defer_alpha_clip_pipeline_desc
         ];
 
         if let Some(desc) = sun_shadow_desc {
@@ -637,8 +753,11 @@ impl Pipelines {
             transmission: pipelines[5],
             tonemap: pipelines[6],
             cluster_debugging: pipelines[7],
+            deferred_render: pipelines[8],
+            defer_opaque: pipelines[9],
+            defer_alpha_clip: pipelines[10],
             sun_shadow: if enable_ray_tracing {
-                Some(pipelines[8])
+                Some(pipelines[11])
             } else {
                 None
             },
@@ -652,7 +771,7 @@ impl Pipelines {
                 None
             },
             depth_pre_pass_pipeline_layout,
-            pipeline_layout,
+            forwards_pipeline_layout,
             tonemap_pipeline_layout,
             transmission_pipeline_layout,
             frustum_culling_pipeline_layout,
@@ -660,6 +779,7 @@ impl Pipelines {
             lights_pipeline_layout,
             write_cluster_data_pipeline_layout,
             cluster_debugging_pipeline_layout,
+            deferred_render_pipeline_layout,
         })
     }
 }

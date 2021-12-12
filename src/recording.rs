@@ -9,8 +9,8 @@ pub(crate) struct RecordParams<'a> {
     pub profiling_ctx: &'a ProfilingContext,
     pub model_buffers: &'a ModelBuffers,
     pub render_passes: &'a RenderPasses,
+    pub g_buffer: Option<&'a GBuffer>,
     pub draw_framebuffer: vk::Framebuffer,
-    pub depth_framebuffer: vk::Framebuffer,
     pub sun_shadow_framebuffer: vk::Framebuffer,
     pub transmission_framebuffer: vk::Framebuffer,
     pub tonemap_framebuffer: vk::Framebuffer,
@@ -19,6 +19,7 @@ pub(crate) struct RecordParams<'a> {
     pub descriptor_sets: &'a DescriptorSets,
     pub dynamic: DynamicRecordParams,
     pub toggle: bool,
+    pub current_draw_render_pass: vk::RenderPass,
 }
 
 pub(crate) struct DynamicRecordParams {
@@ -46,11 +47,12 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         profiling_ctx,
         render_passes,
         draw_framebuffer,
-        depth_framebuffer,
         sun_shadow_framebuffer,
         transmission_framebuffer,
         tonemap_framebuffer,
+        g_buffer,
         toggle,
+        current_draw_render_pass,
         dynamic:
             DynamicRecordParams {
                 num_primitives,
@@ -70,20 +72,40 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         descriptor_sets,
     } = params;
 
-    let depth_pre_pass_clear_values = [
+    let draw_clear_values = [
         vk::ClearValue {
             depth_stencil: vk::ClearDepthStencilValue {
                 depth: 0.0,
                 stencil: 0,
             },
         },
+        vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        },
+        vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        },
     ];
 
-    let draw_clear_values = [
+    let defer_clear_values = [
         vk::ClearValue {
             depth_stencil: vk::ClearDepthStencilValue {
                 depth: 0.0,
                 stencil: 0,
+            },
+        },
+        vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        },
+        vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
             },
         },
         vk::ClearValue {
@@ -110,16 +132,20 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     };
 
     let draw_render_pass_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_passes.draw)
+        .render_pass(current_draw_render_pass)
         .framebuffer(draw_framebuffer)
         .render_area(area)
         .clear_values(&draw_clear_values);
 
-    let depth_pre_pass_render_pass_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_passes.depth_pre_pass)
-        .framebuffer(depth_framebuffer)
+    let defer_render_pass_info = if let Some(g_buffer) = g_buffer {
+        Some(vk::RenderPassBeginInfo::builder()
+        .render_pass(render_passes.defer)
+        .framebuffer(g_buffer.framebuffer)
         .render_area(area)
-        .clear_values(&depth_pre_pass_clear_values);
+        .clear_values(&defer_clear_values))
+    } else {
+        None
+    };
 
     let sun_shadow_clear_values = [
         vk::ClearValue {
@@ -372,36 +398,6 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         );
     }
 
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &depth_pre_pass_render_pass_info,
-        vk::SubpassContents::INLINE,
-    );
-
-    device.cmd_set_scissor(command_buffer, 0, &[area]);
-    device.cmd_set_viewport(command_buffer, 0, &[viewport]);
-
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.depth_pre_pass_pipeline_layout,
-        0,
-        &[
-            descriptor_sets.main,
-            descriptor_sets.instance_buffer,
-            descriptor_sets.lights,
-        ],
-        &[],
-    );
-
-    device.cmd_push_constants(
-        command_buffer,
-        pipelines.depth_pre_pass_pipeline_layout,
-        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-        0,
-        bytes_of(&push_constants),
-    );
-
     device.cmd_bind_vertex_buffers(
         command_buffer,
         0,
@@ -420,148 +416,217 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         vk::IndexType::UINT32,
     );
 
-    {
-        let _depth_profiling_zone =
-            profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "depth pre pass opaque",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass,
-            );
-
-            draw_buffers
-                .opaque
-                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
-        }
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "depth pre pass alpha clipped",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass_alpha_clip,
-            );
-
-            draw_buffers.alpha_clip.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                1,
-                command_buffer,
-            );
-        }
-    }
-
-    device.cmd_end_render_pass(command_buffer);
-
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &sun_shadow_render_pass_info,
-        vk::SubpassContents::INLINE
-    );
-
-    if let Some(pipeline) = pipelines.sun_shadow {
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipeline,
-        );
-
-        {
-            let _profiling_zone = profiling_zone!("sun shadow opaque", device, command_buffer, profiling_ctx);
-            draw_buffers
-                .opaque
-                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
-        }
-
-        {
-            let _profiling_zone =
-                profiling_zone!("sun shadow alpha clipped", device, command_buffer, profiling_ctx);
-            draw_buffers
-                .alpha_clip
-                .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
-        }
-    }
-
-    device.cmd_end_render_pass(command_buffer);
-
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &draw_render_pass_info,
-        vk::SubpassContents::INLINE,
-    );
-
-    /*{
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.cluster_debugging,
-        );
-
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.cluster_debugging_pipeline_layout,
-            0,
-            &[
-                descriptor_sets.cluster_data,
-            ],
-            &[],
-        );
-
-        device.cmd_draw(command_buffer, NUM_CLUSTERS * 8, 1, 0, 0);
-    }*/
-
-    device.cmd_bind_pipeline(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.normal,
-    );
+    device.cmd_set_scissor(command_buffer, 0, &[area]);
+    device.cmd_set_viewport(command_buffer, 0, &[viewport]);
 
     device.cmd_bind_descriptor_sets(
         command_buffer,
         vk::PipelineBindPoint::GRAPHICS,
-        pipelines.pipeline_layout,
+        pipelines.depth_pre_pass_pipeline_layout,
         0,
         &[
             descriptor_sets.main,
             descriptor_sets.instance_buffer,
-            descriptor_sets.lights,
-            descriptor_sets.sun_shadow_buffer,
         ],
         &[],
     );
 
-    {
-        let _profiling_zone = profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
-        draw_buffers
-            .opaque
-            .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+    device.cmd_push_constants(
+        command_buffer,
+        pipelines.depth_pre_pass_pipeline_layout,
+        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+        0,
+        bytes_of(&push_constants),
+    );
+
+    if let (Some(defer_render_pass_info), Some(g_buffer)) = (defer_render_pass_info, g_buffer) {
+        device.cmd_begin_render_pass(
+            command_buffer,
+            &defer_render_pass_info,
+            vk::SubpassContents::INLINE,
+        );
+
+        {
+            {
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipelines.defer_opaque,
+                );
+
+                draw_buffers
+                    .opaque
+                    .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+            }
+
+            {
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipelines.defer_alpha_clip,
+                );
+
+                draw_buffers.alpha_clip.record(
+                    device,
+                    &draw_buffers.draw_counts_buffer,
+                    1,
+                    command_buffer,
+                );
+            }
+        }
+
+        device.cmd_end_render_pass(command_buffer);
+
+        device.cmd_begin_render_pass(
+            command_buffer,
+            &sun_shadow_render_pass_info,
+            vk::SubpassContents::INLINE
+        );
+
+        device.cmd_end_render_pass(command_buffer);
+
+        device.cmd_begin_render_pass(
+            command_buffer,
+            &draw_render_pass_info,
+            vk::SubpassContents::INLINE,
+        );
+
+        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipelines.deferred_render);
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.deferred_render_pipeline_layout,
+            0,
+            &[
+                descriptor_sets.main,
+                g_buffer.descriptor_set,
+                descriptor_sets.lights,
+                descriptor_sets.sun_shadow_buffer,
+            ],
+            &[],
+        );
+        device.cmd_draw(command_buffer, 3, 1, 0, 0);
+
+        device.cmd_end_render_pass(command_buffer);
+    } else {
+        device.cmd_begin_render_pass(
+            command_buffer,
+            &draw_render_pass_info,
+            vk::SubpassContents::INLINE,
+        );
+
+        {
+            let _depth_profiling_zone =
+                profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
+
+            {
+                let _profiling_zone = profiling_zone!(
+                    "depth pre pass opaque",
+                    device,
+                    command_buffer,
+                    profiling_ctx
+                );
+
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipelines.depth_pre_pass,
+                );
+
+                draw_buffers
+                    .opaque
+                    .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+            }
+
+            {
+                let _profiling_zone = profiling_zone!(
+                    "depth pre pass alpha clipped",
+                    device,
+                    command_buffer,
+                    profiling_ctx
+                );
+
+                device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipelines.depth_pre_pass_alpha_clip,
+                );
+
+                draw_buffers.alpha_clip.record(
+                    device,
+                    &draw_buffers.draw_counts_buffer,
+                    1,
+                    command_buffer,
+                );
+            }
+        }
+
+        device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+
+        {
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.normal,
+            );
+
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipelines.forwards_pipeline_layout,
+                0,
+                &[
+                    descriptor_sets.main,
+                    descriptor_sets.instance_buffer,
+                    descriptor_sets.lights,
+                ],
+                &[],
+            );
+
+            {
+                let _profiling_zone = profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
+                draw_buffers
+                    .opaque
+                    .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+            }
+
+            {
+                let _profiling_zone =
+                    profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
+                draw_buffers
+                    .alpha_clip
+                    .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
+            }
+        }
+
+        device.cmd_end_render_pass(command_buffer);
     }
 
     {
-        let _profiling_zone =
-            profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
-        draw_buffers
-            .alpha_clip
-            .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
+        let _profiling_zone = profiling_zone!(
+            "opaque framebuffer mipchain",
+            device,
+            command_buffer,
+            profiling_ctx
+        );
+
+        ash_abstractions::generate_mips(
+            device,
+            command_buffer,
+            opaque_sampled_hdr_framebuffer.image,
+            extent.width as i32,
+            extent.height as i32,
+            opaque_mip_levels,
+            &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+            vk_sync::ImageLayout::Optimal,
+        );
     }
 
-    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
+    device.cmd_begin_render_pass(
+        command_buffer,
+        &transmission_render_pass_info,
+        vk::SubpassContents::INLINE,
+    );
 
     {
         let _profiling_zone = profiling_zone!(
@@ -569,6 +634,26 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             device,
             command_buffer,
             profiling_ctx
+        );
+
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.depth_pre_pass_pipeline_layout,
+            0,
+            &[
+                descriptor_sets.main,
+                descriptor_sets.instance_buffer,
+            ],
+            &[],
+        );
+
+        device.cmd_push_constants(
+            command_buffer,
+            pipelines.depth_pre_pass_pipeline_layout,
+            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+            0,
+            bytes_of(&push_constants),
         );
 
         {
@@ -602,33 +687,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         }
     }
 
-    device.cmd_end_render_pass(command_buffer);
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "opaque framebuffer mipchain",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        ash_abstractions::generate_mips(
-            device,
-            command_buffer,
-            opaque_sampled_hdr_framebuffer.image,
-            extent.width as i32,
-            extent.height as i32,
-            opaque_mip_levels,
-            &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
-            vk_sync::ImageLayout::Optimal,
-        );
-    }
-
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &transmission_render_pass_info,
-        vk::SubpassContents::INLINE,
-    );
+    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
 
     device.cmd_bind_descriptor_sets(
         command_buffer,
