@@ -138,11 +138,13 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .clear_values(&draw_clear_values);
 
     let defer_render_pass_info = if let Some(g_buffer) = g_buffer {
-        Some(vk::RenderPassBeginInfo::builder()
-        .render_pass(render_passes.defer)
-        .framebuffer(g_buffer.framebuffer)
-        .render_area(area)
-        .clear_values(&defer_clear_values))
+        Some(
+            vk::RenderPassBeginInfo::builder()
+                .render_pass(render_passes.defer)
+                .framebuffer(g_buffer.framebuffer)
+                .render_area(area)
+                .clear_values(&defer_clear_values),
+        )
     } else {
         None
     };
@@ -155,10 +157,8 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             },
         },
         vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [1.0; 4],
-            },
-        }
+            color: vk::ClearColorValue { float32: [1.0; 4] },
+        },
     ];
 
     let sun_shadow_render_pass_info = vk::RenderPassBeginInfo::builder()
@@ -351,7 +351,10 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             command_buffer,
             Some(vk_sync::GlobalBarrier {
                 previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther, vk_sync::AccessType::FragmentShaderReadOther],
+                next_accesses: &[
+                    vk_sync::AccessType::ComputeShaderReadOther,
+                    vk_sync::AccessType::FragmentShaderReadOther,
+                ],
             }),
             &[],
             &[],
@@ -424,10 +427,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         vk::PipelineBindPoint::GRAPHICS,
         pipelines.depth_pre_pass_pipeline_layout,
         0,
-        &[
-            descriptor_sets.main,
-            descriptor_sets.instance_buffer,
-        ],
+        &[descriptor_sets.main, descriptor_sets.instance_buffer],
         &[],
     );
 
@@ -454,9 +454,12 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                     pipelines.defer_opaque,
                 );
 
-                draw_buffers
-                    .opaque
-                    .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+                draw_buffers.opaque.record(
+                    device,
+                    &draw_buffers.draw_counts_buffer,
+                    0,
+                    command_buffer,
+                );
             }
 
             {
@@ -480,7 +483,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         device.cmd_begin_render_pass(
             command_buffer,
             &sun_shadow_render_pass_info,
-            vk::SubpassContents::INLINE
+            vk::SubpassContents::INLINE,
         );
 
         device.cmd_end_render_pass(command_buffer);
@@ -491,7 +494,11 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             vk::SubpassContents::INLINE,
         );
 
-        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipelines.deferred_render);
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.deferred_render,
+        );
         device.cmd_bind_descriptor_sets(
             command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
@@ -533,9 +540,12 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                     pipelines.depth_pre_pass,
                 );
 
-                draw_buffers
-                    .opaque
-                    .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+                draw_buffers.opaque.record(
+                    device,
+                    &draw_buffers.draw_counts_buffer,
+                    0,
+                    command_buffer,
+                );
             }
 
             {
@@ -584,18 +594,25 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             );
 
             {
-                let _profiling_zone = profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
-                draw_buffers
-                    .opaque
-                    .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
+                let _profiling_zone =
+                    profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
+                draw_buffers.opaque.record(
+                    device,
+                    &draw_buffers.draw_counts_buffer,
+                    0,
+                    command_buffer,
+                );
             }
 
             {
                 let _profiling_zone =
                     profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
-                draw_buffers
-                    .alpha_clip
-                    .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
+                draw_buffers.alpha_clip.record(
+                    device,
+                    &draw_buffers.draw_counts_buffer,
+                    1,
+                    command_buffer,
+                );
             }
         }
 
@@ -641,10 +658,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             vk::PipelineBindPoint::GRAPHICS,
             pipelines.depth_pre_pass_pipeline_layout,
             0,
-            &[
-                descriptor_sets.main,
-                descriptor_sets.instance_buffer,
-            ],
+            &[descriptor_sets.main, descriptor_sets.instance_buffer],
             &[],
         );
 
@@ -777,7 +791,11 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             vk::PipelineBindPoint::COMPUTE,
             pipelines.acceleration_structure_debugging_layout,
             0,
-            &[descriptor_sets.main, descriptor_sets.acceleration_structure_debugging, descriptor_sets.instance_buffer],
+            &[
+                descriptor_sets.main,
+                descriptor_sets.acceleration_structure_debugging,
+                descriptor_sets.instance_buffer,
+            ],
             &[],
         );
 

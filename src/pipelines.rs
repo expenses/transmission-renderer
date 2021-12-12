@@ -288,7 +288,11 @@ impl Pipelines {
         let acceleration_structure_debugging_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.main, descriptor_set_layouts.acceleration_structure_debugging, descriptor_set_layouts.instance_buffer])
+                    .set_layouts(&[
+                        descriptor_set_layouts.main,
+                        descriptor_set_layouts.acceleration_structure_debugging,
+                        descriptor_set_layouts.instance_buffer,
+                    ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
@@ -517,11 +521,14 @@ impl Pipelines {
             depth_stencil_state: None,
             vertex_attributes: &[],
             vertex_bindings: &[],
-            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
-                .blend_enable(false), *vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
-                .blend_enable(false)],
+            colour_attachments: &[
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+                *vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .blend_enable(false),
+            ],
         };
 
         let cluster_debugging_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -558,8 +565,12 @@ impl Pipelines {
 
         let stages = &[*vertex_instanced_stage, *fragment_stage];
 
-        let normal_pipeline_desc =
-            normal_baked.as_pipeline_create_info(stages, forwards_pipeline_layout, render_passes.draw_forwards, 1);
+        let normal_pipeline_desc = normal_baked.as_pipeline_create_info(
+            stages,
+            forwards_pipeline_layout,
+            render_passes.draw_forwards,
+            1,
+        );
 
         let depth_pre_pass_stage = &[*vertex_depth_pre_pass_stage];
 
@@ -634,7 +645,7 @@ impl Pipelines {
             deferred_render_stages,
             deferred_render_pipeline_layout,
             render_passes.draw_deferred,
-            0
+            0,
         );
 
         let defer_opaque_stages = &[*vertex_instanced_stage, *defer_opaque_stage];
@@ -643,7 +654,7 @@ impl Pipelines {
             defer_opaque_stages,
             depth_pre_pass_pipeline_layout,
             render_passes.defer,
-            0
+            0,
         );
 
         let defer_alpha_clip_stages = &[*vertex_instanced_stage, *defer_alpha_clip_stage];
@@ -652,7 +663,7 @@ impl Pipelines {
             defer_alpha_clip_stages,
             depth_pre_pass_pipeline_layout,
             render_passes.defer,
-            0
+            0,
         );
 
         let sun_shadow_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -668,11 +679,9 @@ impl Pipelines {
             }),
             vertex_attributes: &full_vertex_attributes,
             vertex_bindings: &full_vertex_bindings,
-            colour_attachments: &[
-                *vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(vk::ColorComponentFlags::all())
-                    .blend_enable(false),
-            ],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)],
         };
 
         let sun_shadow_baked = sun_shadow_pipeline_desc.as_baked();
@@ -683,7 +692,10 @@ impl Pipelines {
             sun_shadow_stages.extend_from_slice(&[*vertex_instanced_stage, *stage]);
 
             Some(sun_shadow_baked.as_pipeline_create_info(
-                &sun_shadow_stages, depth_pre_pass_pipeline_layout, render_passes.sun_shadow, 0
+                &sun_shadow_stages,
+                depth_pre_pass_pipeline_layout,
+                render_passes.sun_shadow,
+                0,
             ))
         } else {
             None
@@ -700,21 +712,16 @@ impl Pipelines {
             *cluster_debugging_pipeline_desc,
             *deferred_render_pipeline_desc,
             *defer_opaque_pipeline_desc,
-            *defer_alpha_clip_pipeline_desc
+            *defer_alpha_clip_pipeline_desc,
         ];
 
         if let Some(desc) = sun_shadow_desc {
             pipeline_descs.push(*desc);
         }
 
-        let pipelines = unsafe {
-            device.create_graphics_pipelines(
-                pipeline_cache,
-                &pipeline_descs,
-                None,
-            )
-        }
-        .map_err(|(_, err)| err)?;
+        let pipelines =
+            unsafe { device.create_graphics_pipelines(pipeline_cache, &pipeline_descs, None) }
+                .map_err(|(_, err)| err)?;
 
         let mut compute_pipeline_stages = vec![
             *vk::ComputePipelineCreateInfo::builder()

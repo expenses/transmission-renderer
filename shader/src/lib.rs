@@ -6,20 +6,20 @@
 )]
 
 mod asm;
-mod lighting;
-mod tonemapping;
-mod noise;
-mod vertex;
 mod debugging;
-mod fragment;
-mod depth_pre_pass;
 mod deferred;
+mod depth_pre_pass;
+mod fragment;
+mod lighting;
+mod noise;
+mod tonemapping;
+mod vertex;
 
-pub use vertex::*;
-pub use fragment::*;
 pub use debugging::*;
-pub use depth_pre_pass::*;
 pub use deferred::*;
+pub use depth_pre_pass::*;
+pub use fragment::*;
+pub use vertex::*;
 
 use noise::BlueNoiseSampler;
 
@@ -30,6 +30,7 @@ use lighting::{
 };
 use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 
+use core::ops::{Add, Mul};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     AccelerationStructureDebuggingUniforms, AssignLightsPushConstants, ClusterAabb,
@@ -44,19 +45,36 @@ use spirv_std::{
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
 };
-use core::ops::{Add, Mul};
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
 
-fn sample_animated_blue_noise(frag_coord: Vec2, iteration: u32, textures: &Textures, sampler: &Sampler, uniforms: &Uniforms) -> Vec2 {
+fn sample_animated_blue_noise(
+    frag_coord: Vec2,
+    iteration: u32,
+    textures: &Textures,
+    sampler: &Sampler,
+    uniforms: &Uniforms,
+) -> Vec2 {
     let offset = UVec2::new(13, 41);
     let texture_size = Vec2::splat(64.0);
 
     let first_offset = iteration * 2 * offset;
     let second_offset = (iteration * 2 + 1) * offset;
 
-    let first_sample = sample(textures, *sampler, (frag_coord + first_offset.as_vec2()) / texture_size, uniforms.blue_noise_texture_index).x;
-    let second_sample = sample(textures, *sampler, (frag_coord + second_offset.as_vec2()) / texture_size, uniforms.blue_noise_texture_index).x;
+    let first_sample = sample(
+        textures,
+        *sampler,
+        (frag_coord + first_offset.as_vec2()) / texture_size,
+        uniforms.blue_noise_texture_index,
+    )
+    .x;
+    let second_sample = sample(
+        textures,
+        *sampler,
+        (frag_coord + second_offset.as_vec2()) / texture_size,
+        uniforms.blue_noise_texture_index,
+    )
+    .x;
 
     animate_blue_noise(Vec2::new(first_sample, second_sample), uniforms.frame_index)
 }
@@ -69,8 +87,11 @@ fn animate_blue_noise(blue_noise: Vec2, frame_index: u32) -> Vec2 {
 
 fn sample(textures: &Textures, sampler: Sampler, uv: Vec2, texture_id: u32) -> Vec4 {
     TextureSampler {
-        textures, sampler, uv
-    }.sample(texture_id)
+        textures,
+        sampler,
+        uv,
+    }
+    .sample(texture_id)
 }
 
 struct TextureSampler<'a> {
@@ -328,13 +349,14 @@ pub fn assign_lights_to_clusters(
 
     if light.is_a_spotlight() {
         // Todo: idk if using the inversed quat from the camera is working 100% here.
-        let spotlight_direction = push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
+        let spotlight_direction =
+            push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
 
         let angle = light.spotlight_direction_and_outer_angle.w;
         let range = light.colour_emission_and_falloff_distance_sq.w;
 
         if cluster.cull_spotlight(light_position, spotlight_direction, angle, range) {
-            return
+            return;
         }
     }
 
@@ -370,7 +392,7 @@ fn debug_colour_for_id(id: u32) -> Vec3 {
 
 struct ModelBuffers<'a> {
     indices: &'a [u32],
-    uvs: &'a [Vec2]
+    uvs: &'a [Vec2],
 }
 
 impl<'a> ModelBuffers<'a> {
@@ -380,7 +402,7 @@ impl<'a> ModelBuffers<'a> {
         UVec3::new(
             *index(self.indices, index_offset),
             *index(self.indices, index_offset + 1),
-            *index(self.indices, index_offset + 2)
+            *index(self.indices, index_offset + 2),
         )
     }
 

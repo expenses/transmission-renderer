@@ -3,7 +3,7 @@ use crate::*;
 struct GBuffer<'a> {
     position: &'a Image!(2D, type=f32, sampled),
     normal: &'a Image!(2D, type=f32, sampled),
-    uv:  &'a Image!(2D, type=f32, sampled),
+    uv: &'a Image!(2D, type=f32, sampled),
     material: &'a Image!(2D, type=u32, sampled),
 }
 
@@ -19,7 +19,7 @@ impl<'a> GBuffer<'a> {
             frag_coord_z: position.w,
             normal: normal.truncate(),
             uv: uv.xy(),
-            material_id: material_id.x
+            material_id: material_id.x,
         }
     }
 }
@@ -29,7 +29,7 @@ struct GBufferSample {
     frag_coord_z: f32,
     normal: Vec3,
     uv: Vec2,
-    material_id: u32
+    material_id: u32,
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
@@ -119,12 +119,16 @@ pub fn render(
         position: position_buffer,
         normal: normal_buffer,
         uv: uv_buffer,
-        material: material_buffer
+        material: material_buffer,
     };
 
-    let GBufferSample { position, normal, uv, material_id, frag_coord_z } = g_buffer.sample(
-        *nearest_sampler, uv
-    );
+    let GBufferSample {
+        position,
+        normal,
+        uv,
+        material_id,
+        frag_coord_z,
+    } = g_buffer.sample(*nearest_sampler, uv);
 
     let material = index(materials, material_id);
 
@@ -197,7 +201,7 @@ pub fn render(
         &acceleration_structure,
         #[cfg(target_feature = "RayQueryKHR")]
         &mut blue_noise_sampler,
-        sun_shadow_value
+        sun_shadow_value,
     );
 
     let mut output = (result.diffuse + result.specular + emission).extend(1.0);

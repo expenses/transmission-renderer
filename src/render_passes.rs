@@ -1,6 +1,6 @@
+use crate::GBuffer;
 use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 use ash::vk;
-use crate::GBuffer;
 
 pub struct RenderPasses {
     pub(crate) draw_forwards: vk::RenderPass,
@@ -31,7 +31,11 @@ impl RenderPasses {
                 *vk::AttachmentDescription::builder()
                     .format(vk::Format::D32_SFLOAT)
                     .samples(vk::SampleCountFlags::TYPE_1)
-                    .load_op(if is_deferred { vk::AttachmentLoadOp::LOAD } else { vk::AttachmentLoadOp::CLEAR })
+                    .load_op(if is_deferred {
+                        vk::AttachmentLoadOp::LOAD
+                    } else {
+                        vk::AttachmentLoadOp::CLEAR
+                    })
                     .store_op(vk::AttachmentStoreOp::STORE)
                     .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
                     .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
@@ -66,11 +70,9 @@ impl RenderPasses {
                 .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
         ];
 
-        let draw_deferred_subpasses = [
-            *vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&hdr_framebuffer_refs),
-        ];
+        let draw_deferred_subpasses = [*vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&hdr_framebuffer_refs)];
 
         let draw_deferred_render_pass = unsafe {
             device.create_render_pass(
@@ -132,12 +134,9 @@ impl RenderPasses {
                 .final_layout(vk::ImageLayout::PRESENT_SRC_KHR),
         ];
 
-
-        let single_subpass = [
-            *vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&single_attachment_ref),
-        ];
+        let single_subpass = [*vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&single_attachment_ref)];
 
         let tonemap_render_pass = unsafe {
             device.create_render_pass(
@@ -171,12 +170,15 @@ impl RenderPasses {
             .attachment(1)
             .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
-        let transmission_subpass = [*vk::SubpassDescription::builder()
-        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-        .depth_stencil_attachment(&depth_attachment_ref),*vk::SubpassDescription::builder()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&hdr_framebuffer_ref)
-            .depth_stencil_attachment(&depth_attachment_ref)];
+        let transmission_subpass = [
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .depth_stencil_attachment(&depth_attachment_ref),
+            *vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&hdr_framebuffer_ref)
+                .depth_stencil_attachment(&depth_attachment_ref),
+        ];
 
         let transmission_subpass_dependency = [
             *vk::SubpassDependency::builder()
@@ -228,22 +230,18 @@ impl RenderPasses {
             .attachment(1)
             .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
-        let sun_shadow_subpass = [
-            *vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&sun_shadow_buffer_ref)
-                .depth_stencil_attachment(&depth_attachment_ref),
-        ];
+        let sun_shadow_subpass = [*vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&sun_shadow_buffer_ref)
+            .depth_stencil_attachment(&depth_attachment_ref)];
 
-        let sun_shadow_subpass_dependencies = [
-            *vk::SubpassDependency::builder()
-                .src_subpass(0)
-                .dst_subpass(vk::SUBPASS_EXTERNAL)
-                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
-                .dst_access_mask(vk::AccessFlags::SHADER_READ),
-        ];
+        let sun_shadow_subpass_dependencies = [*vk::SubpassDependency::builder()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+            .dst_access_mask(vk::AccessFlags::SHADER_READ)];
 
         let sun_shadow_render_pass = unsafe {
             device.create_render_pass(
@@ -295,25 +293,25 @@ impl RenderPasses {
                 .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         ];
 
-        let defer_attachment_refs = [*vk::AttachmentReference::builder()
-            .attachment(1)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+        let defer_attachment_refs = [
             *vk::AttachmentReference::builder()
-            .attachment(2)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+                .attachment(1)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
             *vk::AttachmentReference::builder()
-            .attachment(3)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+                .attachment(2)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
             *vk::AttachmentReference::builder()
-            .attachment(4)
-            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
-
-        let defer_subpass = [
-            *vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&defer_attachment_refs)
-                .depth_stencil_attachment(&depth_attachment_ref),
+                .attachment(3)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
+            *vk::AttachmentReference::builder()
+                .attachment(4)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
         ];
+
+        let defer_subpass = [*vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .color_attachments(&defer_attachment_refs)
+            .depth_stencil_attachment(&depth_attachment_ref)];
 
         let defer_render_pass = unsafe {
             device.create_render_pass(
@@ -325,12 +323,7 @@ impl RenderPasses {
         }?;
 
         let set_name = |render_pass, name| {
-            ash_abstractions::set_object_name(
-                device,
-                debug_utils_loader,
-                render_pass,
-                name
-            )
+            ash_abstractions::set_object_name(device, debug_utils_loader, render_pass, name)
         };
 
         set_name(draw_deferred_render_pass, "draw deferred render pass")?;

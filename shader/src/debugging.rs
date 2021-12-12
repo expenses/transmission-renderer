@@ -39,9 +39,7 @@ pub fn acceleration_structure_debugging(
         AccelerationStructure, CommittedIntersection, RayFlags, RayQuery,
     };
 
-    let model_buffers = ModelBuffers {
-        indices, uvs
-    };
+    let model_buffers = ModelBuffers { indices, uvs };
 
     spirv_std::ray_query!(let mut ray);
 
@@ -65,8 +63,10 @@ pub fn acceleration_structure_debugging(
             let primitive_info = index(primitives, instance.primitive_id);
 
             let triangle_index = ray.get_candidate_intersection_primitive_index();
-            let indices = model_buffers.get_indices_for_primitive(triangle_index + primitive_info.first_index / 3);
-            let barycentric_coords = barycentric_coords_from_hits(ray.get_candidate_intersection_barycentrics());
+            let indices = model_buffers
+                .get_indices_for_primitive(triangle_index + primitive_info.first_index / 3);
+            let barycentric_coords =
+                barycentric_coords_from_hits(ray.get_candidate_intersection_barycentrics());
             let interpolated_uv = model_buffers.interpolate_uv(indices, barycentric_coords);
 
             let texture_sampler = TextureSampler {

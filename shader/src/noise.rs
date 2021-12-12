@@ -1,4 +1,5 @@
-use crate::{Textures, sample};
+use crate::{sample, Textures};
+use shared_structs::Uniforms;
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
@@ -7,7 +8,6 @@ use spirv_std::{
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
 };
-use shared_structs::Uniforms;
 
 pub struct BlueNoiseSampler<'a> {
     pub textures: &'a Textures,
@@ -30,10 +30,25 @@ impl<'a> BlueNoiseSampler<'a> {
         let second_offset = self.iteration * offset;
         self.iteration += 1;
 
-        let first_sample = sample(self.textures, self.sampler, (self.frag_coord + first_offset.as_vec2()) / texture_size, self.uniforms.blue_noise_texture_index).x;
-        let second_sample = sample(self.textures, self.sampler, (self.frag_coord + second_offset.as_vec2()) / texture_size, self.uniforms.blue_noise_texture_index).x;
+        let first_sample = sample(
+            self.textures,
+            self.sampler,
+            (self.frag_coord + first_offset.as_vec2()) / texture_size,
+            self.uniforms.blue_noise_texture_index,
+        )
+        .x;
+        let second_sample = sample(
+            self.textures,
+            self.sampler,
+            (self.frag_coord + second_offset.as_vec2()) / texture_size,
+            self.uniforms.blue_noise_texture_index,
+        )
+        .x;
 
-        animate_blue_noise(Vec2::new(first_sample, second_sample), self.uniforms.frame_index)
+        animate_blue_noise(
+            Vec2::new(first_sample, second_sample),
+            self.uniforms.frame_index,
+        )
     }
 
     // Maps 2 randomly generated numbers from 0 to 1 onto a circle with a radius of 1.

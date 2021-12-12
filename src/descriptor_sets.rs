@@ -37,17 +37,23 @@ impl DescriptorSetLayouts {
                                 .binding(0)
                                 .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                                 .descriptor_count(MAX_IMAGES)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                                .stage_flags(
+                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(1)
                                 .descriptor_type(vk::DescriptorType::SAMPLER)
                                 .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                                .stage_flags(
+                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(2)
                                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                                 .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                                .stage_flags(
+                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(3)
                                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
@@ -64,17 +70,23 @@ impl DescriptorSetLayouts {
                                 .binding(5)
                                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                                 .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                                .stage_flags(
+                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(6)
                                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                                 .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                                .stage_flags(
+                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(7)
                                 .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                                 .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
+                                .stage_flags(
+                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(8)
                                 .descriptor_type(vk::DescriptorType::SAMPLER)
@@ -220,17 +232,17 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                            *vk::DescriptorSetLayoutBinding::builder()
+                        *vk::DescriptorSetLayoutBinding::builder()
                             .binding(1)
                             .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                            *vk::DescriptorSetLayoutBinding::builder()
+                        *vk::DescriptorSetLayoutBinding::builder()
                             .binding(2)
                             .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                            *vk::DescriptorSetLayoutBinding::builder()
+                        *vk::DescriptorSetLayoutBinding::builder()
                             .binding(3)
                             .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
@@ -238,7 +250,7 @@ impl DescriptorSetLayouts {
                     ]),
                     None,
                 )?
-            }
+            },
         })
     }
 }

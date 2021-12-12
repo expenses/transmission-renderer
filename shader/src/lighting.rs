@@ -1,4 +1,4 @@
-use crate::{index, TextureSampler, noise::BlueNoiseSampler};
+use crate::{index, noise::BlueNoiseSampler, TextureSampler};
 use glam_pbr::{
     basic_brdf, light_direction_and_attenuation, BasicBrdfParams, BrdfResult, IndexOfRefraction,
     Light as LightDir, MaterialParams, Normal, PerceptualRoughness, View,

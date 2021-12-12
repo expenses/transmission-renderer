@@ -210,7 +210,7 @@ pub fn opaque(
         &acceleration_structure,
         #[cfg(target_feature = "RayQueryKHR")]
         &mut blue_noise_sampler,
-        1.0
+        1.0,
     );
 
     let mut output = (result.diffuse + result.specular + emission).extend(1.0);

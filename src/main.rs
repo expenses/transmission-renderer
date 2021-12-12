@@ -23,8 +23,8 @@ mod descriptor_sets;
 mod model_loading;
 mod pipelines;
 mod profiling;
-mod render_passes;
 mod recording;
+mod render_passes;
 
 use recording::*;
 
@@ -306,7 +306,6 @@ fn main() -> anyhow::Result<()> {
     let mut buffers_to_cleanup = Vec::new();
 
     let (ggx_lut_texture_index, blue_noise_texture_index) = {
-
         use image::GenericImageView;
 
         let ggx_lut_texture_index = {
@@ -435,10 +434,18 @@ fn main() -> anyhow::Result<()> {
 
     let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
 
-    let mut sun_shadow_buffer = create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
+    let mut sun_shadow_buffer =
+        create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
 
     let mut g_buffer = if needs_g_buffer {
-        Some(GBuffer::new(extent.width, extent.height, descriptor_sets.g_buffer, &render_passes, &depthbuffer, &mut init_resources)?)
+        Some(GBuffer::new(
+            extent.width,
+            extent.height,
+            descriptor_sets.g_buffer,
+            &render_passes,
+            &depthbuffer,
+            &mut init_resources,
+        )?)
     } else {
         None
     };
@@ -684,7 +691,12 @@ fn main() -> anyhow::Result<()> {
                 primitive.draw_buffer_index < 2
             })
             .map(|(instance_id, &instance)| {
-                acceleration_structure_instance(instance_id as u32, instance, &acceleration_structures, &device)
+                acceleration_structure_instance(
+                    instance_id as u32,
+                    instance,
+                    &acceleration_structures,
+                    &device,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -914,7 +926,12 @@ fn main() -> anyhow::Result<()> {
         )
     }
 
-    descriptor_sets.update_framebuffers(&device, &hdr_framebuffer, &opaque_sampled_hdr_framebuffer, &sun_shadow_buffer);
+    descriptor_sets.update_framebuffers(
+        &device,
+        &hdr_framebuffer,
+        &opaque_sampled_hdr_framebuffer,
+        &sun_shadow_buffer,
+    );
 
     unsafe {
         record_write_cluster_data(
@@ -1144,7 +1161,11 @@ fn main() -> anyhow::Result<()> {
                         depthbuffer =
                             create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
 
-                        sun_shadow_buffer = create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
+                        sun_shadow_buffer = create_sun_shadow_buffer(
+                            extent.width,
+                            extent.height,
+                            &mut init_resources,
+                        )?;
 
                         hdr_framebuffer = create_hdr_framebuffer(
                             extent.width,
@@ -1156,7 +1177,14 @@ fn main() -> anyhow::Result<()> {
                         )?;
 
                         g_buffer = if needs_g_buffer {
-                            Some(GBuffer::new(extent.width, extent.height, descriptor_sets.g_buffer, &render_passes, &depthbuffer, &mut init_resources)?)
+                            Some(GBuffer::new(
+                                extent.width,
+                                extent.height,
+                                descriptor_sets.g_buffer,
+                                &render_passes,
+                                &depthbuffer,
+                                &mut init_resources,
+                            )?)
                         } else {
                             None
                         };
@@ -1239,7 +1267,7 @@ fn main() -> anyhow::Result<()> {
                             &device,
                             &hdr_framebuffer,
                             &opaque_sampled_hdr_framebuffer,
-                            &sun_shadow_buffer
+                            &sun_shadow_buffer,
                         );
 
                         swapchain_image_framebuffers = create_swapchain_image_framebuffers(
@@ -1697,7 +1725,9 @@ fn create_sun_shadow_buffer(
             mip_levels: 1,
             format: vk::Format::R8G8B8A8_UNORM,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
-            next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+            next_accesses: &[
+                vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+            ],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
@@ -1885,7 +1915,9 @@ impl ModelStagingBuffers {
             index: ash_abstractions::Buffer::new(
                 unsafe { cast_slice(&self.index) },
                 "index buffer",
-                vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER | ray_tracing_flags,
+                vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::STORAGE_BUFFER
+                    | ray_tracing_flags,
                 init_resources,
             )?,
             instances: ash_abstractions::Buffer::new(
@@ -2119,7 +2151,9 @@ fn create_g_buffer_image(
             mip_levels: 1,
             format,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
-            next_accesses: &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
+            next_accesses: &[
+                vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+            ],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
@@ -2141,11 +2175,42 @@ impl GBuffer {
     pub const UV_FORMAT: vk::Format = vk::Format::R32G32_SFLOAT;
     pub const MATERIAL_FORMAT: vk::Format = vk::Format::R32_UINT;
 
-    fn new(width: u32, height: u32, descriptor_set: vk::DescriptorSet, render_passes: &RenderPasses, depth_buffer: &ash_abstractions::Image, init_resources: &mut ash_abstractions::InitResources) -> anyhow::Result<Self> {
-        let position_buffer = create_g_buffer_image(width, height, "position g buffer", Self::POSITION_FORMAT, init_resources)?;
-        let normal_buffer = create_g_buffer_image(width, height, "normal g buffer", Self::NORMAL_FORMAT, init_resources)?;
-        let uv_buffer = create_g_buffer_image(width, height, "uv g buffer", Self::UV_FORMAT, init_resources)?;
-        let material_buffer = create_g_buffer_image(width, height, "material g buffer", Self::MATERIAL_FORMAT, init_resources)?;
+    fn new(
+        width: u32,
+        height: u32,
+        descriptor_set: vk::DescriptorSet,
+        render_passes: &RenderPasses,
+        depth_buffer: &ash_abstractions::Image,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<Self> {
+        let position_buffer = create_g_buffer_image(
+            width,
+            height,
+            "position g buffer",
+            Self::POSITION_FORMAT,
+            init_resources,
+        )?;
+        let normal_buffer = create_g_buffer_image(
+            width,
+            height,
+            "normal g buffer",
+            Self::NORMAL_FORMAT,
+            init_resources,
+        )?;
+        let uv_buffer = create_g_buffer_image(
+            width,
+            height,
+            "uv g buffer",
+            Self::UV_FORMAT,
+            init_resources,
+        )?;
+        let material_buffer = create_g_buffer_image(
+            width,
+            height,
+            "material g buffer",
+            Self::MATERIAL_FORMAT,
+            init_resources,
+        )?;
 
         unsafe {
             init_resources.device.update_descriptor_sets(
@@ -2184,15 +2249,23 @@ impl GBuffer {
         }
 
         Ok(Self {
-            framebuffer: unsafe{init_resources.device.create_framebuffer(
-                &vk::FramebufferCreateInfo::builder()
-                    .render_pass(render_passes.defer)
-                    .attachments(&[depth_buffer.view, position_buffer.view, normal_buffer.view, uv_buffer.view, material_buffer.view])
-                    .width(width)
-                    .height(height)
-                    .layers(1),
-                None,
-            )}?,
+            framebuffer: unsafe {
+                init_resources.device.create_framebuffer(
+                    &vk::FramebufferCreateInfo::builder()
+                        .render_pass(render_passes.defer)
+                        .attachments(&[
+                            depth_buffer.view,
+                            position_buffer.view,
+                            normal_buffer.view,
+                            uv_buffer.view,
+                            material_buffer.view,
+                        ])
+                        .width(width)
+                        .height(height)
+                        .layers(1),
+                    None,
+                )
+            }?,
             position: position_buffer,
             normal: normal_buffer,
             uv: uv_buffer,
@@ -2201,7 +2274,11 @@ impl GBuffer {
         })
     }
 
-    fn cleanup(&self, device: &ash::Device, allocator: &mut gpu_allocator::vulkan::Allocator) -> anyhow::Result<()> {
+    fn cleanup(
+        &self,
+        device: &ash::Device,
+        allocator: &mut gpu_allocator::vulkan::Allocator,
+    ) -> anyhow::Result<()> {
         self.position.cleanup(device, allocator)?;
         self.normal.cleanup(device, allocator)?;
         self.uv.cleanup(device, allocator)?;
