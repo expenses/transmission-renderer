@@ -10,13 +10,13 @@ pub struct DescriptorSetLayouts {
     pub cluster_data: vk::DescriptorSetLayout,
     pub acceleration_structure_debugging: vk::DescriptorSetLayout,
     pub g_buffer: vk::DescriptorSetLayout,
+    pub sun_shadow_buffer: vk::DescriptorSetLayout,
 }
 
 impl DescriptorSetLayouts {
     pub fn new(device: &ash::Device) -> anyhow::Result<Self> {
         let flags = &[
             vk::DescriptorBindingFlags::PARTIALLY_BOUND,
-            vk::DescriptorBindingFlags::empty(),
             vk::DescriptorBindingFlags::empty(),
             vk::DescriptorBindingFlags::empty(),
             vk::DescriptorBindingFlags::empty(),
@@ -87,11 +87,6 @@ impl DescriptorSetLayouts {
                                 .stage_flags(
                                     vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
                                 ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(8)
-                                .descriptor_type(vk::DescriptorType::SAMPLER)
-                                .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                         ])
                         .push_next(&mut bindless_flags),
                     None,
@@ -232,21 +227,18 @@ impl DescriptorSetLayouts {
                             .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                             .descriptor_count(1)
                             .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                    ]),
+                    None,
+                )?
+            },
+            sun_shadow_buffer: unsafe {
+                device.create_descriptor_set_layout(
+                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
                         *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(1)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                            .binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                             .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(2)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(3)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                            .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
                     ]),
                     None,
                 )?
@@ -283,7 +275,7 @@ impl DescriptorSets {
                             .descriptor_count(3 + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(MAX_IMAGES + 4),
+                            .descriptor_count(MAX_IMAGES + 1),
                         *vk::DescriptorPoolSize::builder()
                             .ty(vk::DescriptorType::SAMPLER)
                             .descriptor_count(3),
@@ -308,7 +300,7 @@ impl DescriptorSets {
                         layouts.lights,
                         layouts.cluster_data,
                         layouts.acceleration_structure_debugging,
-                        layouts.single_sampled_image,
+                        layouts.sun_shadow_buffer,
                         layouts.g_buffer,
                     ])
                     .descriptor_pool(descriptor_pool),
@@ -364,10 +356,10 @@ impl DescriptorSets {
                     *vk::WriteDescriptorSet::builder()
                         .dst_set(self.sun_shadow_buffer)
                         .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                         .image_info(&[*vk::DescriptorImageInfo::builder()
                             .image_view(sun_shadow_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                            .image_layout(vk::ImageLayout::GENERAL)]),
                 ],
                 &[],
             );

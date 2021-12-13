@@ -59,7 +59,7 @@ fn perspective_matrix_reversed(width: u32, height: u32) -> Mat4 {
 pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
-pub const MAX_IMAGES: u32 = 185;
+pub const MAX_IMAGES: u32 = 189;
 pub const NUM_CLUSTERS_X: u32 = 24;
 pub const NUM_CLUSTERS_Y: u32 = 16;
 pub const NUM_DEPTH_SLICES: u32 = 16;
@@ -91,8 +91,9 @@ struct Opt {
     ///
     #[structopt(long)]
     rotate_model: bool,
+    /// For viewing packed normals / velocity in renderdoc.
     #[structopt(long)]
-    deferred: bool,
+    debug_g_buffer: bool
 }
 
 fn main() -> anyhow::Result<()> {
@@ -230,14 +231,6 @@ fn main() -> anyhow::Result<()> {
     };
 
     let render_passes = RenderPasses::new(&device, &debug_utils_loader, surface_format.format)?;
-
-    let needs_g_buffer = opt.deferred || opt.ray_tracing;
-    let current_draw_render_pass = if needs_g_buffer {
-        render_passes.draw_deferred
-    } else {
-        render_passes.draw_forwards
-    };
-
     let descriptor_set_layouts = DescriptorSetLayouts::new(&device)?;
 
     let pipeline_cache =
@@ -437,18 +430,14 @@ fn main() -> anyhow::Result<()> {
     let mut sun_shadow_buffer =
         create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
 
-    let mut g_buffer = if needs_g_buffer {
-        Some(GBuffer::new(
-            extent.width,
-            extent.height,
-            descriptor_sets.g_buffer,
-            &render_passes,
-            &depthbuffer,
-            &mut init_resources,
-        )?)
-    } else {
-        None
-    };
+    let mut g_buffer = GBuffer::new(
+        extent.width,
+        extent.height,
+        descriptor_sets.g_buffer,
+        &render_passes,
+        &depthbuffer,
+        &mut init_resources,
+    )?;
 
     let mut hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
@@ -740,17 +729,16 @@ fn main() -> anyhow::Result<()> {
     let mut draw_framebuffer = create_draw_framebuffer(
         &device,
         extent,
-        current_draw_render_pass,
+        render_passes.draw,
         &hdr_framebuffer,
         opaque_sampled_hdr_framebuffer_top_mip_view,
         &depthbuffer,
     )?;
 
-    let mut sun_shadow_framebuffer = create_framebuffer_with_depth(
+    let mut depth_framebuffer = create_single_attachment_framebuffer(
         &device,
         extent,
-        render_passes.sun_shadow,
-        &sun_shadow_buffer,
+        render_passes.depth_pre_pass,
         &depthbuffer,
     )?;
 
@@ -770,16 +758,6 @@ fn main() -> anyhow::Result<()> {
                 .mag_filter(vk::Filter::LINEAR)
                 .min_filter(vk::Filter::LINEAR)
                 .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                .max_lod(vk::LOD_CLAMP_NONE),
-            None,
-        )
-    }?;
-
-    let nearest_sampler = unsafe {
-        device.create_sampler(
-            &vk::SamplerCreateInfo::builder()
-                .mag_filter(vk::Filter::NEAREST)
-                .min_filter(vk::Filter::NEAREST)
                 .max_lod(vk::LOD_CLAMP_NONE),
             None,
         )
@@ -845,11 +823,6 @@ fn main() -> anyhow::Result<()> {
                     .dst_binding(7)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .buffer_info(&buffer_info(&model_buffers.primitives)),
-                *vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_sets.main)
-                    .dst_binding(8)
-                    .descriptor_type(vk::DescriptorType::SAMPLER)
-                    .image_info(&[*vk::DescriptorImageInfo::builder().sampler(nearest_sampler)]),
                 // Instance buffer
                 *vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_sets.instance_buffer)
@@ -1147,9 +1120,7 @@ fn main() -> anyhow::Result<()> {
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         sun_shadow_buffer.cleanup(&device, &mut allocator)?;
-                        if let Some(g_buffer) = g_buffer.as_ref() {
-                            g_buffer.cleanup(&device, &mut allocator)?;
-                        }
+                        g_buffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
                             command_buffer,
@@ -1176,18 +1147,14 @@ fn main() -> anyhow::Result<()> {
                             &mut init_resources,
                         )?;
 
-                        g_buffer = if needs_g_buffer {
-                            Some(GBuffer::new(
-                                extent.width,
-                                extent.height,
-                                descriptor_sets.g_buffer,
-                                &render_passes,
-                                &depthbuffer,
-                                &mut init_resources,
-                            )?)
-                        } else {
-                            None
-                        };
+                        g_buffer = GBuffer::new(
+                            extent.width,
+                            extent.height,
+                            descriptor_sets.g_buffer,
+                            &render_passes,
+                            &depthbuffer,
+                            &mut init_resources,
+                        )?;
 
                         opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
 
@@ -1280,16 +1247,15 @@ fn main() -> anyhow::Result<()> {
                         draw_framebuffer = create_draw_framebuffer(
                             &device,
                             extent,
-                            current_draw_render_pass,
+                            render_passes.draw,
                             &hdr_framebuffer,
                             opaque_sampled_hdr_framebuffer_top_mip_view,
                             &depthbuffer,
                         )?;
-                        sun_shadow_framebuffer = create_framebuffer_with_depth(
+                        depth_framebuffer = create_single_attachment_framebuffer(
                             &device,
                             extent,
-                            render_passes.sun_shadow,
-                            &sun_shadow_buffer,
+                            render_passes.depth_pre_pass,
                             &depthbuffer,
                         )?;
                         transmission_framebuffer = create_framebuffer_with_depth(
@@ -1494,16 +1460,16 @@ fn main() -> anyhow::Result<()> {
                             profiling_ctx: &mut profiling_ctx,
                             model_buffers: &model_buffers,
                             render_passes: &render_passes,
-                            g_buffer: g_buffer.as_ref(),
+                            g_buffer: &g_buffer,
+                            record_g_buffer: opt.ray_tracing || opt.debug_g_buffer,
                             draw_framebuffer,
-                            sun_shadow_framebuffer,
+                            depth_framebuffer,
                             tonemap_framebuffer,
                             transmission_framebuffer,
                             descriptor_sets: &descriptor_sets,
                             hdr_framebuffer: &hdr_framebuffer,
                             opaque_sampled_hdr_framebuffer: &opaque_sampled_hdr_framebuffer,
                             toggle,
-                            current_draw_render_pass,
                             dynamic: DynamicRecordParams {
                                 extent,
                                 num_primitives,
@@ -1572,9 +1538,7 @@ fn main() -> anyhow::Result<()> {
                         acceleration_structure_debugging_uniforms_buffer
                             .cleanup(&device, &mut allocator)?;
 
-                        if let Some(g_buffer) = g_buffer.as_ref() {
-                            g_buffer.cleanup(&device, &mut allocator)?;
-                        }
+                        g_buffer.cleanup(&device, &mut allocator)?;
 
                         if let Some(acceleration_structure_data) =
                             acceleration_structure_data.as_ref()
@@ -1666,6 +1630,27 @@ fn create_draw_framebuffer(
     }?)
 }
 
+fn create_single_attachment_framebuffer(
+    device: &ash::Device,
+    extent: vk::Extent2D,
+    render_pass: vk::RenderPass,
+    image: &ash_abstractions::Image,
+) -> anyhow::Result<vk::Framebuffer> {
+    Ok(unsafe {
+        device.create_framebuffer(
+            &vk::FramebufferCreateInfo::builder()
+                .render_pass(render_pass)
+                .attachments(&[
+                    image.view,
+                ])
+                .width(extent.width)
+                .height(extent.height)
+                .layers(1),
+            None,
+        )
+    }?)
+}
+
 fn create_swapchain_image_framebuffers(
     device: &ash::Device,
     extent: vk::Extent2D,
@@ -1724,9 +1709,9 @@ fn create_sun_shadow_buffer(
             name: "sun shadow buffer",
             mip_levels: 1,
             format: vk::Format::R8G8B8A8_UNORM,
-            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            usage: vk::ImageUsageFlags::STORAGE,
             next_accesses: &[
-                vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                vk_sync::AccessType::FragmentShaderReadOther,
             ],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
@@ -2161,19 +2146,13 @@ fn create_g_buffer_image(
 }
 
 struct GBuffer {
-    pub position: ash_abstractions::Image,
-    pub normal: ash_abstractions::Image,
-    pub uv: ash_abstractions::Image,
-    pub material: ash_abstractions::Image,
+    pub normals_velocity: ash_abstractions::Image,
     pub descriptor_set: vk::DescriptorSet,
     pub framebuffer: vk::Framebuffer,
 }
 
 impl GBuffer {
-    pub const POSITION_FORMAT: vk::Format = vk::Format::R32G32B32A32_SFLOAT;
-    pub const NORMAL_FORMAT: vk::Format = vk::Format::R32G32B32A32_SFLOAT;
-    pub const UV_FORMAT: vk::Format = vk::Format::R32G32_SFLOAT;
-    pub const MATERIAL_FORMAT: vk::Format = vk::Format::R32_UINT;
+    pub const NORMALS_VELOCITY_FORMAT: vk::Format = vk::Format::R16G16B16A16_SFLOAT;
 
     fn new(
         width: u32,
@@ -2183,32 +2162,11 @@ impl GBuffer {
         depth_buffer: &ash_abstractions::Image,
         init_resources: &mut ash_abstractions::InitResources,
     ) -> anyhow::Result<Self> {
-        let position_buffer = create_g_buffer_image(
+        let normals_velocity_buffer = create_g_buffer_image(
             width,
             height,
-            "position g buffer",
-            Self::POSITION_FORMAT,
-            init_resources,
-        )?;
-        let normal_buffer = create_g_buffer_image(
-            width,
-            height,
-            "normal g buffer",
-            Self::NORMAL_FORMAT,
-            init_resources,
-        )?;
-        let uv_buffer = create_g_buffer_image(
-            width,
-            height,
-            "uv g buffer",
-            Self::UV_FORMAT,
-            init_resources,
-        )?;
-        let material_buffer = create_g_buffer_image(
-            width,
-            height,
-            "material g buffer",
-            Self::MATERIAL_FORMAT,
+            "normals velocity buffer",
+            Self::NORMALS_VELOCITY_FORMAT,
             init_resources,
         )?;
 
@@ -2220,28 +2178,7 @@ impl GBuffer {
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                         .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(position_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
-                    *vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(normal_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
-                    *vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(2)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(uv_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
-                    *vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(3)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(material_buffer.view)
+                            .image_view(normals_velocity_buffer.view)
                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                 ],
                 &[],
@@ -2255,10 +2192,7 @@ impl GBuffer {
                         .render_pass(render_passes.defer)
                         .attachments(&[
                             depth_buffer.view,
-                            position_buffer.view,
-                            normal_buffer.view,
-                            uv_buffer.view,
-                            material_buffer.view,
+                            normals_velocity_buffer.view,
                         ])
                         .width(width)
                         .height(height)
@@ -2266,10 +2200,7 @@ impl GBuffer {
                     None,
                 )
             }?,
-            position: position_buffer,
-            normal: normal_buffer,
-            uv: uv_buffer,
-            material: material_buffer,
+            normals_velocity: normals_velocity_buffer,
             descriptor_set,
         })
     }
@@ -2279,10 +2210,7 @@ impl GBuffer {
         device: &ash::Device,
         allocator: &mut gpu_allocator::vulkan::Allocator,
     ) -> anyhow::Result<()> {
-        self.position.cleanup(device, allocator)?;
-        self.normal.cleanup(device, allocator)?;
-        self.uv.cleanup(device, allocator)?;
-        self.material.cleanup(device, allocator)?;
+        self.normals_velocity.cleanup(device, allocator)?;
         Ok(())
     }
 }
