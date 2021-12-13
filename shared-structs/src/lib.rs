@@ -19,7 +19,7 @@ pub struct PushConstants {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Uniforms {
-    pub light_clustering_coefficients: LightClusterCoefficients,
+    pub prev_proj_view: Mat4,
     pub sun_dir: Vec3A,
     pub sun_intensity: Vec3A,
     pub cluster_size_in_pixels: Vec2,
@@ -28,6 +28,7 @@ pub struct Uniforms {
     pub ggx_lut_texture_index: u32,
     pub blue_noise_texture_index: u32,
     pub frame_index: u32,
+    pub light_clustering_coefficients: LightClusterCoefficients,
 }
 
 // https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering
@@ -254,6 +255,7 @@ impl Mul<Vec3> for Similarity {
 #[repr(C)]
 pub struct Instance {
     pub transform: PackedSimilarity,
+    pub prev_transform: PackedSimilarity,
     pub primitive_id: u32,
     pub material_id: u32,
 }

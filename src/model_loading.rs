@@ -135,6 +135,7 @@ pub(crate) fn load_gltf(
 
             model_buffers.instances.push(Instance {
                 transform: transform.pack(),
+                prev_transform: transform.pack(),
                 primitive_id: model_buffers.primitives.len() as u32,
                 material_id: material_id as u32,
             });

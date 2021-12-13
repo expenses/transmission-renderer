@@ -609,9 +609,8 @@ fn main() -> anyhow::Result<()> {
         ),
         blue_noise_texture_index,
         frame_index: 0,
+        prev_proj_view: Default::default(),
     };
-
-    dbg!(&uniforms);
 
     let mut uniforms_buffer = ash_abstractions::Buffer::new(
         unsafe { bytes_of(&uniforms) },
@@ -1286,16 +1285,6 @@ fn main() -> anyhow::Result<()> {
 
                     camera.update(delta_time);
 
-                    push_constants.proj_view = {
-                        view_matrix = Mat4::look_at_rh(
-                            camera.final_transform.position,
-                            camera.final_transform.position + camera.final_transform.forward(),
-                            camera.final_transform.up(),
-                        );
-                        perspective_matrix * view_matrix
-                    };
-                    push_constants.view_position = camera.final_transform.position.into();
-
                     {
                         let acceleration = 0.002;
                         let max_velocity = 0.05;
@@ -1329,7 +1318,17 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     uniforms.sun_dir = sun.as_normal().into();
-                    uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
+                    uniforms.prev_proj_view = push_constants.proj_view;
+
+                    push_constants.proj_view = {
+                        view_matrix = Mat4::look_at_rh(
+                            camera.final_transform.position,
+                            camera.final_transform.position + camera.final_transform.forward(),
+                            camera.final_transform.up(),
+                        );
+                        perspective_matrix * view_matrix
+                    };
+                    push_constants.view_position = camera.final_transform.position.into();
 
                     acceleration_structure_debugging_uniforms.view_inverse = view_matrix.inverse();
                     acceleration_structure_debugging_uniforms.proj_inverse =
@@ -1358,27 +1357,9 @@ fn main() -> anyhow::Result<()> {
 
                     if opt.rotate_model {
                         let instances_offset = instances_to_rotate.clone().start;
+                        instances[instances_offset].prev_transform = instances[instances_offset].transform;
                         instances[instances_offset].transform.rotation =
                             Quat::from_rotation_y(model_rotation);
-
-                        if let Some(acceleration_structure_data) =
-                            acceleration_structure_data.as_mut()
-                        {
-                            let instance = instances[instances_offset];
-
-                            acceleration_structure_data.instances.write_mapped(
-                                unsafe {
-                                    bytes_of(&acceleration_structure_instance(
-                                        instances_offset as u32,
-                                        instance,
-                                        &acceleration_structure_data.bottom_levels,
-                                        &device,
-                                    ))
-                                },
-                                std::mem::size_of::<vk::AccelerationStructureInstanceKHR>()
-                                    * instances_offset,
-                            )?;
-                        }
 
                         model_rotation -= 0.0025;
                     }
@@ -1414,12 +1395,36 @@ fn main() -> anyhow::Result<()> {
                     let tonemap_framebuffer =
                         swapchain_image_framebuffers[swapchain_image_index as usize];
 
-                    if opt.rotate_model {
-                        let instances_offset = instances_to_rotate.clone().start;
-                        model_buffers.instances.write_mapped(
-                            cast_slice(&instances[instances_to_rotate.clone()]),
-                            std::mem::size_of::<Instance>() * instances_offset,
-                        )?;
+                    // write to buffers here to avoid race conditions
+                    {
+                        uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
+
+                        if opt.rotate_model {
+                            let instances_offset = instances_to_rotate.clone().start;
+                            model_buffers.instances.write_mapped(
+                                cast_slice(&instances[instances_to_rotate.clone()]),
+                                std::mem::size_of::<Instance>() * instances_offset,
+                            )?;
+
+                            if let Some(acceleration_structure_data) =
+                            acceleration_structure_data.as_mut()
+                            {
+                                let instance = instances[instances_offset];
+
+                                acceleration_structure_data.instances.write_mapped(
+                                    unsafe {
+                                        bytes_of(&acceleration_structure_instance(
+                                            instances_offset as u32,
+                                            instance,
+                                            &acceleration_structure_data.bottom_levels,
+                                            &device,
+                                        ))
+                                    },
+                                    std::mem::size_of::<vk::AccelerationStructureInstanceKHR>()
+                                        * instances_offset,
+                                )?;
+                            }
+                        }
                     }
 
                     {

@@ -59,7 +59,7 @@ impl DescriptorSetLayouts {
                                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                                 .descriptor_count(1)
                                 .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
+                                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
                                 ),
                             *vk::DescriptorSetLayoutBinding::builder()
                                 .binding(4)

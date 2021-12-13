@@ -178,6 +178,13 @@ impl Pipelines {
             c_str!("deferred::defer_alpha_clip"),
         )?;
 
+        let defer_vs_stage = ash_abstractions::load_shader_module_as_stage(
+            &read_shader(normal, "deferred_vs")?,
+            vk::ShaderStageFlags::VERTEX,
+            device,
+            c_str!("deferred::vs"),
+        )?;
+
         let acceleration_structure_debugging_stage = if enable_ray_tracing {
             Some(ash_abstractions::load_shader_module_as_stage(
                 &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
@@ -585,7 +592,7 @@ impl Pipelines {
             0,
         );
 
-        let defer_opaque_stages = &[*vertex_instanced_stage, *defer_opaque_stage];
+        let defer_opaque_stages = &[*defer_vs_stage, *defer_opaque_stage];
 
         let defer_opaque_pipeline_desc = defer_baked.as_pipeline_create_info(
             defer_opaque_stages,
@@ -594,7 +601,7 @@ impl Pipelines {
             0,
         );
 
-        let defer_alpha_clip_stages = &[*vertex_instanced_stage, *defer_alpha_clip_stage];
+        let defer_alpha_clip_stages = &[*defer_vs_stage, *defer_alpha_clip_stage];
 
         let defer_alpha_clip_pipeline_desc = defer_baked.as_pipeline_create_info(
             defer_alpha_clip_stages,
