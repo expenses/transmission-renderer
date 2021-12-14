@@ -1,0 +1,12 @@
+[package]
+name = "ash-reflect"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.51"
+ash = "0.33.3"
+log = "0.4.14"
+rspirv-reflect = "0.5.0"

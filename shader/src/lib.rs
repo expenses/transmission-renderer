@@ -40,7 +40,7 @@ use shared_structs::{
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{const_vec3, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles},
+    glam::{const_vec3, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Mat4, Vec4Swizzles},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
@@ -48,50 +48,19 @@ use spirv_std::{
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
 
-fn sample_animated_blue_noise(
-    frag_coord: Vec2,
-    iteration: u32,
-    textures: &Textures,
-    sampler: &Sampler,
-    uniforms: &Uniforms,
-) -> Vec2 {
-    let offset = UVec2::new(13, 41);
-    let texture_size = Vec2::splat(64.0);
-
-    let first_offset = iteration * 2 * offset;
-    let second_offset = (iteration * 2 + 1) * offset;
-
-    let first_sample = sample(
-        textures,
-        *sampler,
-        (frag_coord + first_offset.as_vec2()) / texture_size,
-        uniforms.blue_noise_texture_index,
-    )
-    .x;
-    let second_sample = sample(
-        textures,
-        *sampler,
-        (frag_coord + second_offset.as_vec2()) / texture_size,
-        uniforms.blue_noise_texture_index,
-    )
-    .x;
-
-    animate_blue_noise(Vec2::new(first_sample, second_sample), uniforms.frame_index)
-}
-
 fn animate_blue_noise(blue_noise: Vec2, frame_index: u32) -> Vec2 {
     // The fractional part of the golden ratio
     let golden_ratio_fract = 0.618033988749;
     (blue_noise + (frame_index % 32) as f32 * golden_ratio_fract).fract()
 }
 
-fn sample(textures: &Textures, sampler: Sampler, uv: Vec2, texture_id: u32) -> Vec4 {
+fn sample_by_lod_0(textures: &Textures, sampler: Sampler, uv: Vec2, texture_id: u32) -> Vec4 {
     TextureSampler {
         textures,
         sampler,
         uv,
     }
-    .sample(texture_id)
+    .sample_by_lod_0(texture_id)
 }
 
 struct TextureSampler<'a> {
@@ -430,4 +399,69 @@ fn interpolate<T: Mul<f32, Output = T> + Add<T, Output = T>>(
     barycentric_coords: Vec3,
 ) -> T {
     a * barycentric_coords.x + b * barycentric_coords.y + c * barycentric_coords.z
+}
+
+fn world_position_from_depth(tex_coord: Vec2, ndc_depth: f32, view_proj_inverse: Mat4) -> Vec3 {
+    // Take texture coordinate and remap to [-1.0, 1.0] range.
+    let screen_pos = tex_coord * 2.0 - 1.0;
+
+    // Create NDC position.
+    let ndc_pos = Vec4::new(screen_pos.x, screen_pos.y, ndc_depth, 1.0);
+
+    // Transform back into world position.
+    let world_pos = view_proj_inverse * ndc_pos;
+
+    // Undo projection.
+    world_pos.truncate() / world_pos.w
+}
+
+#[cfg(target_feature = "RayQueryKHR")]
+#[spirv(compute(threads(8, 4)))]
+pub fn ray_trace_sun_shadow(
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
+    #[spirv(descriptor_set = 1, binding = 1)] depth_buffer: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 2, binding = 0)] sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let frag_coord = id.truncate().as_vec2();
+    let tex_coord = frag_coord / push_constants.framebuffer_size.as_vec2();
+
+    let mut blue_noise_sampler = BlueNoiseSampler {
+        textures,
+        sampler: *sampler,
+        uniforms,
+        frag_coord,
+        iteration: 0,
+    };
+
+    let acceleration_structure =
+        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
+
+    use spirv_std::ray_tracing::RayQuery;
+    spirv_std::ray_query!(let mut shadow_ray);
+
+    let depth = {
+        let sample: Vec4 = depth_buffer.sample_by_lod(*sampler, tex_coord, 0.0);
+        sample.x
+    };
+
+    let position = world_position_from_depth(
+        tex_coord,
+        depth, push_constants.proj_view.inverse()
+    );
+
+    let factor = lighting::trace_shadow_ray(
+        shadow_ray,
+        &acceleration_structure,
+        position,
+        blue_noise_sampler.sample_directional_light(0.05, uniforms.sun_dir.into()),
+        10_000.0,
+    );
+
+    unsafe {
+        sun_shadow_buffer.write(id.truncate(), Vec4::new(factor, 0.0, 0.0, 1.0));
+    }
 }

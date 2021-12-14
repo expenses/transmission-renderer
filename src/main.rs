@@ -59,7 +59,7 @@ fn perspective_matrix_reversed(width: u32, height: u32) -> Mat4 {
 pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
-pub const MAX_IMAGES: u32 = 189;
+pub const MAX_IMAGES: u32 = 193;
 pub const NUM_CLUSTERS_X: u32 = 24;
 pub const NUM_CLUSTERS_Y: u32 = 16;
 pub const NUM_DEPTH_SLICES: u32 = 16;
@@ -231,20 +231,18 @@ fn main() -> anyhow::Result<()> {
     };
 
     let render_passes = RenderPasses::new(&device, &debug_utils_loader, surface_format.format)?;
-    let descriptor_set_layouts = DescriptorSetLayouts::new(&device)?;
 
     let pipeline_cache =
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
-    let pipelines = Pipelines::new(
+    let (pipelines, descriptor_set_layouts, pool_sizes) = Pipelines::new(
         &device,
         &render_passes,
-        &descriptor_set_layouts,
         pipeline_cache,
         opt.ray_tracing,
     )?;
 
-    let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts)?;
+    let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts, &pool_sizes)?;
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
@@ -425,7 +423,7 @@ fn main() -> anyhow::Result<()> {
 
     let draw_buffers = DrawBuffers::new(max_draw_counts, &mut init_resources)?;
 
-    let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+    let mut depth_buffer = create_depth_buffer(extent.width, extent.height, &mut init_resources)?;
 
     let mut sun_shadow_buffer =
         create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
@@ -435,7 +433,7 @@ fn main() -> anyhow::Result<()> {
         extent.height,
         descriptor_sets.g_buffer,
         &render_passes,
-        &depthbuffer,
+        &depth_buffer,
         &mut init_resources,
     )?;
 
@@ -731,14 +729,14 @@ fn main() -> anyhow::Result<()> {
         render_passes.draw,
         &hdr_framebuffer,
         opaque_sampled_hdr_framebuffer_top_mip_view,
-        &depthbuffer,
+        &depth_buffer,
     )?;
 
     let mut depth_framebuffer = create_single_attachment_framebuffer(
         &device,
         extent,
         render_passes.depth_pre_pass,
-        &depthbuffer,
+        &depth_buffer,
     )?;
 
     let mut transmission_framebuffer = create_framebuffer_with_depth(
@@ -746,7 +744,7 @@ fn main() -> anyhow::Result<()> {
         extent,
         render_passes.transmission,
         &hdr_framebuffer,
-        &depthbuffer,
+        &depth_buffer,
     )?;
 
     let mut keyboard_state = KeyboardState::default();
@@ -1115,7 +1113,7 @@ fn main() -> anyhow::Result<()> {
                             )?;
                         }
 
-                        depthbuffer.cleanup(&device, &mut allocator)?;
+                        depth_buffer.cleanup(&device, &mut allocator)?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         sun_shadow_buffer.cleanup(&device, &mut allocator)?;
@@ -1128,8 +1126,8 @@ fn main() -> anyhow::Result<()> {
                             debug_utils_loader: Some(&debug_utils_loader),
                         };
 
-                        depthbuffer =
-                            create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+                        depth_buffer =
+                            create_depth_buffer(extent.width, extent.height, &mut init_resources)?;
 
                         sun_shadow_buffer = create_sun_shadow_buffer(
                             extent.width,
@@ -1151,7 +1149,7 @@ fn main() -> anyhow::Result<()> {
                             extent.height,
                             descriptor_sets.g_buffer,
                             &render_passes,
-                            &depthbuffer,
+                            &depth_buffer,
                             &mut init_resources,
                         )?;
 
@@ -1249,20 +1247,20 @@ fn main() -> anyhow::Result<()> {
                             render_passes.draw,
                             &hdr_framebuffer,
                             opaque_sampled_hdr_framebuffer_top_mip_view,
-                            &depthbuffer,
+                            &depth_buffer,
                         )?;
                         depth_framebuffer = create_single_attachment_framebuffer(
                             &device,
                             extent,
                             render_passes.depth_pre_pass,
-                            &depthbuffer,
+                            &depth_buffer,
                         )?;
                         transmission_framebuffer = create_framebuffer_with_depth(
                             &device,
                             extent,
                             render_passes.transmission,
                             &hdr_framebuffer,
-                            &depthbuffer,
+                            &depth_buffer,
                         )?;
                     }
                     _ => {}
@@ -1530,7 +1528,7 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     {
-                        depthbuffer.cleanup(&device, &mut allocator)?;
+                        depth_buffer.cleanup(&device, &mut allocator)?;
                         light_buffers.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         uniforms_buffer.cleanup(&device, &mut allocator)?;
@@ -1595,13 +1593,13 @@ fn create_framebuffer_with_depth(
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
     image: &ash_abstractions::Image,
-    depthbuffer: &ash_abstractions::Image,
+    depth_buffer: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
-                .attachments(&[depthbuffer.view, image.view])
+                .attachments(&[depth_buffer.view, image.view])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -1616,14 +1614,14 @@ fn create_draw_framebuffer(
     render_pass: vk::RenderPass,
     hdr_framebuffer: &ash_abstractions::Image,
     opaque_sampled_hdr_framebuffer_top_mip_view: vk::ImageView,
-    depthbuffer: &ash_abstractions::Image,
+    depth_buffer: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
                 .attachments(&[
-                    depthbuffer.view,
+                    depth_buffer.view,
                     hdr_framebuffer.view,
                     opaque_sampled_hdr_framebuffer_top_mip_view,
                 ])
@@ -1682,7 +1680,7 @@ fn create_swapchain_image_framebuffers(
         .collect()
 }
 
-fn create_depthbuffer(
+fn create_depth_buffer(
     width: u32,
     height: u32,
     init_resources: &mut ash_abstractions::InitResources,
@@ -1691,10 +1689,10 @@ fn create_depthbuffer(
         &ash_abstractions::ImageDescriptor {
             width,
             height,
-            name: "depthbuffer",
+            name: "depth_buffer",
             mip_levels: 1,
             format: vk::Format::D32_SFLOAT,
-            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
             next_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
@@ -2184,6 +2182,13 @@ impl GBuffer {
                         .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                         .image_info(&[*vk::DescriptorImageInfo::builder()
                             .image_view(normals_velocity_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(depth_buffer.view)
                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                 ],
                 &[],

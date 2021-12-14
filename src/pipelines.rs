@@ -1,7 +1,6 @@
 use crate::descriptor_sets::DescriptorSetLayouts;
 use crate::render_passes::RenderPasses;
 use ash::vk;
-use c_str_macro::c_str;
 use glam::{Vec2, Vec3};
 use std::path::{Path, PathBuf};
 
@@ -43,10 +42,9 @@ impl Pipelines {
     pub fn new(
         device: &ash::Device,
         render_passes: &RenderPasses,
-        descriptor_set_layouts: &DescriptorSetLayouts,
         pipeline_cache: vk::PipelineCache,
         enable_ray_tracing: bool,
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<(Self, DescriptorSetLayouts, ash_reflect::PoolSizes)> {
         let _span = tracy_client::span!("Pipelines::new");
 
         let normal = &PathBuf::from("compiled-shaders/normal");
@@ -58,154 +56,130 @@ impl Pipelines {
             normal
         };
 
-        let fragment_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(maybe_ray_tracing, "fragment_opaque")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("fragment::opaque"),
-        )?;
+        let mut layouts = ash_reflect::DescriptorSetLayouts::default();
 
-        let fragment_transmission_stage = ash_abstractions::load_shader_module_as_stage(
+        let fragment_stage = layouts.passthrough(ash_reflect::ShaderModule::new(device, &read_shader(maybe_ray_tracing, "fragment_opaque")?)?);
+
+        let fragment_transmission_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(maybe_ray_tracing, "fragment_transmission")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("fragment::transmission"),
-        )?;
+        )?);
 
-        let vertex_instanced_stage = ash_abstractions::load_shader_module_as_stage(
+        let vertex_instanced_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "vertex_instanced")?,
-            vk::ShaderStageFlags::VERTEX,
-            device,
-            c_str!("vertex::instanced"),
-        )?;
+        )?);
 
-        let vertex_instanced_with_scale_stage = ash_abstractions::load_shader_module_as_stage(
+        let vertex_instanced_with_scale_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "vertex_instanced_with_scale")?,
-            vk::ShaderStageFlags::VERTEX,
-            device,
-            c_str!("vertex::instanced_with_scale"),
-        )?;
+        )?);
 
-        let vertex_depth_pre_pass_stage = ash_abstractions::load_shader_module_as_stage(
+        let vertex_depth_pre_pass_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "depth_pre_pass_vertex")?,
-            vk::ShaderStageFlags::VERTEX,
-            device,
-            c_str!("depth_pre_pass::vertex"),
-        )?;
+        )?);
 
-        let vertex_depth_pre_pass_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
-            &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
-            vk::ShaderStageFlags::VERTEX,
+        let vertex_depth_pre_pass_alpha_clip_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
             device,
-            c_str!("depth_pre_pass::vertex_alpha_clip"),
-        )?;
+            &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
+        )?);
 
         let fragment_depth_pre_pass_alpha_clip_stage =
-            ash_abstractions::load_shader_module_as_stage(
+        layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
                 &read_shader(normal, "depth_pre_pass_fragment_alpha_clip")?,
-                vk::ShaderStageFlags::FRAGMENT,
-                device,
-                c_str!("depth_pre_pass::fragment_alpha_clip"),
-            )?;
+            )?);
 
-        let fullscreen_tri_stage = ash_abstractions::load_shader_module_as_stage(
+        let fullscreen_tri_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "vertex_fullscreen_tri")?,
-            vk::ShaderStageFlags::VERTEX,
-            device,
-            c_str!("vertex::fullscreen_tri"),
-        )?;
+        )?);
 
-        let fragment_tonemap_stage = ash_abstractions::load_shader_module_as_stage(
+        let fragment_tonemap_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "fragment_tonemap")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("fragment::tonemap"),
-        )?;
+        )?);
 
-        let frustum_culling_stage = ash_abstractions::load_shader_module_as_stage(
+        let frustum_culling_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "frustum_culling")?,
-            vk::ShaderStageFlags::COMPUTE,
-            device,
-            c_str!("frustum_culling"),
-        )?;
+        )?);
 
-        let demultiplex_draws_stage = ash_abstractions::load_shader_module_as_stage(
+        let demultiplex_draws_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "demultiplex_draws")?,
-            vk::ShaderStageFlags::COMPUTE,
-            device,
-            c_str!("demultiplex_draws"),
-        )?;
+        )?);
 
-        let assign_lights_to_clusters_stage = ash_abstractions::load_shader_module_as_stage(
+        let assign_lights_to_clusters_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "assign_lights_to_clusters")?,
-            vk::ShaderStageFlags::COMPUTE,
-            device,
-            c_str!("assign_lights_to_clusters"),
-        )?;
+        )?);
 
-        let write_cluster_data_stage = ash_abstractions::load_shader_module_as_stage(
+        let write_cluster_data_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "write_cluster_data")?,
-            vk::ShaderStageFlags::COMPUTE,
-            device,
-            c_str!("write_cluster_data"),
-        )?;
+        )?);
 
-        let cluster_debugging_vs_stage = ash_abstractions::load_shader_module_as_stage(
+        let cluster_debugging_vs_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "debugging_cluster_debugging_vs")?,
-            vk::ShaderStageFlags::VERTEX,
-            device,
-            c_str!("debugging::cluster_debugging_vs"),
-        )?;
+        )?);
 
-        let cluster_debugging_fs_stage = ash_abstractions::load_shader_module_as_stage(
+        let cluster_debugging_fs_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "debugging_cluster_debugging_fs")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("debugging::cluster_debugging_fs"),
-        )?;
+        )?);
 
-        let defer_opaque_stage = ash_abstractions::load_shader_module_as_stage(
+        let defer_opaque_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "deferred_defer_opaque")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("deferred::defer_opaque"),
-        )?;
+        )?);
 
-        let defer_alpha_clip_stage = ash_abstractions::load_shader_module_as_stage(
+        let defer_alpha_clip_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "deferred_defer_alpha_clip")?,
-            vk::ShaderStageFlags::FRAGMENT,
-            device,
-            c_str!("deferred::defer_alpha_clip"),
-        )?;
+        )?);
 
-        let defer_vs_stage = ash_abstractions::load_shader_module_as_stage(
+        let defer_vs_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
             &read_shader(normal, "deferred_vs")?,
-            vk::ShaderStageFlags::VERTEX,
-            device,
-            c_str!("deferred::vs"),
-        )?;
+        )?);
 
-        let acceleration_structure_debugging_stage = if enable_ray_tracing {
-            Some(ash_abstractions::load_shader_module_as_stage(
-                &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
-                vk::ShaderStageFlags::COMPUTE,
-                device,
-                c_str!("debugging::acceleration_structure_debugging"),
-            )?)
+        struct RayTracingStages {
+            acceleration_structure_debugging: ash_reflect::ShaderModule,
+            ray_trace_sun_shadow: ash_reflect::ShaderModule,
+        }
+
+        let ray_tracing_stages = if enable_ray_tracing {
+            Some(RayTracingStages {
+                acceleration_structure_debugging: ash_reflect::ShaderModule::new(
+                    device,
+                    &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
+                )?,
+                ray_trace_sun_shadow: ash_reflect::ShaderModule::new(
+                    device,
+                    &read_shader(ray_tracing, "ray_trace_sun_shadow")?,
+                )?
+            })
         } else {
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(
+                &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?
+            )?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(
+                &read_shader(ray_tracing, "ray_trace_sun_shadow")?
+            )?);
+
             None
         };
 
-        let sun_shadow_stage = if enable_ray_tracing {
-            Some(ash_abstractions::load_shader_module_as_stage(
-                &read_shader(ray_tracing, "fragment_sun_shadow")?,
-                vk::ShaderStageFlags::FRAGMENT,
-                device,
-                c_str!("fragment::sun_shadow"),
-            )?)
-        } else {
-            None
-        };
+        dbg!(&layouts);
+        let mut pool_sizes = layouts.get_pool_sizes(crate::MAX_IMAGES);
+        pool_sizes.add(vk::DescriptorType::SAMPLED_IMAGE, 1);
+        dbg!(&pool_sizes);
+        let built_layouts = layouts.build(&device, crate::MAX_IMAGES, true)?;
+
+        let descriptor_set_layouts = DescriptorSetLayouts::from_reflected_layouts(&built_layouts);
 
         let draw_pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -516,7 +490,7 @@ impl Pipelines {
         let cluster_debugging_baked = cluster_debugging_pipeline_desc.as_baked();
         let defer_baked = defer_pipeline_desc.as_baked();
 
-        let stages = &[*vertex_instanced_stage, *fragment_stage];
+        let stages = &[*vertex_instanced_stage.as_stage_create_info(), *fragment_stage.as_stage_create_info()];
 
         let normal_pipeline_desc = normal_baked.as_pipeline_create_info(
             stages,
@@ -525,7 +499,7 @@ impl Pipelines {
             0,
         );
 
-        let depth_pre_pass_stage = &[*vertex_depth_pre_pass_stage];
+        let depth_pre_pass_stage = &[*vertex_depth_pre_pass_stage.as_stage_create_info()];
 
         let depth_pre_pass_desc = depth_pre_pass_baked.as_pipeline_create_info(
             depth_pre_pass_stage,
@@ -535,8 +509,8 @@ impl Pipelines {
         );
 
         let depth_pre_pass_alpha_clip_stages = &[
-            *vertex_depth_pre_pass_alpha_clip_stage,
-            *fragment_depth_pre_pass_alpha_clip_stage,
+            *vertex_depth_pre_pass_alpha_clip_stage.as_stage_create_info(),
+            *fragment_depth_pre_pass_alpha_clip_stage.as_stage_create_info(),
         ];
 
         let depth_pre_pass_alpha_clip_desc = depth_pre_pass_alpha_clip_baked
@@ -548,8 +522,8 @@ impl Pipelines {
             );
 
         let transmission_stages = &[
-            *vertex_instanced_with_scale_stage,
-            *fragment_transmission_stage,
+            *vertex_instanced_with_scale_stage.as_stage_create_info(),
+            *fragment_transmission_stage.as_stage_create_info(),
         ];
 
         let transmission_pipeline_desc = transmission_baked.as_pipeline_create_info(
@@ -559,7 +533,7 @@ impl Pipelines {
             1,
         );
 
-        let tonemap_stages = &[*fullscreen_tri_stage, *fragment_tonemap_stage];
+        let tonemap_stages = &[*fullscreen_tri_stage.as_stage_create_info(), *fragment_tonemap_stage.as_stage_create_info()];
 
         let tonemap_pipeline_desc = tonemap_pipeline_baked.as_pipeline_create_info(
             tonemap_stages,
@@ -583,7 +557,7 @@ impl Pipelines {
                 0,
             );
 
-        let cluster_debugging_stages = &[*cluster_debugging_vs_stage, *cluster_debugging_fs_stage];
+        let cluster_debugging_stages = &[*cluster_debugging_vs_stage.as_stage_create_info(), *cluster_debugging_fs_stage.as_stage_create_info()];
 
         let cluster_debugging_pipeline_desc = cluster_debugging_baked.as_pipeline_create_info(
             cluster_debugging_stages,
@@ -592,7 +566,7 @@ impl Pipelines {
             0,
         );
 
-        let defer_opaque_stages = &[*defer_vs_stage, *defer_opaque_stage];
+        let defer_opaque_stages = &[*defer_vs_stage.as_stage_create_info(), *defer_opaque_stage.as_stage_create_info()];
 
         let defer_opaque_pipeline_desc = defer_baked.as_pipeline_create_info(
             defer_opaque_stages,
@@ -601,7 +575,7 @@ impl Pipelines {
             0,
         );
 
-        let defer_alpha_clip_stages = &[*defer_vs_stage, *defer_alpha_clip_stage];
+        let defer_alpha_clip_stages = &[*defer_vs_stage.as_stage_create_info(), *defer_alpha_clip_stage.as_stage_create_info()];
 
         let defer_alpha_clip_pipeline_desc = defer_baked.as_pipeline_create_info(
             defer_alpha_clip_stages,
@@ -629,23 +603,29 @@ impl Pipelines {
 
         let mut compute_pipeline_stages = vec![
             *vk::ComputePipelineCreateInfo::builder()
-                .stage(*frustum_culling_stage)
+                .stage(*frustum_culling_stage.as_stage_create_info())
                 .layout(frustum_culling_pipeline_layout),
             *vk::ComputePipelineCreateInfo::builder()
-                .stage(*demultiplex_draws_stage)
+                .stage(*demultiplex_draws_stage.as_stage_create_info())
                 .layout(frustum_culling_pipeline_layout),
             *vk::ComputePipelineCreateInfo::builder()
-                .stage(*assign_lights_to_clusters_stage)
+                .stage(*assign_lights_to_clusters_stage.as_stage_create_info())
                 .layout(lights_pipeline_layout),
             *vk::ComputePipelineCreateInfo::builder()
-                .stage(*write_cluster_data_stage)
+                .stage(*write_cluster_data_stage.as_stage_create_info())
                 .layout(write_cluster_data_pipeline_layout),
         ];
 
-        if let Some(stage) = acceleration_structure_debugging_stage.as_ref() {
+        if let Some(stages) = ray_tracing_stages.as_ref() {
             compute_pipeline_stages.push(
                 *vk::ComputePipelineCreateInfo::builder()
-                    .stage(**stage)
+                    .stage(*stages.acceleration_structure_debugging.as_stage_create_info())
+                    .layout(acceleration_structure_debugging_layout),
+            );
+
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(*stages.ray_trace_sun_shadow.as_stage_create_info())
                     .layout(acceleration_structure_debugging_layout),
             );
         }
@@ -655,7 +635,7 @@ impl Pipelines {
         }
         .map_err(|(_, err)| err)?;
 
-        Ok(Self {
+        Ok((Self {
             normal: pipelines[0],
             depth_pre_pass: pipelines[1],
             depth_pre_pass_alpha_clip: pipelines[2],
@@ -685,6 +665,6 @@ impl Pipelines {
             lights_pipeline_layout,
             write_cluster_data_pipeline_layout,
             cluster_debugging_pipeline_layout,
-        })
+        }, descriptor_set_layouts, pool_sizes))
     }
 }

@@ -14,236 +14,18 @@ pub struct DescriptorSetLayouts {
 }
 
 impl DescriptorSetLayouts {
-    pub fn new(device: &ash::Device) -> anyhow::Result<Self> {
-        let flags = &[
-            vk::DescriptorBindingFlags::PARTIALLY_BOUND,
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-            vk::DescriptorBindingFlags::empty(),
-        ];
-        let mut bindless_flags =
-            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(flags);
-
-        Ok(Self {
-            main: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder()
-                        .bindings(&[
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(0)
-                                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                                .descriptor_count(MAX_IMAGES)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(1)
-                                .descriptor_type(vk::DescriptorType::SAMPLER)
-                                .descriptor_count(1)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(2)
-                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                                .descriptor_count(1)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(3)
-                                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                                .descriptor_count(1)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(4)
-                                .descriptor_type(vk::DescriptorType::SAMPLER)
-                                .descriptor_count(1)
-                                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(5)
-                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                                .descriptor_count(1)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(6)
-                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                                .descriptor_count(1)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                            *vk::DescriptorSetLayoutBinding::builder()
-                                .binding(7)
-                                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                                .descriptor_count(1)
-                                .stage_flags(
-                                    vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE,
-                                ),
-                        ])
-                        .push_next(&mut bindless_flags),
-                    None,
-                )?
-            },
-            single_sampled_image: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                    ]),
-                    None,
-                )?
-            },
-            frustum_culling: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(1)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(2)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(3)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(4)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(5)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(6)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                    ]),
-                    None,
-                )?
-            },
-            instance_buffer: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(
-                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::COMPUTE,
-                            ),
-                    ]),
-                    None,
-                )?
-            },
-            lights: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(
-                                vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::FRAGMENT,
-                            ),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(1)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(
-                                vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::FRAGMENT,
-                            ),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(2)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(
-                                vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::FRAGMENT,
-                            ),
-                    ]),
-                    None,
-                )?
-            },
-            cluster_data: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(
-                                vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX,
-                            ),
-                    ]),
-                    None,
-                )?
-            },
-            acceleration_structure_debugging: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(1)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::COMPUTE),
-                    ]),
-                    None,
-                )?
-            },
-            g_buffer: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                    ]),
-                    None,
-                )?
-            },
-            sun_shadow_buffer: unsafe {
-                device.create_descriptor_set_layout(
-                    &*vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[
-                        *vk::DescriptorSetLayoutBinding::builder()
-                            .binding(0)
-                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                            .descriptor_count(1)
-                            .stage_flags(vk::ShaderStageFlags::FRAGMENT | vk::ShaderStageFlags::COMPUTE),
-                    ]),
-                    None,
-                )?
-            },
-        })
+    pub fn from_reflected_layouts(built: &ash_reflect::BuiltDescriptorSetLayouts) -> Self {
+        Self {
+            main: built.layout_for_shader("fragment::opaque", 0),
+            instance_buffer: built.layout_for_shader("vertex::instanced", 1),
+            single_sampled_image: built.layout_for_shader("fragment::tonemap", 1),
+            frustum_culling: built.layout_for_shader("frustum_culling", 0),
+            lights: built.layout_for_shader("fragment::opaque", 2),
+            cluster_data: built.layout_for_shader("write_cluster_data", 1),
+            acceleration_structure_debugging: built.layout_for_shader("debugging::acceleration_structure_debugging", 1),
+            g_buffer: built.layout_for_shader("ray_trace_sun_shadow", 1),
+            sun_shadow_buffer: built.layout_for_shader("ray_trace_sun_shadow", 2),
+        }
     }
 }
 
@@ -262,28 +44,27 @@ pub struct DescriptorSets {
 }
 
 impl DescriptorSets {
-    pub fn allocate(device: &ash::Device, layouts: &DescriptorSetLayouts) -> anyhow::Result<Self> {
+    pub fn allocate(device: &ash::Device, layouts: &DescriptorSetLayouts, pool_sizes: &ash_reflect::PoolSizes) -> anyhow::Result<Self> {
+        let set_layouts = [
+            layouts.main,
+            layouts.instance_buffer,
+            layouts.single_sampled_image,
+            layouts.single_sampled_image,
+            layouts.frustum_culling,
+            layouts.lights,
+            layouts.cluster_data,
+            layouts.acceleration_structure_debugging,
+            layouts.sun_shadow_buffer,
+            layouts.g_buffer,
+        ];
+
+        let mut pool_sizes = pool_sizes.as_vec();
+
         let descriptor_pool = unsafe {
             device.create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo::builder()
-                    .pool_sizes(&[
-                        *vk::DescriptorPoolSize::builder()
-                            .ty(vk::DescriptorType::STORAGE_BUFFER)
-                            .descriptor_count(5 + 8 + 3 + 1),
-                        *vk::DescriptorPoolSize::builder()
-                            .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                            .descriptor_count(3 + 1),
-                        *vk::DescriptorPoolSize::builder()
-                            .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                            .descriptor_count(MAX_IMAGES + 1),
-                        *vk::DescriptorPoolSize::builder()
-                            .ty(vk::DescriptorType::SAMPLER)
-                            .descriptor_count(3),
-                        *vk::DescriptorPoolSize::builder()
-                            .ty(vk::DescriptorType::STORAGE_IMAGE)
-                            .descriptor_count(1),
-                    ])
-                    .max_sets(10),
+                    .pool_sizes(&pool_sizes)
+                    .max_sets(set_layouts.len() as u32),
                 None,
             )
         }?;
@@ -291,18 +72,7 @@ impl DescriptorSets {
         let descriptor_sets = unsafe {
             device.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::builder()
-                    .set_layouts(&[
-                        layouts.main,
-                        layouts.instance_buffer,
-                        layouts.single_sampled_image,
-                        layouts.single_sampled_image,
-                        layouts.frustum_culling,
-                        layouts.lights,
-                        layouts.cluster_data,
-                        layouts.acceleration_structure_debugging,
-                        layouts.sun_shadow_buffer,
-                        layouts.g_buffer,
-                    ])
+                    .set_layouts(&set_layouts)
                     .descriptor_pool(descriptor_pool),
             )
         }?;

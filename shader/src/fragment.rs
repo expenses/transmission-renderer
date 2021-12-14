@@ -15,7 +15,7 @@ pub fn transmission(
     #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
     #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
-    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
+    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] cluster_light_indices: &[u32],
     #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
     #[spirv(frag_coord)] frag_coord: Vec4,
     output: &mut Vec4,
@@ -76,7 +76,7 @@ pub fn transmission(
         LightParams {
             num_lights: *index(cluster_light_counts, cluster),
             light_indices_offset: cluster * MAX_LIGHTS_PER_CLUSTER,
-            light_indices,
+            light_indices: cluster_light_indices,
             lights,
         },
         #[cfg(target_feature = "RayQueryKHR")]
@@ -140,7 +140,7 @@ pub fn opaque(
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
     #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
-    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
+    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] cluster_light_indices: &[u32],
     #[spirv(frag_coord)] frag_coord: Vec4,
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
@@ -203,7 +203,7 @@ pub fn opaque(
         LightParams {
             num_lights,
             light_indices_offset: cluster * MAX_LIGHTS_PER_CLUSTER,
-            light_indices,
+            light_indices: cluster_light_indices,
             lights,
         },
         #[cfg(target_feature = "RayQueryKHR")]
@@ -225,44 +225,6 @@ pub fn opaque(
 
     *hdr_framebuffer = output;
     *opaque_sampled_framebuffer = output;
-}
-
-#[cfg(target_feature = "RayQueryKHR")]
-#[spirv(fragment)]
-pub fn sun_shadow(
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(frag_coord)] frag_coord: Vec4,
-    output: &mut Vec4,
-) {
-    let mut blue_noise_sampler = BlueNoiseSampler {
-        textures,
-        sampler: *sampler,
-        uniforms,
-        frag_coord: frag_coord.xy(),
-        iteration: 0,
-    };
-
-    let acceleration_structure =
-        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
-
-    use spirv_std::ray_tracing::RayQuery;
-    spirv_std::ray_query!(let mut shadow_ray);
-
-    let factor = lighting::trace_shadow_ray(
-        shadow_ray,
-        &acceleration_structure,
-        position,
-        blue_noise_sampler.sample_directional_light(0.05, uniforms.sun_dir.into()),
-        10_000.0,
-    );
-
-    *output = Vec4::new(factor, 0.0, 0.0, 1.0);
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]

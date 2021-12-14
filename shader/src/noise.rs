@@ -1,4 +1,4 @@
-use crate::{sample, Textures};
+use crate::{sample_by_lod_0, Textures};
 use shared_structs::Uniforms;
 use spirv_std::{
     self as _,
@@ -30,14 +30,14 @@ impl<'a> BlueNoiseSampler<'a> {
         let second_offset = self.iteration * offset;
         self.iteration += 1;
 
-        let first_sample = sample(
+        let first_sample = sample_by_lod_0(
             self.textures,
             self.sampler,
             (self.frag_coord + first_offset.as_vec2()) / texture_size,
             self.uniforms.blue_noise_texture_index,
         )
         .x;
-        let second_sample = sample(
+        let second_sample = sample_by_lod_0(
             self.textures,
             self.sampler,
             (self.frag_coord + second_offset.as_vec2()) / texture_size,
