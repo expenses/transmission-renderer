@@ -1,31 +1,57 @@
 use crate::MAX_IMAGES;
 use ash::vk;
+use ash_reflect::FetchedDescriptorSetLayout;
 
 pub struct DescriptorSetLayouts {
-    pub main: vk::DescriptorSetLayout,
-    pub instance_buffer: vk::DescriptorSetLayout,
-    pub single_sampled_image: vk::DescriptorSetLayout,
-    pub frustum_culling: vk::DescriptorSetLayout,
-    pub lights: vk::DescriptorSetLayout,
-    pub cluster_data: vk::DescriptorSetLayout,
-    pub acceleration_structure_debugging: vk::DescriptorSetLayout,
-    pub g_buffer: vk::DescriptorSetLayout,
-    pub sun_shadow_buffer: vk::DescriptorSetLayout,
+    pub main: FetchedDescriptorSetLayout,
+    pub instance_buffer: FetchedDescriptorSetLayout,
+    pub single_sampled_image: FetchedDescriptorSetLayout,
+    pub frustum_culling: FetchedDescriptorSetLayout,
+    pub lights: FetchedDescriptorSetLayout,
+    pub cluster_data: FetchedDescriptorSetLayout,
+    pub acceleration_structure_debugging: FetchedDescriptorSetLayout,
+    pub g_buffer: FetchedDescriptorSetLayout,
+    pub sun_shadow_buffer: FetchedDescriptorSetLayout,
+    layouts: ash_reflect::DescriptorSetLayouts,
 }
 
 impl DescriptorSetLayouts {
-    pub fn from_reflected_layouts(built: &ash_reflect::BuiltDescriptorSetLayouts) -> Self {
-        Self {
-            main: built.layout_for_shader("fragment::opaque", 0),
-            instance_buffer: built.layout_for_shader("vertex::instanced", 1),
-            single_sampled_image: built.layout_for_shader("fragment::tonemap", 1),
-            frustum_culling: built.layout_for_shader("frustum_culling", 0),
-            lights: built.layout_for_shader("fragment::opaque", 2),
-            cluster_data: built.layout_for_shader("write_cluster_data", 1),
-            acceleration_structure_debugging: built.layout_for_shader("debugging::acceleration_structure_debugging", 1),
-            g_buffer: built.layout_for_shader("ray_trace_sun_shadow", 1),
-            sun_shadow_buffer: built.layout_for_shader("ray_trace_sun_shadow", 2),
-        }
+    pub fn from_reflected_layouts(
+        device: &ash::Device,
+        layouts: ash_reflect::DescriptorSetLayouts,
+    ) -> anyhow::Result<Self> {
+        let settings = ash_reflect::Settings {
+            max_unbounded_descriptors: MAX_IMAGES,
+            enable_partially_bound_unbounded_descriptors: true,
+        };
+
+        Ok(Self {
+            main: layouts.layout_for_shader(device, "fragment::opaque", 0, settings)?,
+            instance_buffer: layouts.layout_for_shader(device, "vertex::instanced", 1, settings)?,
+            single_sampled_image: layouts.layout_for_shader(
+                device,
+                "fragment::tonemap",
+                1,
+                settings,
+            )?,
+            frustum_culling: layouts.layout_for_shader(device, "frustum_culling", 0, settings)?,
+            lights: layouts.layout_for_shader(device, "fragment::opaque", 2, settings)?,
+            cluster_data: layouts.layout_for_shader(device, "write_cluster_data", 1, settings)?,
+            acceleration_structure_debugging: layouts.layout_for_shader(
+                device,
+                "debugging::acceleration_structure_debugging",
+                1,
+                settings,
+            )?,
+            g_buffer: layouts.layout_for_shader(device, "ray_trace_sun_shadow", 1, settings)?,
+            sun_shadow_buffer: layouts.layout_for_shader(
+                device,
+                "ray_trace_sun_shadow",
+                2,
+                settings,
+            )?,
+            layouts,
+        })
     }
 }
 
@@ -44,7 +70,7 @@ pub struct DescriptorSets {
 }
 
 impl DescriptorSets {
-    pub fn allocate(device: &ash::Device, layouts: &DescriptorSetLayouts, pool_sizes: &ash_reflect::PoolSizes) -> anyhow::Result<Self> {
+    pub fn allocate(device: &ash::Device, layouts: &DescriptorSetLayouts) -> anyhow::Result<Self> {
         let set_layouts = [
             layouts.main,
             layouts.instance_buffer,
@@ -58,7 +84,11 @@ impl DescriptorSets {
             layouts.g_buffer,
         ];
 
-        let mut pool_sizes = pool_sizes.as_vec();
+        let pool_sizes = layouts.layouts.get_pool_sizes(&set_layouts);
+
+        dbg!(&pool_sizes);
+
+        let pool_sizes = pool_sizes.as_vec();
 
         let descriptor_pool = unsafe {
             device.create_descriptor_pool(
@@ -68,6 +98,8 @@ impl DescriptorSets {
                 None,
             )
         }?;
+
+        let set_layouts = set_layouts.map(|fetched_set_layout| *fetched_set_layout);
 
         let descriptor_sets = unsafe {
             device.allocate_descriptor_sets(

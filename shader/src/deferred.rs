@@ -4,7 +4,8 @@ use crate::*;
 // is so cursed holy shit. `( v.xy >= 0.0 ? 1.0 : -1.0 )` apparently does a `OpFOrdGreaterThanEqual`
 // then a `OpSelect` but there's no way to tell by looking.
 fn octahedron_wrap(xy: Vec2) -> Vec2 {
-    (1.0 - Vec2::new(xy.y.abs(), xy.x.abs())) * Vec2::select(xy.cmpge(Vec2::ZERO), Vec2::ONE, -Vec2::ONE)
+    (1.0 - Vec2::new(xy.y.abs(), xy.x.abs()))
+        * Vec2::select(xy.cmpge(Vec2::ZERO), Vec2::ONE, -Vec2::ONE)
 }
 
 // https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/
@@ -26,7 +27,11 @@ fn decode_octahedron_as_normal(octahedron: Vec2) -> Vec3 {
     let octahedron = octahedron * 2.0 - 1.0;
 
     // https://twitter.com/Stubbesaurus/status/937994790553227264
-    let normal  = Vec3::new(octahedron.x, octahedron.y, 1.0 - octahedron.x.abs() - octahedron.y.abs());
+    let normal = Vec3::new(
+        octahedron.x,
+        octahedron.y,
+        1.0 - octahedron.x.abs() - octahedron.y.abs(),
+    );
     let t = (-normal.z).max(0.0).min(1.0);
 
     let mut xy = normal.truncate();
@@ -50,7 +55,10 @@ pub fn defer_opaque(
     #[spirv(frag_coord)] frag_coord: Vec4,
     out_normal_and_velocity: &mut Vec4,
 ) {
-    *out_normal_and_velocity = Vec4::from((encode_normal_as_octahedron(normal), compute_velocity(clip_position, prev_clip_position)));
+    *out_normal_and_velocity = Vec4::from((
+        encode_normal_as_octahedron(normal),
+        compute_velocity(clip_position, prev_clip_position),
+    ));
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]
@@ -85,7 +93,10 @@ pub fn defer_alpha_clip(
         spirv_std::arch::kill();
     }
 
-    *out_normal_and_velocity = Vec4::from((encode_normal_as_octahedron(normal), compute_velocity(clip_position, prev_clip_position)));
+    *out_normal_and_velocity = Vec4::from((
+        encode_normal_as_octahedron(normal),
+        compute_velocity(clip_position, prev_clip_position),
+    ));
 }
 
 #[cfg(not(target_feature = "RayQueryKHR"))]

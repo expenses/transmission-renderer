@@ -35,11 +35,9 @@ impl RenderPasses {
             .attachment(0)
             .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
-        let depth_pre_pass_subpasses = [
-            *vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .depth_stencil_attachment(&depth_attachment_ref),
-        ];
+        let depth_pre_pass_subpasses = [*vk::SubpassDescription::builder()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .depth_stencil_attachment(&depth_attachment_ref)];
 
         let depth_pre_pass_render_pass = unsafe {
             device.create_render_pass(
@@ -94,15 +92,13 @@ impl RenderPasses {
                 .depth_stencil_attachment(&depth_attachment_ref),
         ];
 
-        let draw_subpass_dependency = [
-            *vk::SubpassDependency::builder()
-                .src_subpass(0)
-                .dst_subpass(vk::SUBPASS_EXTERNAL)
-                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                .dst_stage_mask(vk::PipelineStageFlags::TRANSFER)
-                .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
-        ];
+        let draw_subpass_dependency = [*vk::SubpassDependency::builder()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+            .dst_stage_mask(vk::PipelineStageFlags::TRANSFER)
+            .dst_access_mask(vk::AccessFlags::TRANSFER_READ)];
 
         let draw_render_pass = unsafe {
             device.create_render_pass(
@@ -216,26 +212,28 @@ impl RenderPasses {
                 .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         ];
 
-        let defer_attachment_refs = [
-            *vk::AttachmentReference::builder()
-                .attachment(1)
-                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
-        ];
+        let defer_attachment_refs = [*vk::AttachmentReference::builder()
+            .attachment(1)
+            .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
 
         let defer_subpass = [*vk::SubpassDescription::builder()
             .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
             .color_attachments(&defer_attachment_refs)
             .depth_stencil_attachment(&depth_attachment_ref)];
 
-        let defer_subpass_dependency = [
-            *vk::SubpassDependency::builder()
-                .src_subpass(0)
-                .dst_subpass(vk::SUBPASS_EXTERNAL)
-                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
-                .dst_access_mask(vk::AccessFlags::SHADER_READ),
-        ];
+        let defer_subpass_dependency = [*vk::SubpassDependency::builder()
+            .src_subpass(0)
+            .dst_subpass(vk::SUBPASS_EXTERNAL)
+            .src_stage_mask(
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            )
+            .src_access_mask(
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            )
+            .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
+            .dst_access_mask(vk::AccessFlags::SHADER_READ)];
 
         let defer_render_pass = unsafe {
             device.create_render_pass(

@@ -17,6 +17,7 @@ pub(crate) struct RecordParams<'a> {
     pub tonemap_framebuffer: vk::Framebuffer,
     pub hdr_framebuffer: &'a ash_abstractions::Image,
     pub opaque_sampled_hdr_framebuffer: &'a ash_abstractions::Image,
+    pub depth_buffer: &'a ash_abstractions::Image,
     pub descriptor_sets: &'a DescriptorSets,
     pub dynamic: DynamicRecordParams,
     pub toggle: bool,
@@ -52,6 +53,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         transmission_framebuffer,
         tonemap_framebuffer,
         g_buffer,
+        depth_buffer,
         toggle,
         dynamic:
             DynamicRecordParams {
@@ -72,14 +74,12 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         descriptor_sets,
     } = params;
 
-    let depth_pre_pass_clear_values = [
-        vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue {
-                depth: 0.0,
-                stencil: 0,
-            },
+    let depth_pre_pass_clear_values = [vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+            depth: 0.0,
+            stencil: 0,
         },
-    ];
+    }];
 
     let draw_clear_values = [
         vk::ClearValue {
@@ -161,6 +161,16 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .height(extent.height as f32)
         .min_depth(0.0)
         .max_depth(1.0);
+
+    let base_subresource_range = *vk::ImageSubresourceRange::builder()
+        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .level_count(1)
+        .layer_count(1);
+
+    let depth_range = *vk::ImageSubresourceRange::builder()
+        .aspect_mask(vk::ImageAspectFlags::DEPTH)
+        .level_count(1)
+        .layer_count(1);
 
     profiling_ctx.reset(device, command_buffer);
 
@@ -417,22 +427,47 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     if record_g_buffer {
         record_deferred(
-            device, command_buffer, &defer_render_pass_info,
+            device,
+            command_buffer,
+            &defer_render_pass_info,
             pipelines,
             draw_buffers,
         );
+
+        vk_sync::cmd::pipeline_barrier(
+            device,
+            command_buffer,
+            None,
+            &[],
+            &[vk_sync::ImageBarrier {
+                previous_accesses: &[
+                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                ],
+                next_accesses: &[
+                    vk_sync::AccessType::DepthStencilAttachmentRead,
+                    vk_sync::AccessType::DepthStencilAttachmentWrite,
+                ],
+                next_layout: vk_sync::ImageLayout::Optimal,
+                image: depth_buffer.image,
+                range: depth_range,
+                ..Default::default()
+            }],
+        );
     } else {
         record_depth_pre_pass(
-            device, command_buffer, &depth_pre_pass_render_pass_info,
+            device,
+            command_buffer,
+            &depth_pre_pass_render_pass_info,
             profiling_ctx,
             pipelines,
-            descriptor_sets,
             draw_buffers,
         );
     }
 
     record_draw_pass(
-        device, command_buffer, &draw_render_pass_info,
+        device,
+        command_buffer,
+        &draw_render_pass_info,
         profiling_ctx,
         pipelines,
         descriptor_sets,
@@ -460,7 +495,9 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
     }
 
     record_transmissive(
-        device, command_buffer, &transmission_render_pass_info,
+        device,
+        command_buffer,
+        &transmission_render_pass_info,
         profiling_ctx,
         pipelines,
         descriptor_sets,
@@ -472,11 +509,6 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         .acceleration_structure_debugging
         .filter(|_| toggle)
     {
-        let subresource_range = *vk::ImageSubresourceRange::builder()
-            .aspect_mask(vk::ImageAspectFlags::COLOR)
-            .level_count(1)
-            .layer_count(1);
-
         vk_sync::cmd::pipeline_barrier(
             device,
             command_buffer,
@@ -489,7 +521,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 next_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
                 next_layout: vk_sync::ImageLayout::Optimal,
                 image: hdr_framebuffer.image,
-                range: subresource_range,
+                range: base_subresource_range,
                 discard_contents: true,
                 ..Default::default()
             }],
@@ -537,7 +569,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 ],
                 next_layout: vk_sync::ImageLayout::Optimal,
                 image: hdr_framebuffer.image,
-                range: subresource_range,
+                range: base_subresource_range,
                 ..Default::default()
             }],
         );
@@ -653,15 +685,15 @@ pub(crate) unsafe fn record_write_cluster_data(
 }
 
 unsafe fn record_depth_pre_pass(
-    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    device: &ash::Device,
+    command_buffer: vk::CommandBuffer,
     depth_pre_pass_render_pass: &vk::RenderPassBeginInfo,
     profiling_ctx: &ProfilingContext,
     pipelines: &Pipelines,
-    descriptor_sets: &DescriptorSets,
     draw_buffers: &DrawBuffers,
 ) {
     let _depth_profiling_zone =
-            profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
+        profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
 
     device.cmd_begin_render_pass(
         command_buffer,
@@ -683,12 +715,9 @@ unsafe fn record_depth_pre_pass(
             pipelines.depth_pre_pass,
         );
 
-        draw_buffers.opaque.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            0,
-            command_buffer,
-        );
+        draw_buffers
+            .opaque
+            .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
     }
 
     {
@@ -705,19 +734,17 @@ unsafe fn record_depth_pre_pass(
             pipelines.depth_pre_pass_alpha_clip,
         );
 
-        draw_buffers.alpha_clip.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            1,
-            command_buffer,
-        );
+        draw_buffers
+            .alpha_clip
+            .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
     }
 
     device.cmd_end_render_pass(command_buffer);
 }
 
 unsafe fn record_draw_pass(
-    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    device: &ash::Device,
+    command_buffer: vk::CommandBuffer,
     draw_render_pass_info: &vk::RenderPassBeginInfo,
     profiling_ctx: &ProfilingContext,
     pipelines: &Pipelines,
@@ -750,32 +777,26 @@ unsafe fn record_draw_pass(
     );
 
     {
-        let _profiling_zone =
-            profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
-        draw_buffers.opaque.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            0,
-            command_buffer,
-        );
+        let _profiling_zone = profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
+        draw_buffers
+            .opaque
+            .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
     }
 
     {
         let _profiling_zone =
             profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
-        draw_buffers.alpha_clip.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            1,
-            command_buffer,
-        );
+        draw_buffers
+            .alpha_clip
+            .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
     }
 
     device.cmd_end_render_pass(command_buffer);
 }
 
 unsafe fn record_deferred(
-    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    device: &ash::Device,
+    command_buffer: vk::CommandBuffer,
     defer_render_pass_info: &vk::RenderPassBeginInfo,
     pipelines: &Pipelines,
     draw_buffers: &DrawBuffers,
@@ -794,12 +815,9 @@ unsafe fn record_deferred(
                 pipelines.defer_opaque,
             );
 
-            draw_buffers.opaque.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                0,
-                command_buffer,
-            );
+            draw_buffers
+                .opaque
+                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
         }
 
         {
@@ -822,7 +840,8 @@ unsafe fn record_deferred(
 }
 
 unsafe fn record_transmissive(
-    device: &ash::Device, command_buffer: vk::CommandBuffer,
+    device: &ash::Device,
+    command_buffer: vk::CommandBuffer,
     transmission_render_pass_info: &vk::RenderPassBeginInfo,
     profiling_ctx: &ProfilingContext,
     pipelines: &Pipelines,

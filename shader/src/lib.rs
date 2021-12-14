@@ -40,7 +40,7 @@ use shared_structs::{
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{const_vec3, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Mat4, Vec4Swizzles},
+    glam::{const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
@@ -448,10 +448,7 @@ pub fn ray_trace_sun_shadow(
         sample.x
     };
 
-    let position = world_position_from_depth(
-        tex_coord,
-        depth, push_constants.proj_view.inverse()
-    );
+    let position = world_position_from_depth(tex_coord, depth, push_constants.proj_view.inverse());
 
     let factor = lighting::trace_shadow_ray(
         shadow_ray,

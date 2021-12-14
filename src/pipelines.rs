@@ -44,7 +44,7 @@ impl Pipelines {
         render_passes: &RenderPasses,
         pipeline_cache: vk::PipelineCache,
         enable_ray_tracing: bool,
-    ) -> anyhow::Result<(Self, DescriptorSetLayouts, ash_reflect::PoolSizes)> {
+    ) -> anyhow::Result<(Self, DescriptorSetLayouts)> {
         let _span = tracy_client::span!("Pipelines::new");
 
         let normal = &PathBuf::from("compiled-shaders/normal");
@@ -58,7 +58,10 @@ impl Pipelines {
 
         let mut layouts = ash_reflect::DescriptorSetLayouts::default();
 
-        let fragment_stage = layouts.passthrough(ash_reflect::ShaderModule::new(device, &read_shader(maybe_ray_tracing, "fragment_opaque")?)?);
+        let fragment_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+            device,
+            &read_shader(maybe_ray_tracing, "fragment_opaque")?,
+        )?);
 
         let fragment_transmission_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
             device,
@@ -70,24 +73,26 @@ impl Pipelines {
             &read_shader(normal, "vertex_instanced")?,
         )?);
 
-        let vertex_instanced_with_scale_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "vertex_instanced_with_scale")?,
-        )?);
+        let vertex_instanced_with_scale_stage =
+            layouts.passthrough(ash_reflect::ShaderModule::new(
+                device,
+                &read_shader(normal, "vertex_instanced_with_scale")?,
+            )?);
 
         let vertex_depth_pre_pass_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
             device,
             &read_shader(normal, "depth_pre_pass_vertex")?,
         )?);
 
-        let vertex_depth_pre_pass_alpha_clip_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
-        )?);
+        let vertex_depth_pre_pass_alpha_clip_stage =
+            layouts.passthrough(ash_reflect::ShaderModule::new(
+                device,
+                &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
+            )?);
 
         let fragment_depth_pre_pass_alpha_clip_stage =
-        layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
+            layouts.passthrough(ash_reflect::ShaderModule::new(
+                device,
                 &read_shader(normal, "depth_pre_pass_fragment_alpha_clip")?,
             )?);
 
@@ -160,34 +165,30 @@ impl Pipelines {
                 ray_trace_sun_shadow: ash_reflect::ShaderModule::new(
                     device,
                     &read_shader(ray_tracing, "ray_trace_sun_shadow")?,
-                )?
+                )?,
             })
         } else {
-            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(
-                &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?
-            )?);
-            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(
-                &read_shader(ray_tracing, "ray_trace_sun_shadow")?
-            )?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "debugging_acceleration_structure_debugging",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "ray_trace_sun_shadow",
+            )?)?);
 
             None
         };
 
-        dbg!(&layouts);
-        let mut pool_sizes = layouts.get_pool_sizes(crate::MAX_IMAGES);
-        pool_sizes.add(vk::DescriptorType::SAMPLED_IMAGE, 1);
-        dbg!(&pool_sizes);
-        let built_layouts = layouts.build(&device, crate::MAX_IMAGES, true)?;
-
-        let descriptor_set_layouts = DescriptorSetLayouts::from_reflected_layouts(&built_layouts);
+        let descriptor_set_layouts = DescriptorSetLayouts::from_reflected_layouts(device, layouts)?;
 
         let draw_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.main,
-                        descriptor_set_layouts.instance_buffer,
-                        descriptor_set_layouts.lights,
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.instance_buffer,
+                        *descriptor_set_layouts.lights,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -200,8 +201,8 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.main,
-                        descriptor_set_layouts.instance_buffer,
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.instance_buffer,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -214,10 +215,10 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.main,
-                        descriptor_set_layouts.instance_buffer,
-                        descriptor_set_layouts.lights,
-                        descriptor_set_layouts.single_sampled_image,
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.instance_buffer,
+                        *descriptor_set_layouts.lights,
+                        *descriptor_set_layouts.single_sampled_image,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -230,8 +231,8 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.frustum_culling,
-                        descriptor_set_layouts.instance_buffer,
+                        *descriptor_set_layouts.frustum_culling,
+                        *descriptor_set_layouts.instance_buffer,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -244,8 +245,8 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.main,
-                        descriptor_set_layouts.single_sampled_image,
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.single_sampled_image,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::FRAGMENT)
@@ -261,9 +262,9 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.main,
-                        descriptor_set_layouts.acceleration_structure_debugging,
-                        descriptor_set_layouts.instance_buffer,
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.acceleration_structure_debugging,
+                        *descriptor_set_layouts.instance_buffer,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -276,8 +277,8 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.main,
-                        descriptor_set_layouts.cluster_data,
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.cluster_data,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -293,8 +294,8 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
-                        descriptor_set_layouts.lights,
-                        descriptor_set_layouts.cluster_data,
+                        *descriptor_set_layouts.lights,
+                        *descriptor_set_layouts.cluster_data,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -308,7 +309,7 @@ impl Pipelines {
         let cluster_debugging_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[descriptor_set_layouts.cluster_data])
+                    .set_layouts(&[*descriptor_set_layouts.cluster_data])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
@@ -370,11 +371,9 @@ impl Pipelines {
             }),
             vertex_attributes: &full_vertex_attributes,
             vertex_bindings: &full_vertex_bindings,
-            colour_attachments: &[
-                *vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(vk::ColorComponentFlags::all())
-                    .blend_enable(false),
-            ],
+            colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
+                .color_write_mask(vk::ColorComponentFlags::all())
+                .blend_enable(false)],
         };
 
         let transmission_pipeline_desc = ash_abstractions::GraphicsPipelineDescriptor {
@@ -490,7 +489,10 @@ impl Pipelines {
         let cluster_debugging_baked = cluster_debugging_pipeline_desc.as_baked();
         let defer_baked = defer_pipeline_desc.as_baked();
 
-        let stages = &[*vertex_instanced_stage.as_stage_create_info(), *fragment_stage.as_stage_create_info()];
+        let stages = &[
+            *vertex_instanced_stage.as_stage_create_info(),
+            *fragment_stage.as_stage_create_info(),
+        ];
 
         let normal_pipeline_desc = normal_baked.as_pipeline_create_info(
             stages,
@@ -533,7 +535,10 @@ impl Pipelines {
             1,
         );
 
-        let tonemap_stages = &[*fullscreen_tri_stage.as_stage_create_info(), *fragment_tonemap_stage.as_stage_create_info()];
+        let tonemap_stages = &[
+            *fullscreen_tri_stage.as_stage_create_info(),
+            *fragment_tonemap_stage.as_stage_create_info(),
+        ];
 
         let tonemap_pipeline_desc = tonemap_pipeline_baked.as_pipeline_create_info(
             tonemap_stages,
@@ -557,7 +562,10 @@ impl Pipelines {
                 0,
             );
 
-        let cluster_debugging_stages = &[*cluster_debugging_vs_stage.as_stage_create_info(), *cluster_debugging_fs_stage.as_stage_create_info()];
+        let cluster_debugging_stages = &[
+            *cluster_debugging_vs_stage.as_stage_create_info(),
+            *cluster_debugging_fs_stage.as_stage_create_info(),
+        ];
 
         let cluster_debugging_pipeline_desc = cluster_debugging_baked.as_pipeline_create_info(
             cluster_debugging_stages,
@@ -566,7 +574,10 @@ impl Pipelines {
             0,
         );
 
-        let defer_opaque_stages = &[*defer_vs_stage.as_stage_create_info(), *defer_opaque_stage.as_stage_create_info()];
+        let defer_opaque_stages = &[
+            *defer_vs_stage.as_stage_create_info(),
+            *defer_opaque_stage.as_stage_create_info(),
+        ];
 
         let defer_opaque_pipeline_desc = defer_baked.as_pipeline_create_info(
             defer_opaque_stages,
@@ -575,7 +586,10 @@ impl Pipelines {
             0,
         );
 
-        let defer_alpha_clip_stages = &[*defer_vs_stage.as_stage_create_info(), *defer_alpha_clip_stage.as_stage_create_info()];
+        let defer_alpha_clip_stages = &[
+            *defer_vs_stage.as_stage_create_info(),
+            *defer_alpha_clip_stage.as_stage_create_info(),
+        ];
 
         let defer_alpha_clip_pipeline_desc = defer_baked.as_pipeline_create_info(
             defer_alpha_clip_stages,
@@ -619,7 +633,11 @@ impl Pipelines {
         if let Some(stages) = ray_tracing_stages.as_ref() {
             compute_pipeline_stages.push(
                 *vk::ComputePipelineCreateInfo::builder()
-                    .stage(*stages.acceleration_structure_debugging.as_stage_create_info())
+                    .stage(
+                        *stages
+                            .acceleration_structure_debugging
+                            .as_stage_create_info(),
+                    )
                     .layout(acceleration_structure_debugging_layout),
             );
 
@@ -635,36 +653,39 @@ impl Pipelines {
         }
         .map_err(|(_, err)| err)?;
 
-        Ok((Self {
-            normal: pipelines[0],
-            depth_pre_pass: pipelines[1],
-            depth_pre_pass_alpha_clip: pipelines[2],
-            depth_pre_pass_transmissive: pipelines[3],
-            depth_pre_pass_transmissive_alpha_clip: pipelines[4],
-            transmission: pipelines[5],
-            tonemap: pipelines[6],
-            cluster_debugging: pipelines[7],
-            defer_opaque: pipelines[8],
-            defer_alpha_clip: pipelines[9],
-            sun_shadow: None,
-            frustum_culling: compute_pipelines[0],
-            demultiplex_draws: compute_pipelines[1],
-            assign_lights_to_clusters: compute_pipelines[2],
-            write_cluster_data: compute_pipelines[3],
-            acceleration_structure_debugging: if enable_ray_tracing {
-                Some(compute_pipelines[4])
-            } else {
-                None
+        Ok((
+            Self {
+                normal: pipelines[0],
+                depth_pre_pass: pipelines[1],
+                depth_pre_pass_alpha_clip: pipelines[2],
+                depth_pre_pass_transmissive: pipelines[3],
+                depth_pre_pass_transmissive_alpha_clip: pipelines[4],
+                transmission: pipelines[5],
+                tonemap: pipelines[6],
+                cluster_debugging: pipelines[7],
+                defer_opaque: pipelines[8],
+                defer_alpha_clip: pipelines[9],
+                sun_shadow: None,
+                frustum_culling: compute_pipelines[0],
+                demultiplex_draws: compute_pipelines[1],
+                assign_lights_to_clusters: compute_pipelines[2],
+                write_cluster_data: compute_pipelines[3],
+                acceleration_structure_debugging: if enable_ray_tracing {
+                    Some(compute_pipelines[4])
+                } else {
+                    None
+                },
+                depth_pre_pass_pipeline_layout,
+                draw_pipeline_layout,
+                tonemap_pipeline_layout,
+                transmission_pipeline_layout,
+                frustum_culling_pipeline_layout,
+                acceleration_structure_debugging_layout,
+                lights_pipeline_layout,
+                write_cluster_data_pipeline_layout,
+                cluster_debugging_pipeline_layout,
             },
-            depth_pre_pass_pipeline_layout,
-            draw_pipeline_layout,
-            tonemap_pipeline_layout,
-            transmission_pipeline_layout,
-            frustum_culling_pipeline_layout,
-            acceleration_structure_debugging_layout,
-            lights_pipeline_layout,
-            write_cluster_data_pipeline_layout,
-            cluster_debugging_pipeline_layout,
-        }, descriptor_set_layouts, pool_sizes))
+            descriptor_set_layouts,
+        ))
     }
 }

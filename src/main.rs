@@ -33,7 +33,7 @@ use acceleration_structures::{
     build_top_level_acceleration_structure_from_instances,
     update_top_level_acceleration_structure_from_instances, AccelerationStructure,
 };
-use descriptor_sets::{DescriptorSetLayouts, DescriptorSets};
+use descriptor_sets::DescriptorSets;
 use model_loading::{load_gltf, ImageManager};
 use pipelines::Pipelines;
 use profiling::ProfilingContext;
@@ -93,7 +93,7 @@ struct Opt {
     rotate_model: bool,
     /// For viewing packed normals / velocity in renderdoc.
     #[structopt(long)]
-    debug_g_buffer: bool
+    debug_g_buffer: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -235,14 +235,10 @@ fn main() -> anyhow::Result<()> {
     let pipeline_cache =
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
-    let (pipelines, descriptor_set_layouts, pool_sizes) = Pipelines::new(
-        &device,
-        &render_passes,
-        pipeline_cache,
-        opt.ray_tracing,
-    )?;
+    let (pipelines, descriptor_set_layouts) =
+        Pipelines::new(&device, &render_passes, pipeline_cache, opt.ray_tracing)?;
 
-    let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts, &pool_sizes)?;
+    let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts)?;
 
     let queue = unsafe { device.get_device_queue(graphics_queue_family, 0) };
 
@@ -1355,7 +1351,8 @@ fn main() -> anyhow::Result<()> {
 
                     if opt.rotate_model {
                         let instances_offset = instances_to_rotate.clone().start;
-                        instances[instances_offset].prev_transform = instances[instances_offset].transform;
+                        instances[instances_offset].prev_transform =
+                            instances[instances_offset].transform;
                         instances[instances_offset].transform.rotation =
                             Quat::from_rotation_y(model_rotation);
 
@@ -1405,7 +1402,7 @@ fn main() -> anyhow::Result<()> {
                             )?;
 
                             if let Some(acceleration_structure_data) =
-                            acceleration_structure_data.as_mut()
+                                acceleration_structure_data.as_mut()
                             {
                                 let instance = instances[instances_offset];
 
@@ -1464,6 +1461,7 @@ fn main() -> anyhow::Result<()> {
                             model_buffers: &model_buffers,
                             render_passes: &render_passes,
                             g_buffer: &g_buffer,
+                            depth_buffer: &depth_buffer,
                             record_g_buffer: opt.ray_tracing || opt.debug_g_buffer,
                             draw_framebuffer,
                             depth_framebuffer,
@@ -1643,9 +1641,7 @@ fn create_single_attachment_framebuffer(
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
-                .attachments(&[
-                    image.view,
-                ])
+                .attachments(&[image.view])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -1713,9 +1709,7 @@ fn create_sun_shadow_buffer(
             mip_levels: 1,
             format: vk::Format::R8G8B8A8_UNORM,
             usage: vk::ImageUsageFlags::STORAGE,
-            next_accesses: &[
-                vk_sync::AccessType::FragmentShaderReadOther,
-            ],
+            next_accesses: &[vk_sync::AccessType::FragmentShaderReadOther],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
@@ -2200,10 +2194,7 @@ impl GBuffer {
                 init_resources.device.create_framebuffer(
                     &vk::FramebufferCreateInfo::builder()
                         .render_pass(render_passes.defer)
-                        .attachments(&[
-                            depth_buffer.view,
-                            normals_velocity_buffer.view,
-                        ])
+                        .attachments(&[depth_buffer.view, normals_velocity_buffer.view])
                         .width(width)
                         .height(height)
                         .layers(1),
