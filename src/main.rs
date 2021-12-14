@@ -299,7 +299,7 @@ fn main() -> anyhow::Result<()> {
             let _span = tracy_client::span!("Loading ggx_lut.png");
 
             let decoded_image = image::load_from_memory_with_format(
-                include_bytes!("../blue_noise_64x64.png"),
+                include_bytes!("../ggx_lut.png"),
                 image::ImageFormat::Png,
             )?;
 
