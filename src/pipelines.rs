@@ -58,98 +58,69 @@ impl Pipelines {
 
         let mut layouts = ash_reflect::DescriptorSetLayouts::default();
 
-        let fragment_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(maybe_ray_tracing, "fragment_opaque")?,
-        )?);
+        let fragment_stage = layouts
+            .load_and_merge_module(device, &read_shader(maybe_ray_tracing, "fragment_opaque")?)?;
 
-        let fragment_transmission_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+        let fragment_transmission_stage = layouts.load_and_merge_module(
             device,
             &read_shader(maybe_ray_tracing, "fragment_transmission")?,
-        )?);
+        )?;
 
-        let vertex_instanced_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+        let vertex_instanced_stage =
+            layouts.load_and_merge_module(device, &read_shader(normal, "vertex_instanced")?)?;
+
+        let vertex_instanced_with_scale_stage = layouts
+            .load_and_merge_module(device, &read_shader(normal, "vertex_instanced_with_scale")?)?;
+
+        let vertex_depth_pre_pass_stage = layouts
+            .load_and_merge_module(device, &read_shader(normal, "depth_pre_pass_vertex")?)?;
+
+        let vertex_depth_pre_pass_alpha_clip_stage = layouts.load_and_merge_module(
             device,
-            &read_shader(normal, "vertex_instanced")?,
-        )?);
+            &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
+        )?;
 
-        let vertex_instanced_with_scale_stage =
-            layouts.passthrough(ash_reflect::ShaderModule::new(
-                device,
-                &read_shader(normal, "vertex_instanced_with_scale")?,
-            )?);
-
-        let vertex_depth_pre_pass_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+        let fragment_depth_pre_pass_alpha_clip_stage = layouts.load_and_merge_module(
             device,
-            &read_shader(normal, "depth_pre_pass_vertex")?,
-        )?);
+            &read_shader(normal, "depth_pre_pass_fragment_alpha_clip")?,
+        )?;
 
-        let vertex_depth_pre_pass_alpha_clip_stage =
-            layouts.passthrough(ash_reflect::ShaderModule::new(
-                device,
-                &read_shader(normal, "depth_pre_pass_vertex_alpha_clip")?,
-            )?);
+        let fullscreen_tri_stage = layouts
+            .load_and_merge_module(device, &read_shader(normal, "vertex_fullscreen_tri")?)?;
 
-        let fragment_depth_pre_pass_alpha_clip_stage =
-            layouts.passthrough(ash_reflect::ShaderModule::new(
-                device,
-                &read_shader(normal, "depth_pre_pass_fragment_alpha_clip")?,
-            )?);
+        let fragment_tonemap_stage =
+            layouts.load_and_merge_module(device, &read_shader(normal, "fragment_tonemap")?)?;
 
-        let fullscreen_tri_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "vertex_fullscreen_tri")?,
-        )?);
+        let frustum_culling_stage =
+            layouts.load_and_merge_module(device, &read_shader(normal, "frustum_culling")?)?;
 
-        let fragment_tonemap_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "fragment_tonemap")?,
-        )?);
+        let demultiplex_draws_stage =
+            layouts.load_and_merge_module(device, &read_shader(normal, "demultiplex_draws")?)?;
 
-        let frustum_culling_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "frustum_culling")?,
-        )?);
+        let assign_lights_to_clusters_stage = layouts
+            .load_and_merge_module(device, &read_shader(normal, "assign_lights_to_clusters")?)?;
 
-        let demultiplex_draws_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "demultiplex_draws")?,
-        )?);
+        let write_cluster_data_stage =
+            layouts.load_and_merge_module(device, &read_shader(normal, "write_cluster_data")?)?;
 
-        let assign_lights_to_clusters_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "assign_lights_to_clusters")?,
-        )?);
-
-        let write_cluster_data_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "write_cluster_data")?,
-        )?);
-
-        let cluster_debugging_vs_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+        let cluster_debugging_vs_stage = layouts.load_and_merge_module(
             device,
             &read_shader(normal, "debugging_cluster_debugging_vs")?,
-        )?);
+        )?;
 
-        let cluster_debugging_fs_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
+        let cluster_debugging_fs_stage = layouts.load_and_merge_module(
             device,
             &read_shader(normal, "debugging_cluster_debugging_fs")?,
-        )?);
+        )?;
 
-        let defer_opaque_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "deferred_defer_opaque")?,
-        )?);
+        let defer_opaque_stage = layouts
+            .load_and_merge_module(device, &read_shader(normal, "deferred_defer_opaque")?)?;
 
-        let defer_alpha_clip_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "deferred_defer_alpha_clip")?,
-        )?);
+        let defer_alpha_clip_stage = layouts
+            .load_and_merge_module(device, &read_shader(normal, "deferred_defer_alpha_clip")?)?;
 
-        let defer_vs_stage = layouts.passthrough(ash_reflect::ShaderModule::new(
-            device,
-            &read_shader(normal, "deferred_vs")?,
-        )?);
+        let defer_vs_stage =
+            layouts.load_and_merge_module(device, &read_shader(normal, "deferred_vs")?)?;
 
         struct RayTracingStages {
             acceleration_structure_debugging: ash_reflect::ShaderModule,
@@ -158,11 +129,11 @@ impl Pipelines {
 
         let ray_tracing_stages = if enable_ray_tracing {
             Some(RayTracingStages {
-                acceleration_structure_debugging: ash_reflect::ShaderModule::new(
+                acceleration_structure_debugging: layouts.load_and_merge_module(
                     device,
                     &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
                 )?,
-                ray_trace_sun_shadow: ash_reflect::ShaderModule::new(
+                ray_trace_sun_shadow: layouts.load_and_merge_module(
                     device,
                     &read_shader(ray_tracing, "ray_trace_sun_shadow")?,
                 )?,

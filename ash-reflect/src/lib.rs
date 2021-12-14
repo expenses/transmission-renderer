@@ -215,9 +215,16 @@ pub struct DescriptorSetLayouts {
 }
 
 impl DescriptorSetLayouts {
-    pub fn passthrough(&mut self, shader_module: ShaderModule) -> ShaderModule {
-        self.merge_from_module(&shader_module);
-        shader_module
+    pub fn load_and_merge_module(
+        &mut self,
+        device: &ash::Device,
+        bytes: &[u8],
+    ) -> anyhow::Result<ShaderModule> {
+        let module = ShaderModule::new(device, bytes)?;
+
+        self.merge_from_module(&module);
+
+        Ok(module)
     }
 
     pub fn merge_from_reflection(&mut self, reflection: &ShaderReflection) {

@@ -8,5 +8,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.51"
 ash = "0.33.3"
-log = "0.4.14"
 rspirv-reflect = "0.5.0"
