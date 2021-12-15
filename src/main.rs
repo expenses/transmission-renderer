@@ -16,7 +16,7 @@ use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
-use shared_structs::{Instance, Light, PushConstants, Similarity};
+use shared_structs::{Instance, Light, PushConstants, Similarity, TileClassificationData};
 
 mod acceleration_structures;
 mod descriptor_sets;
@@ -236,8 +236,13 @@ fn main() -> anyhow::Result<()> {
     let pipeline_cache =
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
-    let (pipelines, descriptor_set_layouts) =
-        Pipelines::new(&device, &debug_utils_loader, &render_passes, pipeline_cache, opt.ray_tracing)?;
+    let (pipelines, descriptor_set_layouts) = Pipelines::new(
+        &device,
+        &debug_utils_loader,
+        &render_passes,
+        pipeline_cache,
+        opt.ray_tracing,
+    )?;
 
     let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts)?;
 
@@ -420,7 +425,24 @@ fn main() -> anyhow::Result<()> {
 
     let draw_buffers = DrawBuffers::new(max_draw_counts, &mut init_resources)?;
 
-    let mut depth_buffer = create_depth_buffer(extent.width, extent.height, &mut init_resources)?;
+    let mut depth_buffers = PingPong::new(
+        DepthBuffer::new(
+            &device,
+            "depth buffer a",
+            extent,
+            &render_passes,
+            descriptor_sets.depth_buffer_a,
+            &mut init_resources,
+        )?,
+        DepthBuffer::new(
+            &device,
+            "depth buffer b",
+            extent,
+            &render_passes,
+            descriptor_sets.depth_buffer_b,
+            &mut init_resources,
+        )?,
+    );
 
     let mut sun_shadow_buffer =
         create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
@@ -428,13 +450,13 @@ fn main() -> anyhow::Result<()> {
     let mut g_buffer = GBuffer::new(
         extent.width,
         extent.height,
-        descriptor_sets.g_buffer,
         &render_passes,
-        &depth_buffer,
+        &depth_buffers,
         &mut init_resources,
     )?;
 
-    let mut shadow_bitmask_buffer = create_shadow_bitmask_buffer(extent.width, extent.height, &mut init_resources)?;
+    let mut shadow_bitmask_buffer =
+        create_shadow_bitmask_buffer(extent.width, extent.height, &mut init_resources)?;
 
     let mut hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
@@ -617,6 +639,40 @@ fn main() -> anyhow::Result<()> {
         &mut init_resources,
     )?;
 
+    let clamp_sampler = unsafe {
+        device.create_sampler(
+            &vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                .max_lod(vk::LOD_CLAMP_NONE),
+            None,
+        )
+    }?;
+
+    let mut tile_classification_descriptors = TileClassificationDescriptors {
+        tile_classification_data_buffer: ash_abstractions::Buffer::new(
+            unsafe { bytes_of(&TileClassificationData::default()) },
+            "tile classification data buffer",
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            &mut init_resources,
+        )?,
+        descriptor_sets: PingPong::new(
+            descriptor_sets.tile_classification_a,
+            descriptor_sets.tile_classification_b,
+        ),
+        trilinear_clamp_sampler: clamp_sampler,
+    };
+
+    tile_classification_descriptors.update(
+        &device,
+        &depth_buffers,
+        &g_buffer.normals_velocity,
+        &shadow_bitmask_buffer,
+    );
+
     let mut acceleration_structure_debugging_uniforms =
         shared_structs::AccelerationStructureDebuggingUniforms {
             proj_inverse: Mat4::IDENTITY,
@@ -723,29 +779,26 @@ fn main() -> anyhow::Result<()> {
 
     let mut instances = model_staging_buffers.instances;
 
-    let mut draw_framebuffer = create_draw_framebuffer(
-        &device,
-        extent,
-        render_passes.draw,
-        &hdr_framebuffer,
-        opaque_sampled_hdr_framebuffer_top_mip_view,
-        &depth_buffer,
-    )?;
+    let mut draw_framebuffer = depth_buffers.try_map(|depth_buffer| {
+        create_draw_framebuffer(
+            &device,
+            extent,
+            render_passes.draw,
+            &hdr_framebuffer,
+            opaque_sampled_hdr_framebuffer_top_mip_view,
+            &depth_buffer.image,
+        )
+    })?;
 
-    let mut depth_framebuffer = create_single_attachment_framebuffer(
-        &device,
-        extent,
-        render_passes.depth_pre_pass,
-        &depth_buffer,
-    )?;
-
-    let mut transmission_framebuffer = create_framebuffer_with_depth(
-        &device,
-        extent,
-        render_passes.transmission,
-        &hdr_framebuffer,
-        &depth_buffer,
-    )?;
+    let mut transmission_framebuffer = depth_buffers.try_map(|depth_buffer| {
+        create_framebuffer_with_depth(
+            &device,
+            extent,
+            render_passes.transmission,
+            &hdr_framebuffer,
+            &depth_buffer.image,
+        )
+    })?;
 
     let mut keyboard_state = KeyboardState::default();
 
@@ -759,27 +812,6 @@ fn main() -> anyhow::Result<()> {
             None,
         )
     }?;
-
-    let clamp_sampler = unsafe {
-        device.create_sampler(
-            &vk::SamplerCreateInfo::builder()
-                .mag_filter(vk::Filter::LINEAR)
-                .min_filter(vk::Filter::LINEAR)
-                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                .max_lod(vk::LOD_CLAMP_NONE),
-            None,
-        )
-    }?;
-
-    fn buffer_info(buffer: &ash_abstractions::Buffer) -> [vk::DescriptorBufferInfo; 1] {
-        [vk::DescriptorBufferInfo {
-            buffer: buffer.buffer,
-            range: vk::WHOLE_SIZE,
-            offset: 0,
-        }]
-    }
 
     unsafe {
         device.update_descriptor_sets(
@@ -1114,7 +1146,9 @@ fn main() -> anyhow::Result<()> {
                             )?;
                         }
 
-                        depth_buffer.cleanup(&device, &mut allocator)?;
+                        depth_buffers.try_for_each(|depth_buffer| {
+                            depth_buffer.image.cleanup(&device, &mut allocator)
+                        })?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         sun_shadow_buffer.cleanup(&device, &mut allocator)?;
@@ -1128,8 +1162,24 @@ fn main() -> anyhow::Result<()> {
                             debug_utils_loader: Some(&debug_utils_loader),
                         };
 
-                        depth_buffer =
-                            create_depth_buffer(extent.width, extent.height, &mut init_resources)?;
+                        depth_buffers = PingPong::new(
+                            DepthBuffer::new(
+                                &device,
+                                "depth buffer a",
+                                extent,
+                                &render_passes,
+                                descriptor_sets.depth_buffer_a,
+                                &mut init_resources,
+                            )?,
+                            DepthBuffer::new(
+                                &device,
+                                "depth buffer b",
+                                extent,
+                                &render_passes,
+                                descriptor_sets.depth_buffer_b,
+                                &mut init_resources,
+                            )?,
+                        );
 
                         sun_shadow_buffer = create_sun_shadow_buffer(
                             extent.width,
@@ -1149,13 +1199,16 @@ fn main() -> anyhow::Result<()> {
                         g_buffer = GBuffer::new(
                             extent.width,
                             extent.height,
-                            descriptor_sets.g_buffer,
                             &render_passes,
-                            &depth_buffer,
+                            &depth_buffers,
                             &mut init_resources,
                         )?;
 
-                        shadow_bitmask_buffer = create_shadow_bitmask_buffer(extent.width, extent.height, &mut init_resources)?;
+                        shadow_bitmask_buffer = create_shadow_bitmask_buffer(
+                            extent.width,
+                            extent.height,
+                            &mut init_resources,
+                        )?;
 
                         opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
 
@@ -1246,27 +1299,32 @@ fn main() -> anyhow::Result<()> {
                             &render_passes,
                         )?;
 
-                        draw_framebuffer = create_draw_framebuffer(
+                        draw_framebuffer = depth_buffers.try_map(|depth_buffer| {
+                            create_draw_framebuffer(
+                                &device,
+                                extent,
+                                render_passes.draw,
+                                &hdr_framebuffer,
+                                opaque_sampled_hdr_framebuffer_top_mip_view,
+                                &depth_buffer.image,
+                            )
+                        })?;
+                        transmission_framebuffer = depth_buffers.try_map(|depth_buffer| {
+                            create_framebuffer_with_depth(
+                                &device,
+                                extent,
+                                render_passes.transmission,
+                                &hdr_framebuffer,
+                                &depth_buffer.image,
+                            )
+                        })?;
+
+                        tile_classification_descriptors.update(
                             &device,
-                            extent,
-                            render_passes.draw,
-                            &hdr_framebuffer,
-                            opaque_sampled_hdr_framebuffer_top_mip_view,
-                            &depth_buffer,
-                        )?;
-                        depth_framebuffer = create_single_attachment_framebuffer(
-                            &device,
-                            extent,
-                            render_passes.depth_pre_pass,
-                            &depth_buffer,
-                        )?;
-                        transmission_framebuffer = create_framebuffer_with_depth(
-                            &device,
-                            extent,
-                            render_passes.transmission,
-                            &hdr_framebuffer,
-                            &depth_buffer,
-                        )?;
+                            &depth_buffers,
+                            &g_buffer.normals_velocity,
+                            &shadow_bitmask_buffer,
+                        )
                     }
                     _ => {}
                 },
@@ -1333,7 +1391,8 @@ fn main() -> anyhow::Result<()> {
                     };
                     push_constants.view_position = camera.final_transform.position.into();
 
-                    uniforms.proj_view_inverse = push_constants.proj_view.as_dmat4().inverse().as_mat4();
+                    uniforms.proj_view_inverse =
+                        push_constants.proj_view.as_dmat4().inverse().as_mat4();
 
                     acceleration_structure_debugging_uniforms.view_inverse = view_matrix.inverse();
                     acceleration_structure_debugging_uniforms.proj_inverse =
@@ -1472,14 +1531,16 @@ fn main() -> anyhow::Result<()> {
                             model_buffers: &model_buffers,
                             render_passes: &render_passes,
                             g_buffer: &g_buffer,
-                            depth_buffer: &depth_buffer,
+                            depth_buffers: &depth_buffers,
                             record_g_buffer: opt.ray_tracing || opt.debug_g_buffer,
-                            draw_framebuffer,
-                            depth_framebuffer,
+                            draw_framebuffer: *draw_framebuffer.get(),
                             tonemap_framebuffer,
-                            transmission_framebuffer,
+                            transmission_framebuffer: *transmission_framebuffer.get(),
                             descriptor_sets: &descriptor_sets,
                             hdr_framebuffer: &hdr_framebuffer,
+                            tile_classification_descriptor_set: *tile_classification_descriptors
+                                .descriptor_sets
+                                .get(),
                             opaque_sampled_hdr_framebuffer: &opaque_sampled_hdr_framebuffer,
                             toggle,
                             dynamic: DynamicRecordParams {
@@ -1530,6 +1591,12 @@ fn main() -> anyhow::Result<()> {
                     tracy_client::finish_continuous_frame!();
 
                     uniforms.frame_index += 1;
+
+                    depth_buffers.switch();
+                    tile_classification_descriptors.descriptor_sets.switch();
+                    draw_framebuffer.switch();
+                    transmission_framebuffer.switch();
+                    g_buffer.framebuffers.switch();
                 },
                 Event::LoopDestroyed => {
                     unsafe {
@@ -1537,7 +1604,9 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     {
-                        depth_buffer.cleanup(&device, &mut allocator)?;
+                        depth_buffers.try_for_each(|depth_buffer| {
+                            depth_buffer.image.cleanup(&device, &mut allocator)
+                        })?;
                         light_buffers.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         uniforms_buffer.cleanup(&device, &mut allocator)?;
@@ -1685,26 +1754,6 @@ fn create_swapchain_image_framebuffers(
             .map_err(|err| err.into())
         })
         .collect()
-}
-
-fn create_depth_buffer(
-    width: u32,
-    height: u32,
-    init_resources: &mut ash_abstractions::InitResources,
-) -> anyhow::Result<ash_abstractions::Image> {
-    ash_abstractions::Image::new(
-        &ash_abstractions::ImageDescriptor {
-            width,
-            height,
-            name: "depth_buffer",
-            mip_levels: 1,
-            format: vk::Format::D32_SFLOAT,
-            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
-            next_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
-            next_layout: vk_sync::ImageLayout::Optimal,
-        },
-        init_resources,
-    )
 }
 
 fn create_sun_shadow_buffer(
@@ -1981,6 +2030,7 @@ impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::Uniforms {}
 impl Castable for shared_structs::PushConstants {}
 impl Castable for MaxDrawCounts {}
+impl Castable for TileClassificationData {}
 impl Castable for vk::AccelerationStructureInstanceKHR {}
 impl Castable for shared_structs::CullingPushConstants {}
 impl Castable for shared_structs::PrimitiveInfo {}
@@ -2157,9 +2207,7 @@ fn create_g_buffer_image(
             mip_levels: 1,
             format,
             usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
-            next_accesses: &[
-                vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-            ],
+            next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
@@ -2168,8 +2216,7 @@ fn create_g_buffer_image(
 
 struct GBuffer {
     pub normals_velocity: ash_abstractions::Image,
-    pub descriptor_set: vk::DescriptorSet,
-    pub framebuffer: vk::Framebuffer,
+    pub framebuffers: PingPong<vk::Framebuffer>,
 }
 
 impl GBuffer {
@@ -2178,9 +2225,8 @@ impl GBuffer {
     fn new(
         width: u32,
         height: u32,
-        descriptor_set: vk::DescriptorSet,
         render_passes: &RenderPasses,
-        depth_buffer: &ash_abstractions::Image,
+        depth_buffers: &PingPong<DepthBuffer>,
         init_resources: &mut ash_abstractions::InitResources,
     ) -> anyhow::Result<Self> {
         let normals_velocity_buffer = create_g_buffer_image(
@@ -2191,43 +2237,19 @@ impl GBuffer {
             init_resources,
         )?;
 
-        unsafe {
-            init_resources.device.update_descriptor_sets(
-                &[
-                    *vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(depth_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
-                    /* *vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(normals_velocity_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),*/
-
-                ],
-                &[],
-            );
-        }
-
         Ok(Self {
-            framebuffer: unsafe {
-                init_resources.device.create_framebuffer(
+            framebuffers: depth_buffers.try_map(|depth_buffer| unsafe {
+                Ok(init_resources.device.create_framebuffer(
                     &vk::FramebufferCreateInfo::builder()
                         .render_pass(render_passes.defer)
-                        .attachments(&[depth_buffer.view, normals_velocity_buffer.view])
+                        .attachments(&[depth_buffer.image.view, normals_velocity_buffer.view])
                         .width(width)
                         .height(height)
                         .layers(1),
                     None,
-                )
-            }?,
+                )?)
+            })?,
             normals_velocity: normals_velocity_buffer,
-            descriptor_set,
         })
     }
 
@@ -2239,4 +2261,206 @@ impl GBuffer {
         self.normals_velocity.cleanup(device, allocator)?;
         Ok(())
     }
+}
+
+struct TileClassificationDescriptors {
+    pub tile_classification_data_buffer: ash_abstractions::Buffer,
+    pub descriptor_sets: PingPong<vk::DescriptorSet>,
+    pub trilinear_clamp_sampler: vk::Sampler,
+}
+
+impl TileClassificationDescriptors {
+    fn update(
+        &self,
+        device: &ash::Device,
+        depth_buffers: &PingPong<DepthBuffer>,
+        normals_velocity_image: &ash_abstractions::Image,
+        shadow_bitmask_buffer: &ash_abstractions::Buffer,
+    ) {
+        self.update_descriptor_set(
+            device,
+            &depth_buffers.ping.image,
+            &depth_buffers.pong.image,
+            normals_velocity_image,
+            shadow_bitmask_buffer,
+            self.descriptor_sets.ping,
+        );
+        self.update_descriptor_set(
+            device,
+            &depth_buffers.pong.image,
+            &depth_buffers.ping.image,
+            normals_velocity_image,
+            shadow_bitmask_buffer,
+            self.descriptor_sets.pong,
+        );
+    }
+
+    fn update_descriptor_set(
+        &self,
+        device: &ash::Device,
+        current_depth_buffer: &ash_abstractions::Image,
+        previous_depth_buffer: &ash_abstractions::Image,
+        normals_velocity_image: &ash_abstractions::Image,
+        shadow_bitmask_buffer: &ash_abstractions::Buffer,
+        descriptor_set: vk::DescriptorSet,
+    ) {
+        unsafe {
+            device.update_descriptor_sets(
+                &[
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .buffer_info(&buffer_info(&self.tile_classification_data_buffer)),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(current_depth_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(2)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(normals_velocity_image.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(4)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(previous_depth_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(5)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&buffer_info(&shadow_bitmask_buffer)),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(10)
+                        .descriptor_type(vk::DescriptorType::SAMPLER)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .sampler(self.trilinear_clamp_sampler)]),
+                ],
+                &[],
+            )
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PingPong<T> {
+    state: bool,
+    ping: T,
+    pong: T,
+}
+
+impl<T> PingPong<T> {
+    pub fn new(ping: T, pong: T) -> Self {
+        Self {
+            state: false,
+            ping,
+            pong,
+        }
+    }
+
+    fn get(&self) -> &T {
+        if self.state {
+            &self.ping
+        } else {
+            &self.pong
+        }
+    }
+
+    fn get_both(&self) -> (&T, &T) {
+        if self.state {
+            (&self.ping, &self.pong)
+        } else {
+            (&self.pong, &self.ping)
+        }
+    }
+
+    fn switch(&mut self) {
+        self.state = !self.state;
+    }
+
+    fn map<M, F: Fn(&T) -> M>(&self, func: F) -> PingPong<M> {
+        PingPong::new(func(&self.ping), func(&self.pong))
+    }
+
+    fn try_map<M, F: Fn(&T) -> anyhow::Result<M>>(&self, func: F) -> anyhow::Result<PingPong<M>> {
+        Ok(PingPong::new(func(&self.ping)?, func(&self.pong)?))
+    }
+
+    fn try_for_each<F: FnMut(&T) -> anyhow::Result<()>>(&self, mut func: F) -> anyhow::Result<()> {
+        func(&self.ping)?;
+        func(&self.pong)?;
+        Ok(())
+    }
+}
+
+struct DepthBuffer {
+    image: ash_abstractions::Image,
+    descriptor_set: vk::DescriptorSet,
+    framebuffer: vk::Framebuffer,
+}
+
+impl DepthBuffer {
+    fn new(
+        device: &ash::Device,
+        name: &str,
+        extent: vk::Extent2D,
+        render_passes: &RenderPasses,
+        descriptor_set: vk::DescriptorSet,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<Self> {
+        let image = ash_abstractions::Image::new(
+            &ash_abstractions::ImageDescriptor {
+                width: extent.width,
+                height: extent.height,
+                name,
+                mip_levels: 1,
+                format: vk::Format::D32_SFLOAT,
+                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+                next_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
+                next_layout: vk_sync::ImageLayout::Optimal,
+            },
+            init_resources,
+        )?;
+
+        unsafe {
+            device.update_descriptor_sets(
+                &[*vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_set)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&[*vk::DescriptorImageInfo::builder()
+                        .image_view(image.view)
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)])],
+                &[],
+            );
+        }
+
+        Ok(Self {
+            framebuffer: create_single_attachment_framebuffer(
+                device,
+                extent,
+                render_passes.depth_pre_pass,
+                &image,
+            )?,
+            image,
+            descriptor_set,
+        })
+    }
+}
+
+fn buffer_info(buffer: &ash_abstractions::Buffer) -> [vk::DescriptorBufferInfo; 1] {
+    [vk::DescriptorBufferInfo {
+        buffer: buffer.buffer,
+        range: vk::WHOLE_SIZE,
+        offset: 0,
+    }]
 }

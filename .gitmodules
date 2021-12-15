@@ -1,0 +1,3 @@
+[submodule "external/FidelityFX-Denoiser"]
+	path = external/FidelityFX-Denoiser
+	url = https://github.com/GPUOpen-Effects/FidelityFX-Denoiser

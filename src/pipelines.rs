@@ -1,9 +1,9 @@
 use crate::descriptor_sets::DescriptorSetLayouts;
 use crate::render_passes::RenderPasses;
+use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 use ash::vk;
 use glam::{Vec2, Vec3};
 use std::path::{Path, PathBuf};
-use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 
 fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
     let mut path = parent.join(name);
@@ -12,39 +12,41 @@ fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 #[derive(Clone, Copy)]
-pub struct RayTracingPipelines {
-    pub(crate) acceleration_structure_debugging: vk::Pipeline,
-    pub(crate) ray_trace_sun_shadow: vk::Pipeline,
-    pub(crate) reconstruct_shadow_buffer: vk::Pipeline,
+pub(crate) struct RayTracingPipelines {
+    pub acceleration_structure_debugging: vk::Pipeline,
+    pub ray_trace_sun_shadow: vk::Pipeline,
+    pub reconstruct_shadow_buffer: vk::Pipeline,
+    pub tile_classification: vk::Pipeline,
 }
 
-pub struct Pipelines {
-    pub(crate) normal: vk::Pipeline,
-    pub(crate) depth_pre_pass: vk::Pipeline,
-    pub(crate) depth_pre_pass_alpha_clip: vk::Pipeline,
-    pub(crate) depth_pre_pass_transmissive: vk::Pipeline,
-    pub(crate) depth_pre_pass_transmissive_alpha_clip: vk::Pipeline,
-    pub(crate) transmission: vk::Pipeline,
-    pub(crate) tonemap: vk::Pipeline,
-    pub(crate) frustum_culling: vk::Pipeline,
-    pub(crate) demultiplex_draws: vk::Pipeline,
-    pub(crate) assign_lights_to_clusters: vk::Pipeline,
-    pub(crate) write_cluster_data: vk::Pipeline,
-    pub(crate) cluster_debugging: vk::Pipeline,
-    pub(crate) defer_opaque: vk::Pipeline,
-    pub(crate) defer_alpha_clip: vk::Pipeline,
-    pub(crate) ray_tracing_pipelines: Option<RayTracingPipelines>,
-    pub(crate) depth_pre_pass_pipeline_layout: vk::PipelineLayout,
-    pub(crate) draw_pipeline_layout: vk::PipelineLayout,
-    pub(crate) tonemap_pipeline_layout: vk::PipelineLayout,
-    pub(crate) transmission_pipeline_layout: vk::PipelineLayout,
-    pub(crate) frustum_culling_pipeline_layout: vk::PipelineLayout,
-    pub(crate) acceleration_structure_debugging_layout: vk::PipelineLayout,
-    pub(crate) lights_pipeline_layout: vk::PipelineLayout,
-    pub(crate) write_cluster_data_pipeline_layout: vk::PipelineLayout,
-    pub(crate) cluster_debugging_pipeline_layout: vk::PipelineLayout,
-    pub(crate) ray_trace_sun_shadow_layout: vk::PipelineLayout,
-    pub(crate) reconstruct_shadow_buffer_layout: vk::PipelineLayout,
+pub(crate) struct Pipelines {
+    pub normal: vk::Pipeline,
+    pub depth_pre_pass: vk::Pipeline,
+    pub depth_pre_pass_alpha_clip: vk::Pipeline,
+    pub depth_pre_pass_transmissive: vk::Pipeline,
+    pub depth_pre_pass_transmissive_alpha_clip: vk::Pipeline,
+    pub transmission: vk::Pipeline,
+    pub tonemap: vk::Pipeline,
+    pub frustum_culling: vk::Pipeline,
+    pub demultiplex_draws: vk::Pipeline,
+    pub assign_lights_to_clusters: vk::Pipeline,
+    pub write_cluster_data: vk::Pipeline,
+    pub cluster_debugging: vk::Pipeline,
+    pub defer_opaque: vk::Pipeline,
+    pub defer_alpha_clip: vk::Pipeline,
+    pub ray_tracing_pipelines: Option<RayTracingPipelines>,
+    pub depth_pre_pass_pipeline_layout: vk::PipelineLayout,
+    pub draw_pipeline_layout: vk::PipelineLayout,
+    pub tonemap_pipeline_layout: vk::PipelineLayout,
+    pub transmission_pipeline_layout: vk::PipelineLayout,
+    pub frustum_culling_pipeline_layout: vk::PipelineLayout,
+    pub acceleration_structure_debugging_layout: vk::PipelineLayout,
+    pub lights_pipeline_layout: vk::PipelineLayout,
+    pub write_cluster_data_pipeline_layout: vk::PipelineLayout,
+    pub cluster_debugging_pipeline_layout: vk::PipelineLayout,
+    pub ray_trace_sun_shadow_layout: vk::PipelineLayout,
+    pub reconstruct_shadow_buffer_layout: vk::PipelineLayout,
+    pub tile_classification_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -136,6 +138,7 @@ impl Pipelines {
             acceleration_structure_debugging: ash_reflect::ShaderModule,
             ray_trace_sun_shadow: ash_reflect::ShaderModule,
             reconstruct_shadow_buffer: ash_reflect::ShaderModule,
+            tile_classification: ash_reflect::ShaderModule,
         }
 
         let ray_tracing_stages = if enable_ray_tracing {
@@ -151,6 +154,10 @@ impl Pipelines {
                 reconstruct_shadow_buffer: layouts.load_and_merge_module(
                     device,
                     &read_shader(ray_tracing, "reconstruct_shadow_buffer")?,
+                )?,
+                tile_classification: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "tile_classification")?,
                 )?,
             })
         } else {
@@ -170,7 +177,8 @@ impl Pipelines {
             None
         };
 
-        let descriptor_set_layouts = DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
+        let descriptor_set_layouts =
+            DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
 
         let draw_pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -269,7 +277,7 @@ impl Pipelines {
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[
                         *descriptor_set_layouts.main,
-                        *descriptor_set_layouts.g_buffer,
+                        *descriptor_set_layouts.depth_buffer,
                         *descriptor_set_layouts.packed_shadow_bitmasks,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
@@ -326,10 +334,22 @@ impl Pipelines {
         let reconstruct_shadow_buffer_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[*descriptor_set_layouts.sun_shadow_buffer, *descriptor_set_layouts.packed_shadow_bitmasks])
+                    .set_layouts(&[
+                        *descriptor_set_layouts.sun_shadow_buffer,
+                        *descriptor_set_layouts.packed_shadow_bitmasks,
+                    ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                None,
+            )
+        }?;
+
+        let tile_classification_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[*descriptor_set_layouts.tile_classification])
+                    .push_constant_ranges(&[]),
                 None,
             )
         }?;
@@ -669,6 +689,12 @@ impl Pipelines {
                     .stage(*stages.reconstruct_shadow_buffer.as_stage_create_info())
                     .layout(reconstruct_shadow_buffer_layout),
             );
+
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(*stages.tile_classification.as_stage_create_info())
+                    .layout(tile_classification_layout),
+            );
         }
 
         let compute_pipelines = unsafe {
@@ -697,6 +723,7 @@ impl Pipelines {
                         acceleration_structure_debugging: compute_pipelines[4],
                         ray_trace_sun_shadow: compute_pipelines[5],
                         reconstruct_shadow_buffer: compute_pipelines[6],
+                        tile_classification: compute_pipelines[7],
                     })
                 } else {
                     None
@@ -712,6 +739,7 @@ impl Pipelines {
                 cluster_debugging_pipeline_layout,
                 ray_trace_sun_shadow_layout,
                 reconstruct_shadow_buffer_layout,
+                tile_classification_layout,
             },
             descriptor_set_layouts,
         ))

@@ -12,13 +12,13 @@ pub(crate) struct RecordParams<'a> {
     pub g_buffer: &'a GBuffer,
     pub record_g_buffer: bool,
     pub draw_framebuffer: vk::Framebuffer,
-    pub depth_framebuffer: vk::Framebuffer,
     pub transmission_framebuffer: vk::Framebuffer,
     pub tonemap_framebuffer: vk::Framebuffer,
     pub hdr_framebuffer: &'a ash_abstractions::Image,
     pub opaque_sampled_hdr_framebuffer: &'a ash_abstractions::Image,
-    pub depth_buffer: &'a ash_abstractions::Image,
+    pub depth_buffers: &'a PingPong<DepthBuffer>,
     pub descriptor_sets: &'a DescriptorSets,
+    pub tile_classification_descriptor_set: vk::DescriptorSet,
     pub dynamic: DynamicRecordParams,
     pub toggle: bool,
 }
@@ -48,12 +48,12 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         profiling_ctx,
         render_passes,
         draw_framebuffer,
-        depth_framebuffer,
         record_g_buffer,
         transmission_framebuffer,
         tonemap_framebuffer,
         g_buffer,
-        depth_buffer,
+        depth_buffers,
+        tile_classification_descriptor_set,
         toggle,
         dynamic:
             DynamicRecordParams {
@@ -133,13 +133,13 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
 
     let depth_pre_pass_render_pass_info = vk::RenderPassBeginInfo::builder()
         .render_pass(render_passes.depth_pre_pass)
-        .framebuffer(depth_framebuffer)
+        .framebuffer(depth_buffers.get().framebuffer)
         .render_area(area)
         .clear_values(&depth_pre_pass_clear_values);
 
     let defer_render_pass_info = vk::RenderPassBeginInfo::builder()
         .render_pass(render_passes.defer)
-        .framebuffer(g_buffer.framebuffer)
+        .framebuffer(*g_buffer.framebuffers.get())
         .render_area(area)
         .clear_values(&defer_clear_values);
 
@@ -435,23 +435,45 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         );
 
         if let Some(rt_pipelines) = pipelines.ray_tracing_pipelines {
+            let (current_depth_buffer, previous_depth_buffer) = depth_buffers.get_both();
+
             vk_sync::cmd::pipeline_barrier(
                 device,
                 command_buffer,
                 None,
                 &[],
-                &[vk_sync::ImageBarrier {
-                    previous_accesses: &[
-                        vk_sync::AccessType::DepthStencilAttachmentWrite,
-                    ],
-                    next_accesses: &[
-                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
-                    ],
-                    next_layout: vk_sync::ImageLayout::Optimal,
-                    image: depth_buffer.image,
-                    range: depth_range,
-                    ..Default::default()
-                }],
+                &[
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
+                        next_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: current_depth_buffer.image.image,
+                        range: depth_range,
+                        ..Default::default()
+                    },
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
+                        next_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: previous_depth_buffer.image.image,
+                        range: depth_range,
+                        ..Default::default()
+                    },
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+                        next_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: g_buffer.normals_velocity.image,
+                        range: base_subresource_range,
+                        ..Default::default()
+                    },
+                ],
             );
 
             device.cmd_bind_pipeline(
@@ -467,7 +489,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 0,
                 &[
                     descriptor_sets.main,
-                    descriptor_sets.g_buffer,
+                    current_depth_buffer.descriptor_set,
                     descriptor_sets.packed_shadow_bitmasks,
                 ],
                 &[],
@@ -481,21 +503,44 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 bytes_of(&push_constants),
             );
 
-            device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 8), 1);
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(extent.width, 8),
+                dispatch_count(extent.height, 8),
+                1,
+            );
 
             vk_sync::cmd::pipeline_barrier(
                 device,
                 command_buffer,
                 Some(vk_sync::GlobalBarrier {
-                    previous_accesses: &[
-                        vk_sync::AccessType::ComputeShaderWrite,
-                    ],
-                    next_accesses: &[
-                        vk_sync::AccessType::ComputeShaderReadOther,
-                    ],
+                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                    next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
                 }),
                 &[],
                 &[],
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                rt_pipelines.tile_classification,
+            );
+
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.tile_classification_layout,
+                0,
+                &[tile_classification_descriptor_set],
+                &[],
+            );
+
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(extent.width, 8),
+                dispatch_count(extent.height, 8),
+                1,
             );
 
             device.cmd_bind_pipeline(
@@ -516,33 +561,59 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 &[],
             );
 
-            device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 8), 1);
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(extent.width, 8),
+                dispatch_count(extent.height, 8),
+                1,
+            );
 
             vk_sync::cmd::pipeline_barrier(
                 device,
                 command_buffer,
                 Some(vk_sync::GlobalBarrier {
-                    previous_accesses: &[
-                        vk_sync::AccessType::ComputeShaderWrite,
-                    ],
-                    next_accesses: &[
-                        vk_sync::AccessType::FragmentShaderReadOther,
-                    ],
+                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                    next_accesses: &[vk_sync::AccessType::FragmentShaderReadOther],
                 }),
                 &[],
-                &[vk_sync::ImageBarrier {
-                    previous_accesses: &[
-                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
-                    ],
-                    next_accesses: &[
-                        vk_sync::AccessType::DepthStencilAttachmentRead,
-                        vk_sync::AccessType::DepthStencilAttachmentWrite,
-                    ],
-                    next_layout: vk_sync::ImageLayout::Optimal,
-                    image: depth_buffer.image,
-                    range: depth_range,
-                    ..Default::default()
-                }],
+                &[
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_accesses: &[
+                            vk_sync::AccessType::DepthStencilAttachmentRead,
+                            vk_sync::AccessType::DepthStencilAttachmentWrite,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: current_depth_buffer.image.image,
+                        range: depth_range,
+                        ..Default::default()
+                    },
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_accesses: &[
+                            vk_sync::AccessType::DepthStencilAttachmentRead,
+                            vk_sync::AccessType::DepthStencilAttachmentWrite,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: previous_depth_buffer.image.image,
+                        range: depth_range,
+                        ..Default::default()
+                    },
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: g_buffer.normals_velocity.image,
+                        range: base_subresource_range,
+                        ..Default::default()
+                    },
+                ],
             );
         }
     } else {
@@ -616,7 +687,11 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             }],
         );
 
-        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, rt_pipelines.acceleration_structure_debugging);
+        device.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::COMPUTE,
+            rt_pipelines.acceleration_structure_debugging,
+        );
 
         device.cmd_bind_descriptor_sets(
             command_buffer,
@@ -861,7 +936,7 @@ unsafe fn record_draw_pass(
             descriptor_sets.main,
             descriptor_sets.instance_buffer,
             descriptor_sets.lights,
-            descriptor_sets.sun_shadow_buffer
+            descriptor_sets.sun_shadow_buffer,
         ],
         &[],
     );

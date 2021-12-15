@@ -1,5 +1,5 @@
-use spirv_std::integer::Integer;
 use spirv_std::glam::UVec4;
+use spirv_std::integer::Integer;
 
 pub fn atomic_i_increment(reference: &mut u32) -> u32 {
     unsafe {
@@ -31,9 +31,7 @@ unsafe fn atomic_i_increment_raw<I: Integer, const SCOPE: u32, const SEMANTICS: 
     old
 }
 
-pub fn subgroup_ballot(
-    predicate: bool
-) -> UVec4 {
+pub fn subgroup_ballot(predicate: bool) -> UVec4 {
     unsafe {
         asm! {
             "%u32 = OpTypeInt 32 0",
@@ -49,9 +47,7 @@ pub fn subgroup_ballot(
     }
 }
 
-pub fn subgroup_inverse_ballot(
-    ballot: UVec4
-) -> bool {
+pub fn subgroup_inverse_ballot(ballot: UVec4) -> bool {
     unsafe {
         asm! {
             "%bool = OpTypeBool",
@@ -68,9 +64,7 @@ pub fn subgroup_inverse_ballot(
 }
 
 pub fn subgroup_elect() -> bool {
-    unsafe {
-        group_elect::<{ spirv_std::memory::Scope::Subgroup as u32 }>()
-    }
+    unsafe { group_elect::<{ spirv_std::memory::Scope::Subgroup as u32 }>() }
 }
 
 unsafe fn group_elect<const SCOPE: u32>() -> bool {

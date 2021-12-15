@@ -1,7 +1,7 @@
 #![no_std]
 
 use core::ops::Mul;
-use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use glam::{IVec2, Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
 #[cfg(target_arch = "spirv")]
 use num_traits::Float;
 
@@ -350,4 +350,17 @@ pub struct WriteClusterDataPushConstants {
 pub struct AssignLightsPushConstants {
     pub view_matrix: Mat4,
     pub view_rotation: Quat,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default)]
+#[repr(C)]
+pub struct TileClassificationData {
+    pub eye: Vec3A,
+    pub first_frame: i32,
+    pub buffer_dimensions: IVec2,
+    pub inv_buffer_dimensions: Vec2,
+    pub projection_inverse: Mat4,
+    pub reprojection_matrix: Mat4,
+    pub view_projection_inverse: Mat4,
 }

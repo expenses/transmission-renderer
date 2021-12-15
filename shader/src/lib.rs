@@ -459,7 +459,8 @@ pub fn ray_trace_sun_shadow(
         let top_bitmask = ballot.x;
         let bottom_bitmask = ballot.y;
 
-        let (top_row_index, bottom_row_index) = indices_for_block(id, push_constants.framebuffer_size);
+        let (top_row_index, bottom_row_index) =
+            indices_for_block(id, push_constants.framebuffer_size);
 
         *index_mut(packed_shadow_bitmasks, top_row_index) = top_bitmask;
         *index_mut(packed_shadow_bitmasks, bottom_row_index) = bottom_bitmask;
@@ -498,6 +499,9 @@ pub fn reconstruct_shadow_buffer(
     let factor = asm::subgroup_inverse_ballot(ballot);
 
     unsafe {
-        debug_sun_shadow_buffer.write(id.truncate(), Vec4::new(factor as u32 as f32, 0.0, 0.0, 1.0));
+        debug_sun_shadow_buffer.write(
+            id.truncate(),
+            Vec4::new(factor as u32 as f32, 0.0, 0.0, 1.0),
+        );
     }
 }

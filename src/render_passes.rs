@@ -208,8 +208,8 @@ impl RenderPasses {
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .initial_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+                .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .final_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL),
         ];
 
         let defer_attachment_refs = [*vk::AttachmentReference::builder()
