@@ -410,14 +410,13 @@ fn world_position_from_depth(tex_coord: Vec2, ndc_depth: f32, view_proj_inverse:
 }
 
 #[cfg(target_feature = "RayQueryKHR")]
-#[spirv(compute(threads(8, 4)))]
+#[spirv(compute(threads(8, 8)))]
 pub fn ray_trace_sun_shadow(
     #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
     #[spirv(descriptor_set = 1, binding = 0)] depth_buffer: &Image!(2D, type=f32, sampled),
-    //#[spirv(descriptor_set = 1, binding = 1)] normals_velocity_buffer: &Image!(2D, type=f32, sampled),
-    #[spirv(descriptor_set = 2, binding = 0)] debug_sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] packed_shadow_bitmasks: &mut [u32],
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
@@ -454,7 +453,51 @@ pub fn ray_trace_sun_shadow(
         10_000.0,
     );
 
+    let ballot = asm::subgroup_ballot(factor);
+
+    if asm::subgroup_elect() {
+        let top_bitmask = ballot.x;
+        let bottom_bitmask = ballot.y;
+
+        let (top_row_index, bottom_row_index) = indices_for_block(id, push_constants.framebuffer_size);
+
+        *index_mut(packed_shadow_bitmasks, top_row_index) = top_bitmask;
+        *index_mut(packed_shadow_bitmasks, bottom_row_index) = bottom_bitmask;
+    }
+}
+
+fn div_round_up(a: u32, b: u32) -> u32 {
+    (a + b - 1) / b
+}
+
+fn indices_for_block(id: UVec3, framebuffer_size: UVec2) -> (u32, u32) {
+    let block_x = id.x / 8;
+    let block_y = id.y / 8;
+    let num_blocks_x = div_round_up(framebuffer_size.x, 8);
+
+    let top_row_index = (block_y * 2) * num_blocks_x + block_x;
+    let bottom_row_index = (block_y * 2 + 1) * num_blocks_x + block_x;
+
+    (top_row_index, bottom_row_index)
+}
+
+#[cfg(target_feature = "RayQueryKHR")]
+#[spirv(compute(threads(8, 8)))]
+pub fn reconstruct_shadow_buffer(
+    #[spirv(descriptor_set = 0, binding = 0)] debug_sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] packed_shadow_bitmasks: &[u32],
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let (top_row_index, bottom_row_index) = indices_for_block(id, push_constants.framebuffer_size);
+
+    let top_row = *index(packed_shadow_bitmasks, top_row_index);
+    let bottom_row = *index(packed_shadow_bitmasks, bottom_row_index);
+    let ballot = UVec4::new(top_row, bottom_row, 0, 0);
+
+    let factor = asm::subgroup_inverse_ballot(ballot);
+
     unsafe {
-        debug_sun_shadow_buffer.write(id.truncate(), Vec4::new(factor, 0.0, 0.0, 1.0));
+        debug_sun_shadow_buffer.write(id.truncate(), Vec4::new(factor as u32 as f32, 0.0, 0.0, 1.0));
     }
 }

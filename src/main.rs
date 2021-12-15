@@ -115,6 +115,7 @@ fn main() -> anyhow::Result<()> {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_title("Transmission Renderer")
+        .with_inner_size(winit::dpi::PhysicalSize::new(512, 512))
         .build(&event_loop)?;
 
     let entry = unsafe { ash::Entry::new() }?;
@@ -432,6 +433,8 @@ fn main() -> anyhow::Result<()> {
         &depth_buffer,
         &mut init_resources,
     )?;
+
+    let mut shadow_bitmask_buffer = create_shadow_bitmask_buffer(extent.width, extent.height, &mut init_resources)?;
 
     let mut hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
@@ -898,6 +901,7 @@ fn main() -> anyhow::Result<()> {
         &hdr_framebuffer,
         &opaque_sampled_hdr_framebuffer,
         &sun_shadow_buffer,
+        &shadow_bitmask_buffer,
     );
 
     unsafe {
@@ -1115,6 +1119,7 @@ fn main() -> anyhow::Result<()> {
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         sun_shadow_buffer.cleanup(&device, &mut allocator)?;
                         g_buffer.cleanup(&device, &mut allocator)?;
+                        shadow_bitmask_buffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
                             command_buffer,
@@ -1149,6 +1154,8 @@ fn main() -> anyhow::Result<()> {
                             &depth_buffer,
                             &mut init_resources,
                         )?;
+
+                        shadow_bitmask_buffer = create_shadow_bitmask_buffer(extent.width, extent.height, &mut init_resources)?;
 
                         opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
 
@@ -1229,6 +1236,7 @@ fn main() -> anyhow::Result<()> {
                             &hdr_framebuffer,
                             &opaque_sampled_hdr_framebuffer,
                             &sun_shadow_buffer,
+                            &shadow_bitmask_buffer,
                         );
 
                         swapchain_image_framebuffers = create_swapchain_image_framebuffers(
@@ -2119,6 +2127,19 @@ fn acceleration_structure_instance(
                 .device_address(device),
         },
     }
+}
+
+fn create_shadow_bitmask_buffer(
+    width: u32,
+    height: u32,
+    init_resources: &mut ash_abstractions::InitResources,
+) -> anyhow::Result<ash_abstractions::Buffer> {
+    ash_abstractions::Buffer::new_of_size(
+        dispatch_count(width, 8) as u64 * dispatch_count(height, 4) as u64 * 4,
+        "shadow bitmask buffer",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        init_resources,
+    )
 }
 
 fn create_g_buffer_image(

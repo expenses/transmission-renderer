@@ -11,6 +11,13 @@ fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
     Ok(std::fs::read(&path)?)
 }
 
+#[derive(Clone, Copy)]
+pub struct RayTracingPipelines {
+    pub(crate) acceleration_structure_debugging: vk::Pipeline,
+    pub(crate) ray_trace_sun_shadow: vk::Pipeline,
+    pub(crate) reconstruct_shadow_buffer: vk::Pipeline,
+}
+
 pub struct Pipelines {
     pub(crate) normal: vk::Pipeline,
     pub(crate) depth_pre_pass: vk::Pipeline,
@@ -26,9 +33,7 @@ pub struct Pipelines {
     pub(crate) cluster_debugging: vk::Pipeline,
     pub(crate) defer_opaque: vk::Pipeline,
     pub(crate) defer_alpha_clip: vk::Pipeline,
-    pub(crate) acceleration_structure_debugging: Option<vk::Pipeline>,
-    pub(crate) ray_trace_sun_shadow: Option<vk::Pipeline>,
-    pub(crate) sun_shadow: Option<vk::Pipeline>,
+    pub(crate) ray_tracing_pipelines: Option<RayTracingPipelines>,
     pub(crate) depth_pre_pass_pipeline_layout: vk::PipelineLayout,
     pub(crate) draw_pipeline_layout: vk::PipelineLayout,
     pub(crate) tonemap_pipeline_layout: vk::PipelineLayout,
@@ -39,6 +44,7 @@ pub struct Pipelines {
     pub(crate) write_cluster_data_pipeline_layout: vk::PipelineLayout,
     pub(crate) cluster_debugging_pipeline_layout: vk::PipelineLayout,
     pub(crate) ray_trace_sun_shadow_layout: vk::PipelineLayout,
+    pub(crate) reconstruct_shadow_buffer_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -129,6 +135,7 @@ impl Pipelines {
         struct RayTracingStages {
             acceleration_structure_debugging: ash_reflect::ShaderModule,
             ray_trace_sun_shadow: ash_reflect::ShaderModule,
+            reconstruct_shadow_buffer: ash_reflect::ShaderModule,
         }
 
         let ray_tracing_stages = if enable_ray_tracing {
@@ -141,6 +148,10 @@ impl Pipelines {
                     device,
                     &read_shader(ray_tracing, "ray_trace_sun_shadow")?,
                 )?,
+                reconstruct_shadow_buffer: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "reconstruct_shadow_buffer")?,
+                )?,
             })
         } else {
             layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
@@ -150,6 +161,10 @@ impl Pipelines {
             layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
                 ray_tracing,
                 "ray_trace_sun_shadow",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "reconstruct_shadow_buffer",
             )?)?);
 
             None
@@ -255,7 +270,7 @@ impl Pipelines {
                     .set_layouts(&[
                         *descriptor_set_layouts.main,
                         *descriptor_set_layouts.g_buffer,
-                        *descriptor_set_layouts.sun_shadow_buffer,
+                        *descriptor_set_layouts.packed_shadow_bitmasks,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -303,6 +318,17 @@ impl Pipelines {
                     .set_layouts(&[*descriptor_set_layouts.cluster_data])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX)
+                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                None,
+            )
+        }?;
+
+        let reconstruct_shadow_buffer_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[*descriptor_set_layouts.sun_shadow_buffer, *descriptor_set_layouts.packed_shadow_bitmasks])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
                 None,
             )
@@ -637,6 +663,12 @@ impl Pipelines {
                     .stage(*stages.ray_trace_sun_shadow.as_stage_create_info())
                     .layout(ray_trace_sun_shadow_layout),
             );
+
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(*stages.reconstruct_shadow_buffer.as_stage_create_info())
+                    .layout(reconstruct_shadow_buffer_layout),
+            );
         }
 
         let compute_pipelines = unsafe {
@@ -656,18 +688,16 @@ impl Pipelines {
                 cluster_debugging: pipelines[7],
                 defer_opaque: pipelines[8],
                 defer_alpha_clip: pipelines[9],
-                sun_shadow: None,
                 frustum_culling: compute_pipelines[0],
                 demultiplex_draws: compute_pipelines[1],
                 assign_lights_to_clusters: compute_pipelines[2],
                 write_cluster_data: compute_pipelines[3],
-                acceleration_structure_debugging: if enable_ray_tracing {
-                    Some(compute_pipelines[4])
-                } else {
-                    None
-                },
-                ray_trace_sun_shadow: if enable_ray_tracing {
-                    Some(compute_pipelines[5])
+                ray_tracing_pipelines: if enable_ray_tracing {
+                    Some(RayTracingPipelines {
+                        acceleration_structure_debugging: compute_pipelines[4],
+                        ray_trace_sun_shadow: compute_pipelines[5],
+                        reconstruct_shadow_buffer: compute_pipelines[6],
+                    })
                 } else {
                     None
                 },
@@ -681,6 +711,7 @@ impl Pipelines {
                 write_cluster_data_pipeline_layout,
                 cluster_debugging_pipeline_layout,
                 ray_trace_sun_shadow_layout,
+                reconstruct_shadow_buffer_layout,
             },
             descriptor_set_layouts,
         ))

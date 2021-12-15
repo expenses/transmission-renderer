@@ -434,7 +434,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             draw_buffers,
         );
 
-        if let Some(pipeline) = pipelines.ray_trace_sun_shadow {
+        if let Some(rt_pipelines) = pipelines.ray_tracing_pipelines {
             vk_sync::cmd::pipeline_barrier(
                 device,
                 command_buffer,
@@ -457,7 +457,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             device.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                pipeline,
+                rt_pipelines.ray_trace_sun_shadow,
             );
 
             device.cmd_bind_descriptor_sets(
@@ -468,7 +468,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 &[
                     descriptor_sets.main,
                     descriptor_sets.g_buffer,
-                    descriptor_sets.sun_shadow_buffer
+                    descriptor_sets.packed_shadow_bitmasks,
                 ],
                 &[],
             );
@@ -481,17 +481,52 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 bytes_of(&push_constants),
             );
 
-            device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 4), 1);
+            device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 8), 1);
 
             vk_sync::cmd::pipeline_barrier(
                 device,
                 command_buffer,
                 Some(vk_sync::GlobalBarrier {
                     previous_accesses: &[
-                        vk_sync::AccessType::General,
+                        vk_sync::AccessType::ComputeShaderWrite,
                     ],
                     next_accesses: &[
-                        vk_sync::AccessType::General,
+                        vk_sync::AccessType::ComputeShaderReadOther,
+                    ],
+                }),
+                &[],
+                &[],
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                rt_pipelines.reconstruct_shadow_buffer,
+            );
+
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.reconstruct_shadow_buffer_layout,
+                0,
+                &[
+                    descriptor_sets.sun_shadow_buffer,
+                    descriptor_sets.packed_shadow_bitmasks,
+                ],
+                &[],
+            );
+
+            device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 8), 1);
+
+            vk_sync::cmd::pipeline_barrier(
+                device,
+                command_buffer,
+                Some(vk_sync::GlobalBarrier {
+                    previous_accesses: &[
+                        vk_sync::AccessType::ComputeShaderWrite,
+                    ],
+                    next_accesses: &[
+                        vk_sync::AccessType::FragmentShaderReadOther,
                     ],
                 }),
                 &[],
@@ -562,10 +597,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         &push_constants,
     );
 
-    if let Some(pipeline) = pipelines
-        .acceleration_structure_debugging
-        .filter(|_| toggle)
-    {
+    if let Some(rt_pipelines) = pipelines.ray_tracing_pipelines.filter(|_| toggle) {
         vk_sync::cmd::pipeline_barrier(
             device,
             command_buffer,
@@ -584,7 +616,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             }],
         );
 
-        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, pipeline);
+        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, rt_pipelines.acceleration_structure_debugging);
 
         device.cmd_bind_descriptor_sets(
             command_buffer,

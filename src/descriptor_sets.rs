@@ -13,6 +13,7 @@ pub struct DescriptorSetLayouts {
     pub acceleration_structure_debugging: FetchedDescriptorSetLayout,
     pub g_buffer: FetchedDescriptorSetLayout,
     pub sun_shadow_buffer: FetchedDescriptorSetLayout,
+    pub packed_shadow_bitmasks: FetchedDescriptorSetLayout,
     layouts: ash_reflect::DescriptorSetLayouts,
 }
 
@@ -53,8 +54,11 @@ impl DescriptorSetLayouts {
             )?,
             g_buffer: create_and_name("ray_trace_sun_shadow", 1)?,
             sun_shadow_buffer: create_and_name(
-                "fragment::opaque",
-                3,
+                "reconstruct_shadow_buffer",
+                0,
+            )?,
+            packed_shadow_bitmasks: create_and_name(
+                "ray_trace_sun_shadow", 2
             )?,
             layouts,
         })
@@ -72,6 +76,7 @@ pub struct DescriptorSets {
     pub acceleration_structure_debugging: vk::DescriptorSet,
     pub sun_shadow_buffer: vk::DescriptorSet,
     pub g_buffer: vk::DescriptorSet,
+    pub packed_shadow_bitmasks: vk::DescriptorSet,
     _descriptor_pool: vk::DescriptorPool,
 }
 
@@ -88,6 +93,7 @@ impl DescriptorSets {
             layouts.acceleration_structure_debugging,
             layouts.sun_shadow_buffer,
             layouts.g_buffer,
+            layouts.packed_shadow_bitmasks,
         ];
 
         let pool_sizes = layouts.layouts.get_pool_sizes(&set_layouts);
@@ -126,6 +132,7 @@ impl DescriptorSets {
             acceleration_structure_debugging: descriptor_sets[7],
             sun_shadow_buffer: descriptor_sets[8],
             g_buffer: descriptor_sets[9],
+            packed_shadow_bitmasks: descriptor_sets[10],
             _descriptor_pool: descriptor_pool,
         })
     }
@@ -136,6 +143,7 @@ impl DescriptorSets {
         hdr_framebuffer: &ash_abstractions::Image,
         opaque_sampled_hdr_framebuffer: &ash_abstractions::Image,
         sun_shadow_buffer: &ash_abstractions::Image,
+        packed_shadow_bitmasks_buffer: &ash_abstractions::Buffer,
     ) {
         unsafe {
             device.update_descriptor_sets(
@@ -168,6 +176,15 @@ impl DescriptorSets {
                         .image_info(&[*vk::DescriptorImageInfo::builder()
                             .image_view(sun_shadow_buffer.view)
                             .image_layout(vk::ImageLayout::GENERAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                            .dst_set(self.packed_shadow_bitmasks)
+                            .dst_binding(0)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .buffer_info(&[vk::DescriptorBufferInfo {
+                                buffer: packed_shadow_bitmasks_buffer.buffer,
+                                range: vk::WHOLE_SIZE,
+                                offset: 0,
+                            }]),
                 ],
                 &[],
             );

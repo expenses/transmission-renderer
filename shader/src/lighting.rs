@@ -29,7 +29,7 @@ pub fn evaluate_lights_transmission(
         position,
         uniforms.sun_dir.into(),
         10_000.0,
-    );
+    ) as u32 as f32;
 
     #[cfg(not(target_feature = "RayQueryKHR"))]
     let factor = 1.0;
@@ -68,7 +68,7 @@ pub fn evaluate_lights_transmission(
             position,
             direction,
             distance,
-        );
+        ) as u32 as f32;
 
         #[cfg(not(target_feature = "RayQueryKHR"))]
         let factor = 1.0;
@@ -100,7 +100,7 @@ pub(crate) fn trace_shadow_ray(
     origin: Vec3,
     direction: Vec3,
     max_t: f32,
-) -> f32 {
+) -> bool {
     unsafe {
         ray.initialize(
             acceleration_structure,
@@ -117,10 +117,7 @@ pub(crate) fn trace_shadow_ray(
             ray.confirm_intersection();
         }
 
-        match ray.get_committed_intersection_type() {
-            CommittedIntersection::None => 1.0,
-            _ => 0.0,
-        }
+        ray.get_committed_intersection_type() == CommittedIntersection::None
     }
 }
 
@@ -187,7 +184,7 @@ pub fn evaluate_lights(
                 position,
                 direction,
                 distance,
-            );
+            ) as u32 as f32;
         }
 
         if light.is_a_spotlight() {
