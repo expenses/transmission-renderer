@@ -3,6 +3,7 @@ use crate::render_passes::RenderPasses;
 use ash::vk;
 use glam::{Vec2, Vec3};
 use std::path::{Path, PathBuf};
+use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 
 fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
     let mut path = parent.join(name);
@@ -26,6 +27,7 @@ pub struct Pipelines {
     pub(crate) defer_opaque: vk::Pipeline,
     pub(crate) defer_alpha_clip: vk::Pipeline,
     pub(crate) acceleration_structure_debugging: Option<vk::Pipeline>,
+    pub(crate) ray_trace_sun_shadow: Option<vk::Pipeline>,
     pub(crate) sun_shadow: Option<vk::Pipeline>,
     pub(crate) depth_pre_pass_pipeline_layout: vk::PipelineLayout,
     pub(crate) draw_pipeline_layout: vk::PipelineLayout,
@@ -36,11 +38,13 @@ pub struct Pipelines {
     pub(crate) lights_pipeline_layout: vk::PipelineLayout,
     pub(crate) write_cluster_data_pipeline_layout: vk::PipelineLayout,
     pub(crate) cluster_debugging_pipeline_layout: vk::PipelineLayout,
+    pub(crate) ray_trace_sun_shadow_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
     pub fn new(
         device: &ash::Device,
+        debug_utils_loader: &DebugUtilsLoader,
         render_passes: &RenderPasses,
         pipeline_cache: vk::PipelineCache,
         enable_ray_tracing: bool,
@@ -151,7 +155,7 @@ impl Pipelines {
             None
         };
 
-        let descriptor_set_layouts = DescriptorSetLayouts::from_reflected_layouts(device, layouts)?;
+        let descriptor_set_layouts = DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
 
         let draw_pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -160,6 +164,7 @@ impl Pipelines {
                         *descriptor_set_layouts.main,
                         *descriptor_set_layouts.instance_buffer,
                         *descriptor_set_layouts.lights,
+                        *descriptor_set_layouts.sun_shadow_buffer,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -236,6 +241,21 @@ impl Pipelines {
                         *descriptor_set_layouts.main,
                         *descriptor_set_layouts.acceleration_structure_debugging,
                         *descriptor_set_layouts.instance_buffer,
+                    ])
+                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                None,
+            )
+        }?;
+
+        let ray_trace_sun_shadow_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[
+                        *descriptor_set_layouts.main,
+                        *descriptor_set_layouts.g_buffer,
+                        *descriptor_set_layouts.sun_shadow_buffer,
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::COMPUTE)
@@ -615,7 +635,7 @@ impl Pipelines {
             compute_pipeline_stages.push(
                 *vk::ComputePipelineCreateInfo::builder()
                     .stage(*stages.ray_trace_sun_shadow.as_stage_create_info())
-                    .layout(acceleration_structure_debugging_layout),
+                    .layout(ray_trace_sun_shadow_layout),
             );
         }
 
@@ -646,6 +666,11 @@ impl Pipelines {
                 } else {
                     None
                 },
+                ray_trace_sun_shadow: if enable_ray_tracing {
+                    Some(compute_pipelines[5])
+                } else {
+                    None
+                },
                 depth_pre_pass_pipeline_layout,
                 draw_pipeline_layout,
                 tonemap_pipeline_layout,
@@ -655,6 +680,7 @@ impl Pipelines {
                 lights_pipeline_layout,
                 write_cluster_data_pipeline_layout,
                 cluster_debugging_pipeline_layout,
+                ray_trace_sun_shadow_layout,
             },
             descriptor_set_layouts,
         ))

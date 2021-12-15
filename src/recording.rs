@@ -434,25 +434,82 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
             draw_buffers,
         );
 
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            None,
-            &[],
-            &[vk_sync::ImageBarrier {
-                previous_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+        if let Some(pipeline) = pipelines.ray_trace_sun_shadow {
+            vk_sync::cmd::pipeline_barrier(
+                device,
+                command_buffer,
+                None,
+                &[],
+                &[vk_sync::ImageBarrier {
+                    previous_accesses: &[
+                        vk_sync::AccessType::DepthStencilAttachmentWrite,
+                    ],
+                    next_accesses: &[
+                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    image: depth_buffer.image,
+                    range: depth_range,
+                    ..Default::default()
+                }],
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipeline,
+            );
+
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                pipelines.ray_trace_sun_shadow_layout,
+                0,
+                &[
+                    descriptor_sets.main,
+                    descriptor_sets.g_buffer,
+                    descriptor_sets.sun_shadow_buffer
                 ],
-                next_accesses: &[
-                    vk_sync::AccessType::DepthStencilAttachmentRead,
-                    vk_sync::AccessType::DepthStencilAttachmentWrite,
-                ],
-                next_layout: vk_sync::ImageLayout::Optimal,
-                image: depth_buffer.image,
-                range: depth_range,
-                ..Default::default()
-            }],
-        );
+                &[],
+            );
+
+            device.cmd_push_constants(
+                command_buffer,
+                pipelines.ray_trace_sun_shadow_layout,
+                vk::ShaderStageFlags::COMPUTE,
+                0,
+                bytes_of(&push_constants),
+            );
+
+            device.cmd_dispatch(command_buffer, dispatch_count(extent.width, 8), dispatch_count(extent.height, 4), 1);
+
+            vk_sync::cmd::pipeline_barrier(
+                device,
+                command_buffer,
+                Some(vk_sync::GlobalBarrier {
+                    previous_accesses: &[
+                        vk_sync::AccessType::General,
+                    ],
+                    next_accesses: &[
+                        vk_sync::AccessType::General,
+                    ],
+                }),
+                &[],
+                &[vk_sync::ImageBarrier {
+                    previous_accesses: &[
+                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_accesses: &[
+                        vk_sync::AccessType::DepthStencilAttachmentRead,
+                        vk_sync::AccessType::DepthStencilAttachmentWrite,
+                    ],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    image: depth_buffer.image,
+                    range: depth_range,
+                    ..Default::default()
+                }],
+            );
+        }
     } else {
         record_depth_pre_pass(
             device,
@@ -772,6 +829,7 @@ unsafe fn record_draw_pass(
             descriptor_sets.main,
             descriptor_sets.instance_buffer,
             descriptor_sets.lights,
+            descriptor_sets.sun_shadow_buffer
         ],
         &[],
     );

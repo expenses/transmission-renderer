@@ -1,6 +1,7 @@
 use crate::MAX_IMAGES;
 use ash::vk;
 use ash_reflect::FetchedDescriptorSetLayout;
+use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 
 pub struct DescriptorSetLayouts {
     pub main: FetchedDescriptorSetLayout,
@@ -18,6 +19,7 @@ pub struct DescriptorSetLayouts {
 impl DescriptorSetLayouts {
     pub fn from_reflected_layouts(
         device: &ash::Device,
+        debug_utils_loader: &DebugUtilsLoader,
         layouts: ash_reflect::DescriptorSetLayouts,
     ) -> anyhow::Result<Self> {
         let settings = ash_reflect::Settings {
@@ -25,30 +27,34 @@ impl DescriptorSetLayouts {
             enable_partially_bound_unbounded_descriptors: true,
         };
 
+        dbg!(&layouts);
+
+        let create_and_name = |name, set_id| {
+            let layout = layouts.layout_for_shader(device, name, set_id, settings)?;
+
+            ash_abstractions::set_object_name(device, debug_utils_loader, *layout, &format!("{} set {}", name, set_id))?;
+
+            Ok::<_, anyhow::Error>(layout)
+        };
+
         Ok(Self {
-            main: layouts.layout_for_shader(device, "fragment::opaque", 0, settings)?,
-            instance_buffer: layouts.layout_for_shader(device, "vertex::instanced", 1, settings)?,
-            single_sampled_image: layouts.layout_for_shader(
-                device,
+            main: create_and_name("fragment::opaque", 0)?,
+            instance_buffer: create_and_name("vertex::instanced", 1)?,
+            single_sampled_image: create_and_name(
                 "fragment::tonemap",
                 1,
-                settings,
             )?,
-            frustum_culling: layouts.layout_for_shader(device, "frustum_culling", 0, settings)?,
-            lights: layouts.layout_for_shader(device, "fragment::opaque", 2, settings)?,
-            cluster_data: layouts.layout_for_shader(device, "write_cluster_data", 1, settings)?,
-            acceleration_structure_debugging: layouts.layout_for_shader(
-                device,
+            frustum_culling: create_and_name("frustum_culling", 0)?,
+            lights: create_and_name("fragment::opaque", 2)?,
+            cluster_data: create_and_name("write_cluster_data", 1)?,
+            acceleration_structure_debugging: create_and_name(
                 "debugging::acceleration_structure_debugging",
                 1,
-                settings,
             )?,
-            g_buffer: layouts.layout_for_shader(device, "ray_trace_sun_shadow", 1, settings)?,
-            sun_shadow_buffer: layouts.layout_for_shader(
-                device,
-                "ray_trace_sun_shadow",
-                2,
-                settings,
+            g_buffer: create_and_name("ray_trace_sun_shadow", 1)?,
+            sun_shadow_buffer: create_and_name(
+                "fragment::opaque",
+                3,
             )?,
             layouts,
         })

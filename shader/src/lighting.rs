@@ -107,7 +107,7 @@ pub(crate) fn trace_shadow_ray(
             RayFlags::NONE,
             0xff,
             origin,
-            0.001,
+            0.01,
             direction,
             max_t,
         );

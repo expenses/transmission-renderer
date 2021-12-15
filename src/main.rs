@@ -236,7 +236,7 @@ fn main() -> anyhow::Result<()> {
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
     let (pipelines, descriptor_set_layouts) =
-        Pipelines::new(&device, &render_passes, pipeline_cache, opt.ray_tracing)?;
+        Pipelines::new(&device, &debug_utils_loader, &render_passes, pipeline_cache, opt.ray_tracing)?;
 
     let descriptor_sets = DescriptorSets::allocate(&device, &descriptor_set_layouts)?;
 
@@ -352,7 +352,7 @@ fn main() -> anyhow::Result<()> {
                     format: vk::Format::R8G8B8A8_UNORM,
                     name: "blue noise",
                     next_accesses: &[
-                        vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
                     ],
                     next_layout: vk_sync::ImageLayout::Optimal,
                     mip_levels: 1,
@@ -604,6 +604,7 @@ fn main() -> anyhow::Result<()> {
         blue_noise_texture_index,
         frame_index: 0,
         prev_proj_view: Default::default(),
+        proj_view_inverse: Default::default(),
     };
 
     let mut uniforms_buffer = ash_abstractions::Buffer::new(
@@ -1323,6 +1324,8 @@ fn main() -> anyhow::Result<()> {
                         perspective_matrix * view_matrix
                     };
                     push_constants.view_position = camera.final_transform.position.into();
+
+                    uniforms.proj_view_inverse = push_constants.proj_view.as_dmat4().inverse().as_mat4();
 
                     acceleration_structure_debugging_uniforms.view_inverse = view_matrix.inverse();
                     acceleration_structure_debugging_uniforms.proj_inverse =
@@ -2175,15 +2178,16 @@ impl GBuffer {
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                         .image_info(&[*vk::DescriptorImageInfo::builder()
-                            .image_view(normals_velocity_buffer.view)
-                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
-                    *vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&[*vk::DescriptorImageInfo::builder()
                             .image_view(depth_buffer.view)
                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    /* *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(normals_velocity_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),*/
+
                 ],
                 &[],
             );

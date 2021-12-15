@@ -141,6 +141,7 @@ pub fn opaque(
     #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
     #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
     #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] cluster_light_indices: &[u32],
+    #[spirv(descriptor_set = 3, binding = 0)] debug_sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
     #[spirv(frag_coord)] frag_coord: Vec4,
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
@@ -194,6 +195,11 @@ pub fn opaque(
 
     let num_lights = *index(cluster_light_counts, cluster);
 
+    let sun_shadow_value = unsafe {
+        let sample: Vec4 = debug_sun_shadow_buffer.read(frag_coord.xy().as_uvec2());
+        sample.x
+    };
+
     let result = evaluate_lights(
         material_params,
         view,
@@ -210,7 +216,7 @@ pub fn opaque(
         &acceleration_structure,
         #[cfg(target_feature = "RayQueryKHR")]
         &mut blue_noise_sampler,
-        1.0,
+        sun_shadow_value,
     );
 
     let mut output = (result.diffuse + result.specular + emission).extend(1.0);

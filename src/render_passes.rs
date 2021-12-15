@@ -201,7 +201,7 @@ impl RenderPasses {
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .initial_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
+                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
             // G Buffer
             *vk::AttachmentDescription::builder()
                 .format(GBuffer::NORMALS_VELOCITY_FORMAT)
@@ -239,8 +239,7 @@ impl RenderPasses {
             device.create_render_pass(
                 &vk::RenderPassCreateInfo::builder()
                     .attachments(&defer_attachments)
-                    .subpasses(&defer_subpass)
-                    .dependencies(&defer_subpass_dependency),
+                    .subpasses(&defer_subpass),
                 None,
             )
         }?;

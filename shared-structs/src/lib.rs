@@ -20,6 +20,7 @@ pub struct PushConstants {
 #[repr(C)]
 pub struct Uniforms {
     pub prev_proj_view: Mat4,
+    pub proj_view_inverse: Mat4,
     pub sun_dir: Vec3A,
     pub sun_intensity: Vec3A,
     pub cluster_size_in_pixels: Vec2,

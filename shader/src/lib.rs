@@ -48,12 +48,6 @@ use spirv_std::{
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
 
-fn animate_blue_noise(blue_noise: Vec2, frame_index: u32) -> Vec2 {
-    // The fractional part of the golden ratio
-    let golden_ratio_fract = 0.618033988749;
-    (blue_noise + (frame_index % 32) as f32 * golden_ratio_fract).fract()
-}
-
 fn sample_by_lod_0(textures: &Textures, sampler: Sampler, uv: Vec2, texture_id: u32) -> Vec4 {
     TextureSampler {
         textures,
@@ -421,8 +415,9 @@ pub fn ray_trace_sun_shadow(
     #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
-    #[spirv(descriptor_set = 1, binding = 1)] depth_buffer: &Image!(2D, type=f32, sampled),
-    #[spirv(descriptor_set = 2, binding = 0)] sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 1, binding = 0)] depth_buffer: &Image!(2D, type=f32, sampled),
+    //#[spirv(descriptor_set = 1, binding = 1)] normals_velocity_buffer: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 2, binding = 0)] debug_sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
 ) {
@@ -433,22 +428,23 @@ pub fn ray_trace_sun_shadow(
         textures,
         sampler: *sampler,
         uniforms,
-        frag_coord,
+        // I spent an actual hour figuring out that I needed to do this offset. Actually kill me.
+        frag_coord: frag_coord + 0.5,
         iteration: 0,
     };
-
-    let acceleration_structure =
-        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
-
-    use spirv_std::ray_tracing::RayQuery;
-    spirv_std::ray_query!(let mut shadow_ray);
 
     let depth = {
         let sample: Vec4 = depth_buffer.sample_by_lod(*sampler, tex_coord, 0.0);
         sample.x
     };
 
-    let position = world_position_from_depth(tex_coord, depth, push_constants.proj_view.inverse());
+    let position = world_position_from_depth(tex_coord, depth, uniforms.proj_view_inverse);
+
+    let acceleration_structure =
+        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
+
+    use spirv_std::ray_tracing::RayQuery;
+    spirv_std::ray_query!(let mut shadow_ray);
 
     let factor = lighting::trace_shadow_ray(
         shadow_ray,
@@ -459,6 +455,6 @@ pub fn ray_trace_sun_shadow(
     );
 
     unsafe {
-        sun_shadow_buffer.write(id.truncate(), Vec4::new(factor, 0.0, 0.0, 1.0));
+        debug_sun_shadow_buffer.write(id.truncate(), Vec4::new(factor, 0.0, 0.0, 1.0));
     }
 }
