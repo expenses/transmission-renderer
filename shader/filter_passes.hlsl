@@ -125,9 +125,7 @@ void filter_pass_2(uint2 gid : SV_GroupID, uint2 gtid : SV_GroupThreadID, uint2 
     bool bWriteOutput = false;
     float2 const results = FFX_DNSR_Shadows_FilterSoftShadowsPass(gid, gtid, did, bWriteOutput, PASS_INDEX, STEP_SIZE);
 
-    // Recover some of the contrast lost during denoising
-    const float shadow_remap = max(1.2f - results.y, 1.0f);
-    const float mean = pow(abs(results.x), shadow_remap);
+    const float mean = results.x;
 
     if (bWriteOutput)
     {
