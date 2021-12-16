@@ -104,16 +104,19 @@ fn main() -> anyhow::Result<()> {
     {
         use simplelog::*;
 
-        CombinedLogger::init(vec![TermLogger::new(
-            LevelFilter::Info,
-            Config::default(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        ), WriteLogger::new(
-            LevelFilter::Trace,
-            Config::default(),
-            std::fs::File::create("run.log")?,
-        )])?;
+        CombinedLogger::init(vec![
+            TermLogger::new(
+                LevelFilter::Info,
+                Config::default(),
+                TerminalMode::Mixed,
+                ColorChoice::Auto,
+            ),
+            WriteLogger::new(
+                LevelFilter::Trace,
+                Config::default(),
+                std::fs::File::create("run.log")?,
+            ),
+        ])?;
     }
 
     let event_loop = winit::event_loop::EventLoop::new();
@@ -670,12 +673,13 @@ fn main() -> anyhow::Result<()> {
             descriptor_sets.tile_classification_b,
         ),
         trilinear_clamp_sampler: clamp_sampler,
-        moments: TileClassificationDescriptors::create_moments_images(
-            extent, &mut init_resources
-        )?,
+        moments: TileClassificationDescriptors::create_moments_images(extent, &mut init_resources)?,
         tile_metadata: create_tile_buffer(extent.width, extent.height, &mut init_resources)?,
         history: TileClassificationDescriptors::create_history_image(extent, &mut init_resources)?,
-        reprojection_results: TileClassificationDescriptors::create_reprojection_results_image(extent, &mut init_resources)?,
+        reprojection_results: TileClassificationDescriptors::create_reprojection_results_image(
+            extent,
+            &mut init_resources,
+        )?,
     };
 
     tile_classification_descriptors.update(
@@ -1219,16 +1223,26 @@ fn main() -> anyhow::Result<()> {
                             &mut init_resources,
                         )?;
 
-                        shadow_bitmask_buffer = create_tile_buffer(
-                            extent.width,
-                            extent.height,
-                            &mut init_resources,
-                        )?;
+                        shadow_bitmask_buffer =
+                            create_tile_buffer(extent.width, extent.height, &mut init_resources)?;
 
-                        tile_classification_descriptors.moments = TileClassificationDescriptors::create_moments_images(extent, &mut init_resources)?;
-                        tile_classification_descriptors.tile_metadata = create_tile_buffer(extent.width, extent.height, &mut init_resources)?;
-                        tile_classification_descriptors.history = TileClassificationDescriptors::create_history_image(extent, &mut init_resources)?;
-                        tile_classification_descriptors.reprojection_results = TileClassificationDescriptors::create_reprojection_results_image(extent, &mut init_resources)?;
+                        tile_classification_descriptors.moments =
+                            TileClassificationDescriptors::create_moments_images(
+                                extent,
+                                &mut init_resources,
+                            )?;
+                        tile_classification_descriptors.tile_metadata =
+                            create_tile_buffer(extent.width, extent.height, &mut init_resources)?;
+                        tile_classification_descriptors.history =
+                            TileClassificationDescriptors::create_history_image(
+                                extent,
+                                &mut init_resources,
+                            )?;
+                        tile_classification_descriptors.reprojection_results =
+                            TileClassificationDescriptors::create_reprojection_results_image(
+                                extent,
+                                &mut init_resources,
+                            )?;
 
                         opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
 
@@ -1426,15 +1440,17 @@ fn main() -> anyhow::Result<()> {
                         eye: camera.final_transform.position.into(),
                         first_frame: (uniforms.frame_index == 0) as i32,
                         screen_dimensions: UVec2::new(extent.width, extent.height).as_ivec2(),
-                        inverse_screen_dimensions: 1.0 / UVec2::new(extent.width, extent.height).as_vec2(),
+                        inverse_screen_dimensions: 1.0
+                            / UVec2::new(extent.width, extent.height).as_vec2(),
                         projection_inverse: perspective_matrix.as_dmat4().inverse().as_mat4(),
                         view_projection_inverse: uniforms.proj_view_inverse,
                         reprojection_matrix: {
-                            perspective_matrix.as_dmat4() * (previous_view.as_dmat4() * uniforms.proj_view_inverse.as_dmat4())
-                        }.as_mat4(),
-                        depth_similarity_sigma: 1.0
+                            perspective_matrix.as_dmat4()
+                                * (previous_view.as_dmat4() * uniforms.proj_view_inverse.as_dmat4())
+                        }
+                        .as_mat4(),
+                        depth_similarity_sigma: 1.0,
                     };
-
 
                     if opt.spotlights {
                         spotlight_angle += 0.01;
@@ -1495,9 +1511,12 @@ fn main() -> anyhow::Result<()> {
                     // write to buffers here to avoid race conditions
                     {
                         uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
-                        tile_classification_descriptors.tile_classification_data_buffer.write_mapped(unsafe {
-                            bytes_of(&tile_classification_descriptors.data)
-                        }, 0)?;
+                        tile_classification_descriptors
+                            .tile_classification_data_buffer
+                            .write_mapped(
+                                unsafe { bytes_of(&tile_classification_descriptors.data) },
+                                0,
+                            )?;
 
                         acceleration_structure_debugging_uniforms_buffer.write_mapped(
                             unsafe { bytes_of(&acceleration_structure_debugging_uniforms) },
@@ -2316,7 +2335,11 @@ struct TileClassificationDescriptors {
 }
 
 impl TileClassificationDescriptors {
-    fn create_moments_image(name: &str, extent: vk::Extent2D, init_resources: &mut ash_abstractions::InitResources) -> anyhow::Result<ash_abstractions::Image> {
+    fn create_moments_image(
+        name: &str,
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ash_abstractions::Image> {
         ash_abstractions::Image::new(
             &ash_abstractions::ImageDescriptor {
                 width: extent.width,
@@ -2332,7 +2355,10 @@ impl TileClassificationDescriptors {
         )
     }
 
-    fn create_history_image(extent: vk::Extent2D, init_resources: &mut ash_abstractions::InitResources) -> anyhow::Result<ash_abstractions::Image> {
+    fn create_history_image(
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ash_abstractions::Image> {
         ash_abstractions::Image::new(
             &ash_abstractions::ImageDescriptor {
                 width: extent.width,
@@ -2341,14 +2367,19 @@ impl TileClassificationDescriptors {
                 mip_levels: 1,
                 format: vk::Format::R16G16_SFLOAT,
                 usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer],
+                next_accesses: &[
+                    vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                ],
                 next_layout: vk_sync::ImageLayout::Optimal,
             },
             init_resources,
         )
     }
 
-    fn create_reprojection_results_image(extent: vk::Extent2D, init_resources: &mut ash_abstractions::InitResources) -> anyhow::Result<ash_abstractions::Image> {
+    fn create_reprojection_results_image(
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ash_abstractions::Image> {
         ash_abstractions::Image::new(
             &ash_abstractions::ImageDescriptor {
                 width: extent.width,
@@ -2364,7 +2395,10 @@ impl TileClassificationDescriptors {
         )
     }
 
-    fn create_moments_images(extent: vk::Extent2D, init_resources: &mut ash_abstractions::InitResources) -> anyhow::Result<PingPong<ash_abstractions::Image>> {
+    fn create_moments_images(
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<PingPong<ash_abstractions::Image>> {
         Ok(PingPong::new(
             Self::create_moments_image("moments image a", extent, init_resources)?,
             Self::create_moments_image("moments image b", extent, init_resources)?,
@@ -2434,12 +2468,12 @@ impl TileClassificationDescriptors {
                             .image_view(normals_velocity_image.view)
                             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                     *vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_set)
-                    .dst_binding(3)
-                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                    .image_info(&[*vk::DescriptorImageInfo::builder()
-                        .image_view(self.history.view)
-                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                        .dst_set(descriptor_set)
+                        .dst_binding(3)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(self.history.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
                     *vk::WriteDescriptorSet::builder()
                         .dst_set(descriptor_set)
                         .dst_binding(4)
@@ -2457,7 +2491,7 @@ impl TileClassificationDescriptors {
                         .dst_binding(6)
                         .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                         .buffer_info(&buffer_info(&self.tile_metadata)),
-                        *vk::WriteDescriptorSet::builder()
+                    *vk::WriteDescriptorSet::builder()
                         .dst_set(descriptor_set)
                         .dst_binding(7)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
@@ -2472,25 +2506,25 @@ impl TileClassificationDescriptors {
                             .image_view(previous_moments.view)
                             .image_layout(vk::ImageLayout::GENERAL)]),
                     *vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_set)
-                    .dst_binding(9)
-                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                    .image_info(&[*vk::DescriptorImageInfo::builder()
-                        .image_view(current_moments.view)
-                        .image_layout(vk::ImageLayout::GENERAL)]),
+                        .dst_set(descriptor_set)
+                        .dst_binding(9)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(current_moments.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
                     *vk::WriteDescriptorSet::builder()
                         .dst_set(descriptor_set)
                         .dst_binding(10)
                         .descriptor_type(vk::DescriptorType::SAMPLER)
                         .image_info(&[*vk::DescriptorImageInfo::builder()
                             .sampler(self.trilinear_clamp_sampler)]),
-                            *vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(11)
-                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                            .image_info(&[*vk::DescriptorImageInfo::builder()
-                                .image_view(self.history.view)
-                                .image_layout(vk::ImageLayout::GENERAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(11)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(self.history.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
                 ],
                 &[],
             )

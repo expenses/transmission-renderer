@@ -41,7 +41,8 @@ fn decode_octahedron_as_normal(octahedron: Vec2) -> Vec3 {
 
 // https://github.com/GPUOpen-Effects/FidelityFX-Denoiser/issues/1#issue-894257263
 fn compute_velocity(clip_position: Vec4, prev_clip_position: Vec4) -> Vec2 {
-    let velocity = (clip_position.xy() / clip_position.w) - (prev_clip_position.xy() / prev_clip_position.w);
+    let velocity =
+        (clip_position.xy() / clip_position.w) - (prev_clip_position.xy() / prev_clip_position.w);
     // AAAAAAAAAAHHHHHHHHHHHH
     Vec2::new(velocity.x, -velocity.y)
 }

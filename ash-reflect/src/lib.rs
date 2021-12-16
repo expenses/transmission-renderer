@@ -36,7 +36,7 @@ impl ShaderReflection {
             descriptor_sets: reflection
                 .get_descriptor_sets()
                 .map_err(|err| anyhow::anyhow!("{}", err))?,
-                push_constant_size: reflection
+            push_constant_size: reflection
                 .get_push_constant_range()
                 .map_err(|err| anyhow::anyhow!("{}", err))?
                 .map(|range| range.size),
@@ -131,23 +131,21 @@ impl DescriptorSetLayout {
 
         for (id, descriptor) in descriptor_set {
             match self.bindings.get(id) {
-                Some(info) => if &info.inner == descriptor {
-                    matching_descriptors += 1;
-                } else {
-                    return None;
+                Some(info) => {
+                    if &info.inner == descriptor {
+                        matching_descriptors += 1;
+                    } else {
+                        return None;
+                    }
                 }
-                None => {},
+                None => {}
             }
         }
 
         Some(matching_descriptors)
     }
 
-    fn merge(
-        &mut self,
-        shader_stage: vk::ShaderStageFlags,
-        descriptor_set: &DescriptorSet,
-    ) {
+    fn merge(&mut self, shader_stage: vk::ShaderStageFlags, descriptor_set: &DescriptorSet) {
         for (id, descriptor) in descriptor_set {
             let entry = self.bindings.entry(*id).or_insert_with(|| DescriptorInfo {
                 shader_stages: shader_stage,
@@ -242,7 +240,7 @@ impl DescriptorSetLayouts {
     }
 
     pub fn merge_from_reflection(&mut self, reflection: &ShaderReflection) {
-        let mut shader_info = ShaderInfo{
+        let mut shader_info = ShaderInfo {
             set_id_to_index: BTreeMap::new(),
             shader_stage: reflection.shader_stage,
             push_constant_size: reflection.push_constant_size,
@@ -254,19 +252,17 @@ impl DescriptorSetLayouts {
                 .iter_mut()
                 .enumerate()
                 .filter_map(|(layout_index, layout)| {
-                    layout.merge_priority(descriptor_set).map(|merge_priority| {
-                        (merge_priority, layout, layout_index)
-                    })
+                    layout
+                        .merge_priority(descriptor_set)
+                        .map(|merge_priority| (merge_priority, layout, layout_index))
                 })
-                .max_by_key(|(merge_priority, ..)| {
-                    *merge_priority
-                });
+                .max_by_key(|(merge_priority, ..)| *merge_priority);
 
             let layout_index = match layout_to_merge {
                 Some((_, layout, layout_index)) => {
                     layout.merge(reflection.shader_stage, descriptor_set);
                     layout_index
-                },
+                }
                 None => {
                     let layout_index = self.layouts.len();
                     self.layouts.push(DescriptorSetLayout::new(
@@ -280,17 +276,24 @@ impl DescriptorSetLayouts {
             shader_info.set_id_to_index.insert(*set_id, layout_index);
         }
 
-        self.mapping
-                .insert(reflection.name.clone(), shader_info);
+        self.mapping.insert(reflection.name.clone(), shader_info);
     }
 
     pub fn merge_from_module(&mut self, shader_module: &ShaderModule) {
         self.merge_from_reflection(&shader_module.reflection)
     }
 
-    pub fn build(self, device: &ash::Device, settings: Settings) -> anyhow::Result<BuiltDescriptorSetLayouts> {
+    pub fn build(
+        self,
+        device: &ash::Device,
+        settings: Settings,
+    ) -> anyhow::Result<BuiltDescriptorSetLayouts> {
         Ok(BuiltDescriptorSetLayouts {
-            built_layouts: self.layouts.iter().map(|layout| layout.build(device, settings)).collect::<anyhow::Result<Vec<_>>>()?,
+            built_layouts: self
+                .layouts
+                .iter()
+                .map(|layout| layout.build(device, settings))
+                .collect::<anyhow::Result<Vec<_>>>()?,
             layouts: self.layouts,
             mapping: self.mapping,
             build_settings: settings,
@@ -320,15 +323,18 @@ pub struct BuiltDescriptorSetLayouts {
 }
 
 impl BuiltDescriptorSetLayouts {
-    pub fn pipeline_layout_for_shaders(&self, shader_names: &[&str]) -> anyhow::Result<OwnedPipelineLayoutCreateInfo> {
+    pub fn pipeline_layout_for_shaders(
+        &self,
+        shader_names: &[&str],
+    ) -> anyhow::Result<OwnedPipelineLayoutCreateInfo> {
         let mut set_layouts = Vec::new();
         let mut push_constant_range = None;
 
         for shader_name in shader_names {
-            let info = self.mapping.get(*shader_name).ok_or_else(|| anyhow::anyhow!(
-                "Could not find shader {}",
-                shader_name
-            ))?;
+            let info = self
+                .mapping
+                .get(*shader_name)
+                .ok_or_else(|| anyhow::anyhow!("Could not find shader {}", shader_name))?;
 
             for (&set_id, &layout_index) in &info.set_id_to_index {
                 while set_layouts.len() <= set_id as usize {
@@ -349,7 +355,7 @@ impl BuiltDescriptorSetLayouts {
                     stage_flags: range.stage_flags | info.shader_stage,
                     size: range.size.max(size),
                     offset: 0,
-                })
+                }),
             };
         }
 
@@ -361,7 +367,7 @@ impl BuiltDescriptorSetLayouts {
 
         Ok(OwnedPipelineLayoutCreateInfo {
             set_layouts,
-            push_constant_ranges
+            push_constant_ranges,
         })
     }
 
@@ -376,17 +382,13 @@ impl BuiltDescriptorSetLayouts {
                     inner: self.built_layouts[*index],
                     index: *index,
                 }),
-                None => {
-                    Err(anyhow::anyhow!(
-                        "Could not find set id {} for shader {}",
-                        set_id, shader_name
-                    ))
-                }
-            }
-            None => Err(anyhow::anyhow!(
-                "Could not find shader {}",
-                shader_name
-            )),
+                None => Err(anyhow::anyhow!(
+                    "Could not find set id {} for shader {}",
+                    set_id,
+                    shader_name
+                )),
+            },
+            None => Err(anyhow::anyhow!("Could not find shader {}", shader_name)),
         }
     }
 

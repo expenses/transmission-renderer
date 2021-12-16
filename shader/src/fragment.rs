@@ -235,7 +235,9 @@ pub fn opaque(
         output = unsafe {
             let sample: Vec2 = reprojection_results.read(frag_coord.xy().as_uvec2());
             sample
-        }.extend(0.0).extend(1.0);
+        }
+        .extend(0.0)
+        .extend(1.0);
 
         /*
         output = unsafe {

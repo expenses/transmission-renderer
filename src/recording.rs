@@ -550,7 +550,10 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 vk::PipelineBindPoint::COMPUTE,
                 pipelines.filter_pass_layout,
                 0,
-                &[tile_classification_descriptor_set, descriptor_sets.sun_shadow_buffer],
+                &[
+                    tile_classification_descriptor_set,
+                    descriptor_sets.sun_shadow_buffer,
+                ],
                 &[],
             );
 
@@ -562,20 +565,16 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                     next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
                 }),
                 &[],
-                &[
-                    vk_sync::ImageBarrier {
-                        previous_accesses: &[
-                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
-                        ],
-                        next_accesses: &[
-                            vk_sync::AccessType::ComputeShaderWrite,
-                        ],
-                        next_layout: vk_sync::ImageLayout::Optimal,
-                        image: history_buffer.image,
-                        range: base_subresource_range,
-                        ..Default::default()
-                    },
-                ],
+                &[vk_sync::ImageBarrier {
+                    previous_accesses: &[
+                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    image: history_buffer.image,
+                    range: base_subresource_range,
+                    ..Default::default()
+                }],
             );
 
             device.cmd_bind_pipeline(
@@ -685,9 +684,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                         ..Default::default()
                     },
                     vk_sync::ImageBarrier {
-                        previous_accesses: &[
-                            vk_sync::AccessType::ComputeShaderWrite,
-                        ],
+                        previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
                         next_accesses: &[
                             vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
                         ],
@@ -1022,7 +1019,7 @@ unsafe fn record_draw_pass(
             descriptor_sets.instance_buffer,
             descriptor_sets.lights,
             descriptor_sets.sun_shadow_buffer,
-            tile_classification_descriptor_set
+            tile_classification_descriptor_set,
         ],
         &[],
     );

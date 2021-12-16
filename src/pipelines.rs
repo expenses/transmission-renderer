@@ -102,18 +102,12 @@ impl Pipelines {
                     device,
                     &read_shader(ray_tracing, "tile_classification")?,
                 )?,
-                filter_pass_0: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "filter_pass_0")?,
-                )?,
-                filter_pass_1: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "filter_pass_1")?,
-                )?,
-                filter_pass_2: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "filter_pass_2")?,
-                )?,
+                filter_pass_0: layouts
+                    .load_and_merge_module(device, &read_shader(ray_tracing, "filter_pass_0")?)?,
+                filter_pass_1: layouts
+                    .load_and_merge_module(device, &read_shader(ray_tracing, "filter_pass_1")?)?,
+                filter_pass_2: layouts
+                    .load_and_merge_module(device, &read_shader(ray_tracing, "filter_pass_2")?)?,
             })
         } else {
             layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
@@ -219,30 +213,55 @@ impl Pipelines {
         let layouts = layouts.build(device, settings)?;
 
         let draw_pipeline_layout = unsafe {
-            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["fragment::opaque", "vertex::instanced"])?.as_ref(), None)?};
+            device.create_pipeline_layout(
+                &layouts
+                    .pipeline_layout_for_shaders(&["fragment::opaque", "vertex::instanced"])?
+                    .as_ref(),
+                None,
+            )?
+        };
 
         let tile_classification_layout = unsafe {
-            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["tile_classification"])?.as_ref(), None)?
+            device.create_pipeline_layout(
+                &layouts
+                    .pipeline_layout_for_shaders(&["tile_classification"])?
+                    .as_ref(),
+                None,
+            )?
         };
 
         let filter_pass_layout = unsafe {
-            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["filter_pass_0", "filter_pass_2"])?.as_ref(), None)?
+            device.create_pipeline_layout(
+                &layouts
+                    .pipeline_layout_for_shaders(&["filter_pass_0", "filter_pass_2"])?
+                    .as_ref(),
+                None,
+            )?
         };
 
         let reconstruct_shadow_buffer_layout = unsafe {
-            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["reconstruct_shadow_buffer"])?.as_ref(), None)?
+            device.create_pipeline_layout(
+                &layouts
+                    .pipeline_layout_for_shaders(&["reconstruct_shadow_buffer"])?
+                    .as_ref(),
+                None,
+            )?
         };
 
         let lights_pipeline_layout = unsafe {
             device.create_pipeline_layout(
-                &layouts.pipeline_layout_for_shaders(&["assign_lights_to_clusters"])?.as_ref(),
+                &layouts
+                    .pipeline_layout_for_shaders(&["assign_lights_to_clusters"])?
+                    .as_ref(),
                 None,
             )
         }?;
 
         let ray_trace_sun_shadow_layout = unsafe {
             device.create_pipeline_layout(
-                &layouts.pipeline_layout_for_shaders(&["ray_trace_sun_shadow"])?.as_ref(),
+                &layouts
+                    .pipeline_layout_for_shaders(&["ray_trace_sun_shadow"])?
+                    .as_ref(),
                 None,
             )
         }?;
