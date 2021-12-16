@@ -212,25 +212,43 @@ impl Pipelines {
         let defer_vs_stage =
             layouts.load_and_merge_module(device, &read_shader(normal, "deferred_vs")?)?;
 
-        let descriptor_set_layouts =
-            DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
+        let settings = ash_reflect::Settings {
+            max_unbounded_descriptors: crate::MAX_IMAGES,
+            enable_partially_bound_unbounded_descriptors: true,
+        };
+        let layouts = layouts.build(device, settings)?;
 
         let draw_pipeline_layout = unsafe {
+            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["fragment::opaque", "vertex::instanced"])?.as_ref(), None)?};
+
+        let tile_classification_layout = unsafe {
+            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["tile_classification"])?.as_ref(), None)?
+        };
+
+        let filter_pass_layout = unsafe {
+            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["filter_pass_0", "filter_pass_2"])?.as_ref(), None)?
+        };
+
+        let reconstruct_shadow_buffer_layout = unsafe {
+            device.create_pipeline_layout(&layouts.pipeline_layout_for_shaders(&["reconstruct_shadow_buffer"])?.as_ref(), None)?
+        };
+
+        let lights_pipeline_layout = unsafe {
             device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[
-                        *descriptor_set_layouts.main,
-                        *descriptor_set_layouts.instance_buffer,
-                        *descriptor_set_layouts.lights,
-                        *descriptor_set_layouts.sun_shadow_buffer,
-                        *descriptor_set_layouts.tile_classification
-                    ])
-                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
-                        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
-                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
+                &layouts.pipeline_layout_for_shaders(&["assign_lights_to_clusters"])?.as_ref(),
                 None,
             )
         }?;
+
+        let ray_trace_sun_shadow_layout = unsafe {
+            device.create_pipeline_layout(
+                &layouts.pipeline_layout_for_shaders(&["ray_trace_sun_shadow"])?.as_ref(),
+                None,
+            )
+        }?;
+
+        let descriptor_set_layouts =
+            DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
 
         let depth_pre_pass_pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -308,21 +326,6 @@ impl Pipelines {
             )
         }?;
 
-        let ray_trace_sun_shadow_layout = unsafe {
-            device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[
-                        *descriptor_set_layouts.main,
-                        *descriptor_set_layouts.depth_buffer,
-                        *descriptor_set_layouts.packed_shadow_bitmasks,
-                    ])
-                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
-                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
-                None,
-            )
-        }?;
-
         let write_cluster_data_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
@@ -340,22 +343,6 @@ impl Pipelines {
             )
         }?;
 
-        let lights_pipeline_layout = unsafe {
-            device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[
-                        *descriptor_set_layouts.lights,
-                        *descriptor_set_layouts.cluster_data,
-                    ])
-                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
-                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                        .size(
-                            std::mem::size_of::<shared_structs::AssignLightsPushConstants>() as u32,
-                        )]),
-                None,
-            )
-        }?;
-
         let cluster_debugging_pipeline_layout = unsafe {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
@@ -363,38 +350,6 @@ impl Pipelines {
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX)
                         .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
-                None,
-            )
-        }?;
-
-        let reconstruct_shadow_buffer_layout = unsafe {
-            device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[
-                        *descriptor_set_layouts.sun_shadow_buffer,
-                        *descriptor_set_layouts.packed_shadow_bitmasks,
-                    ])
-                    .push_constant_ranges(&[*vk::PushConstantRange::builder()
-                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                        .size(std::mem::size_of::<shared_structs::PushConstants>() as u32)]),
-                None,
-            )
-        }?;
-
-        let tile_classification_layout = unsafe {
-            device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[*descriptor_set_layouts.tile_classification])
-                    .push_constant_ranges(&[]),
-                None,
-            )
-        }?;
-
-        let filter_pass_layout = unsafe {
-            device.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::builder()
-                    .set_layouts(&[*descriptor_set_layouts.tile_classification, *descriptor_set_layouts.sun_shadow_buffer])
-                    .push_constant_ranges(&[]),
                 None,
             )
         }?;

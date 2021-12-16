@@ -485,7 +485,7 @@ fn indices_for_block(id: UVec3, framebuffer_size: UVec2) -> (u32, u32) {
 #[cfg(target_feature = "RayQueryKHR")]
 #[spirv(compute(threads(8, 8)))]
 pub fn reconstruct_shadow_buffer(
-    #[spirv(descriptor_set = 0, binding = 0)] debug_sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 0, binding = 0)] sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
     #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] packed_shadow_bitmasks: &[u32],
     #[spirv(push_constant)] push_constants: &PushConstants,
     #[spirv(global_invocation_id)] id: UVec3,
@@ -499,7 +499,7 @@ pub fn reconstruct_shadow_buffer(
     let factor = asm::subgroup_inverse_ballot(ballot);
 
     unsafe {
-        debug_sun_shadow_buffer.write(
+        sun_shadow_buffer.write(
             id.truncate(),
             Vec4::new(factor as u32 as f32, 0.0, 0.0, 1.0),
         );

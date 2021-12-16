@@ -10,7 +10,7 @@ pub struct ShaderReflection {
     name: String,
     shader_stage: vk::ShaderStageFlags,
     descriptor_sets: BTreeMap<u32, DescriptorSet>,
-    push_constant_range: Option<rspirv_reflect::PushConstantInfo>,
+    push_constant_size: Option<u32>,
 }
 
 impl ShaderReflection {
@@ -36,9 +36,10 @@ impl ShaderReflection {
             descriptor_sets: reflection
                 .get_descriptor_sets()
                 .map_err(|err| anyhow::anyhow!("{}", err))?,
-            push_constant_range: reflection
+                push_constant_size: reflection
                 .get_push_constant_range()
-                .map_err(|err| anyhow::anyhow!("{}", err))?,
+                .map_err(|err| anyhow::anyhow!("{}", err))?
+                .map(|range| range.size),
             name: name.into(),
         })
     }
@@ -214,9 +215,16 @@ impl DescriptorSetLayout {
     }
 }
 
+#[derive(Debug)]
+struct ShaderInfo {
+    set_id_to_index: BTreeMap<u32, usize>,
+    shader_stage: vk::ShaderStageFlags,
+    push_constant_size: Option<u32>,
+}
+
 #[derive(Debug, Default)]
 pub struct DescriptorSetLayouts {
-    mapping: BTreeMap<(String, u32), usize>,
+    mapping: BTreeMap<String, ShaderInfo>,
     layouts: Vec<DescriptorSetLayout>,
 }
 
@@ -234,6 +242,12 @@ impl DescriptorSetLayouts {
     }
 
     pub fn merge_from_reflection(&mut self, reflection: &ShaderReflection) {
+        let mut shader_info = ShaderInfo{
+            set_id_to_index: BTreeMap::new(),
+            shader_stage: reflection.shader_stage,
+            push_constant_size: reflection.push_constant_size,
+        };
+
         for (set_id, descriptor_set) in &reflection.descriptor_sets {
             let layout_to_merge = self
                 .layouts
@@ -263,13 +277,117 @@ impl DescriptorSetLayouts {
                 }
             };
 
-            self.mapping
-                .insert((reflection.name.clone(), *set_id), layout_index);
+            shader_info.set_id_to_index.insert(*set_id, layout_index);
         }
+
+        self.mapping
+                .insert(reflection.name.clone(), shader_info);
     }
 
     pub fn merge_from_module(&mut self, shader_module: &ShaderModule) {
         self.merge_from_reflection(&shader_module.reflection)
+    }
+
+    pub fn build(self, device: &ash::Device, settings: Settings) -> anyhow::Result<BuiltDescriptorSetLayouts> {
+        Ok(BuiltDescriptorSetLayouts {
+            built_layouts: self.layouts.iter().map(|layout| layout.build(device, settings)).collect::<anyhow::Result<Vec<_>>>()?,
+            layouts: self.layouts,
+            mapping: self.mapping,
+            build_settings: settings,
+        })
+    }
+}
+
+pub struct OwnedPipelineLayoutCreateInfo {
+    set_layouts: Vec<vk::DescriptorSetLayout>,
+    push_constant_ranges: Vec<vk::PushConstantRange>,
+}
+
+impl OwnedPipelineLayoutCreateInfo {
+    pub fn as_ref(&self) -> vk::PipelineLayoutCreateInfoBuilder {
+        vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&self.set_layouts)
+            .push_constant_ranges(&self.push_constant_ranges)
+    }
+}
+
+#[derive(Debug)]
+pub struct BuiltDescriptorSetLayouts {
+    mapping: BTreeMap<String, ShaderInfo>,
+    layouts: Vec<DescriptorSetLayout>,
+    built_layouts: Vec<vk::DescriptorSetLayout>,
+    build_settings: Settings,
+}
+
+impl BuiltDescriptorSetLayouts {
+    pub fn pipeline_layout_for_shaders(&self, shader_names: &[&str]) -> anyhow::Result<OwnedPipelineLayoutCreateInfo> {
+        let mut set_layouts = Vec::new();
+        let mut push_constant_range = None;
+
+        for shader_name in shader_names {
+            let info = self.mapping.get(*shader_name).ok_or_else(|| anyhow::anyhow!(
+                "Could not find shader {}",
+                shader_name
+            ))?;
+
+            for (&set_id, &layout_index) in &info.set_id_to_index {
+                while set_layouts.len() <= set_id as usize {
+                    set_layouts.push(vk::DescriptorSetLayout::null());
+                }
+                set_layouts[set_id as usize] = self.built_layouts[layout_index];
+            }
+
+            push_constant_range = match (info.push_constant_size, push_constant_range) {
+                (None, None) => None,
+                (Some(size), None) => Some(vk::PushConstantRange {
+                    stage_flags: info.shader_stage,
+                    size,
+                    offset: 0,
+                }),
+                (None, Some(range)) => Some(range),
+                (Some(size), Some(range)) => Some(vk::PushConstantRange {
+                    stage_flags: range.stage_flags | info.shader_stage,
+                    size: range.size.max(size),
+                    offset: 0,
+                })
+            };
+        }
+
+        let mut push_constant_ranges = Vec::new();
+
+        if let Some(push_constant_range) = push_constant_range {
+            push_constant_ranges.push(push_constant_range);
+        }
+
+        Ok(OwnedPipelineLayoutCreateInfo {
+            set_layouts,
+            push_constant_ranges
+        })
+    }
+
+    pub fn layout_for_shader(
+        &self,
+        shader_name: &str,
+        set_id: u32,
+    ) -> anyhow::Result<FetchedDescriptorSetLayout> {
+        match self.mapping.get(shader_name) {
+            Some(shader_info) => match shader_info.set_id_to_index.get(&set_id) {
+                Some(index) => Ok(FetchedDescriptorSetLayout {
+                    inner: self.built_layouts[*index],
+                    index: *index,
+                }),
+                None => {
+                    Err(anyhow::anyhow!(
+                        "Could not find set id {} for shader {}",
+                        set_id, shader_name
+                    ))
+                }
+            }
+            None => Err(anyhow::anyhow!(
+                "Could not find shader {}",
+                shader_name
+            )),
+        }
     }
 
     pub fn get_pool_sizes(&self, fetched_layouts: &[FetchedDescriptorSetLayout]) -> PoolSizes {
@@ -277,41 +395,16 @@ impl DescriptorSetLayouts {
 
         for fetched_layout in fetched_layouts {
             let layout = &self.layouts[fetched_layout.index];
-            layout.add_to_pool(&mut pool_sizes, fetched_layout.settings);
+            layout.add_to_pool(&mut pool_sizes, self.build_settings);
         }
 
         pool_sizes
-    }
-
-    pub fn layout_for_shader(
-        &self,
-        device: &ash::Device,
-        shader_name: &str,
-        set_id: u32,
-        settings: Settings,
-    ) -> anyhow::Result<FetchedDescriptorSetLayout> {
-        match self.mapping.get(&(shader_name.into(), set_id)) {
-            Some(index) => {
-                let layout = &self.layouts[*index];
-                Ok(FetchedDescriptorSetLayout {
-                    inner: layout.build(device, settings)?,
-                    index: *index,
-                    settings,
-                })
-            }
-            None => Err(anyhow::anyhow!(
-                "Could not find descriptor set {} for shader {}",
-                set_id,
-                shader_name
-            )),
-        }
     }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct FetchedDescriptorSetLayout {
     inner: vk::DescriptorSetLayout,
-    settings: Settings,
     index: usize,
 }
 

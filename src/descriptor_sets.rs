@@ -15,24 +15,19 @@ pub struct DescriptorSetLayouts {
     pub sun_shadow_buffer: FetchedDescriptorSetLayout,
     pub packed_shadow_bitmasks: FetchedDescriptorSetLayout,
     pub tile_classification: FetchedDescriptorSetLayout,
-    layouts: ash_reflect::DescriptorSetLayouts,
+    layouts: ash_reflect::BuiltDescriptorSetLayouts,
 }
 
 impl DescriptorSetLayouts {
     pub fn from_reflected_layouts(
         device: &ash::Device,
         debug_utils_loader: &DebugUtilsLoader,
-        layouts: ash_reflect::DescriptorSetLayouts,
+        layouts: ash_reflect::BuiltDescriptorSetLayouts,
     ) -> anyhow::Result<Self> {
-        let settings = ash_reflect::Settings {
-            max_unbounded_descriptors: MAX_IMAGES,
-            enable_partially_bound_unbounded_descriptors: true,
-        };
-
         log::debug!("layouts: {:#?}", &layouts);
 
         let create_and_name = |name, set_id| {
-            let layout = layouts.layout_for_shader(device, name, set_id, settings)?;
+            let layout = layouts.layout_for_shader(name, set_id)?;
 
             ash_abstractions::set_object_name(
                 device,

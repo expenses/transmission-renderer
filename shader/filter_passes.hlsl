@@ -23,7 +23,7 @@
 
 [[vk::binding(11, 0)]] RWTexture2D<float2> rw_history;
 
-[[vk::binding(0, 1)]] RWTexture2D<unorm float4> rwt2d_output;
+[[vk::binding(0, 1)]] RWTexture2D<unorm float4> sun_shadow_buffer;
 
 
 float2 FFX_DNSR_Shadows_GetInvBufferDimensions()
@@ -131,6 +131,6 @@ void filter_pass_2(uint2 gid : SV_GroupID, uint2 gtid : SV_GroupThreadID, uint2 
 
     if (bWriteOutput)
     {
-        rwt2d_output[did].x = mean;
+        sun_shadow_buffer[did].x = mean;
     }
 }

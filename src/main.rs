@@ -1122,6 +1122,9 @@ fn main() -> anyhow::Result<()> {
                             Vec2::new(extent.width as f32, extent.height as f32)
                                 / num_clusters.as_vec2();
 
+                        // Reset frame index
+                        uniforms.frame_index = 0;
+
                         uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
 
                         perspective_matrix =
