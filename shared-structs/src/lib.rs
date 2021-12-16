@@ -356,11 +356,12 @@ pub struct AssignLightsPushConstants {
 #[derive(Default)]
 #[repr(C)]
 pub struct TileClassificationData {
-    pub eye: Vec3A,
+    pub eye: Vec3,
     pub first_frame: i32,
-    pub buffer_dimensions: IVec2,
-    pub inv_buffer_dimensions: Vec2,
+    pub screen_dimensions: IVec2,
+    pub inverse_screen_dimensions: Vec2,
     pub projection_inverse: Mat4,
     pub reprojection_matrix: Mat4,
     pub view_projection_inverse: Mat4,
+    pub depth_similarity_sigma: f32,
 }

@@ -142,6 +142,8 @@ pub fn opaque(
     #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
     #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] cluster_light_indices: &[u32],
     #[spirv(descriptor_set = 3, binding = 0)] debug_sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 4, binding = 7)] reprojection_results: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 4, binding = 9)] current_moments: &Image!(2D, format=rgba8, sampled=false),
     #[spirv(frag_coord)] frag_coord: Vec4,
     hdr_framebuffer: &mut Vec4,
     opaque_sampled_framebuffer: &mut Vec4,
@@ -195,10 +197,14 @@ pub fn opaque(
 
     let num_lights = *index(cluster_light_counts, cluster);
 
+    #[cfg(target_feature = "RayQueryKHR")]
     let sun_shadow_value = unsafe {
         let sample: Vec4 = debug_sun_shadow_buffer.read(frag_coord.xy().as_uvec2());
         sample.x
     };
+
+    #[cfg(not(target_feature = "RayQueryKHR"))]
+    let sun_shadow_value = 1.0;
 
     let result = evaluate_lights(
         material_params,
@@ -225,6 +231,18 @@ pub fn opaque(
         output = (debug_colour_for_id(num_lights) + (debug_colour_for_id(cluster) - 0.5) * 0.025)
             .extend(1.0);
         //output = (debug_colour_for_id(cluster_z)).extend(1.0);
+
+        output = unsafe {
+            let sample: Vec2 = reprojection_results.read(frag_coord.xy().as_uvec2());
+            sample
+        }.extend(0.0).extend(1.0);
+
+        /*
+        output = unsafe {
+            let sample: Vec3 = current_moments.read(frag_coord.xy().as_uvec2());
+            sample
+        }.extend(1.0);
+        */
     }
 
     //output = Vec4::new(sun_shadow_value, sun_shadow_value, sun_shadow_value, 1.0);
@@ -247,4 +265,6 @@ pub fn tonemap(
     *output = LottesTonemapper
         .tonemap(sample.truncate(), *params)
         .extend(1.0);
+
+    //*output = sample;
 }

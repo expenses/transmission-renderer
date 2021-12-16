@@ -449,7 +449,7 @@ pub fn ray_trace_sun_shadow(
         shadow_ray,
         &acceleration_structure,
         position,
-        blue_noise_sampler.sample_directional_light(0.05, uniforms.sun_dir.into()),
+        blue_noise_sampler.sample_directional_light(0.1, uniforms.sun_dir.into()),
         10_000.0,
     );
 

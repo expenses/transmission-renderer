@@ -29,7 +29,7 @@ impl DescriptorSetLayouts {
             enable_partially_bound_unbounded_descriptors: true,
         };
 
-        dbg!(&layouts);
+        log::debug!("layouts: {:#?}", &layouts);
 
         let create_and_name = |name, set_id| {
             let layout = layouts.layout_for_shader(device, name, set_id, settings)?;

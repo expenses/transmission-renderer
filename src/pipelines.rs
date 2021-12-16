@@ -17,6 +17,9 @@ pub(crate) struct RayTracingPipelines {
     pub ray_trace_sun_shadow: vk::Pipeline,
     pub reconstruct_shadow_buffer: vk::Pipeline,
     pub tile_classification: vk::Pipeline,
+    pub filter_pass_0: vk::Pipeline,
+    pub filter_pass_1: vk::Pipeline,
+    pub filter_pass_2: vk::Pipeline,
 }
 
 pub(crate) struct Pipelines {
@@ -47,6 +50,7 @@ pub(crate) struct Pipelines {
     pub ray_trace_sun_shadow_layout: vk::PipelineLayout,
     pub reconstruct_shadow_buffer_layout: vk::PipelineLayout,
     pub tile_classification_layout: vk::PipelineLayout,
+    pub filter_pass_layout: vk::PipelineLayout,
 }
 
 impl Pipelines {
@@ -69,6 +73,80 @@ impl Pipelines {
         };
 
         let mut layouts = ash_reflect::DescriptorSetLayouts::default();
+
+        struct RayTracingStages {
+            acceleration_structure_debugging: ash_reflect::ShaderModule,
+            ray_trace_sun_shadow: ash_reflect::ShaderModule,
+            reconstruct_shadow_buffer: ash_reflect::ShaderModule,
+            tile_classification: ash_reflect::ShaderModule,
+            filter_pass_0: ash_reflect::ShaderModule,
+            filter_pass_1: ash_reflect::ShaderModule,
+            filter_pass_2: ash_reflect::ShaderModule,
+        }
+
+        let ray_tracing_stages = if enable_ray_tracing {
+            Some(RayTracingStages {
+                acceleration_structure_debugging: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
+                )?,
+                ray_trace_sun_shadow: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "ray_trace_sun_shadow")?,
+                )?,
+                reconstruct_shadow_buffer: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "reconstruct_shadow_buffer")?,
+                )?,
+                tile_classification: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "tile_classification")?,
+                )?,
+                filter_pass_0: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "filter_pass_0")?,
+                )?,
+                filter_pass_1: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "filter_pass_1")?,
+                )?,
+                filter_pass_2: layouts.load_and_merge_module(
+                    device,
+                    &read_shader(ray_tracing, "filter_pass_2")?,
+                )?,
+            })
+        } else {
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "debugging_acceleration_structure_debugging",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "ray_trace_sun_shadow",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "reconstruct_shadow_buffer",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "tile_classification",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "filter_pass_0",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "filter_pass_1",
+            )?)?);
+            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
+                ray_tracing,
+                "filter_pass_2",
+            )?)?);
+
+            None
+        };
 
         let fragment_stage = layouts
             .load_and_merge_module(device, &read_shader(maybe_ray_tracing, "fragment_opaque")?)?;
@@ -134,49 +212,6 @@ impl Pipelines {
         let defer_vs_stage =
             layouts.load_and_merge_module(device, &read_shader(normal, "deferred_vs")?)?;
 
-        struct RayTracingStages {
-            acceleration_structure_debugging: ash_reflect::ShaderModule,
-            ray_trace_sun_shadow: ash_reflect::ShaderModule,
-            reconstruct_shadow_buffer: ash_reflect::ShaderModule,
-            tile_classification: ash_reflect::ShaderModule,
-        }
-
-        let ray_tracing_stages = if enable_ray_tracing {
-            Some(RayTracingStages {
-                acceleration_structure_debugging: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "debugging_acceleration_structure_debugging")?,
-                )?,
-                ray_trace_sun_shadow: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "ray_trace_sun_shadow")?,
-                )?,
-                reconstruct_shadow_buffer: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "reconstruct_shadow_buffer")?,
-                )?,
-                tile_classification: layouts.load_and_merge_module(
-                    device,
-                    &read_shader(ray_tracing, "tile_classification")?,
-                )?,
-            })
-        } else {
-            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
-                ray_tracing,
-                "debugging_acceleration_structure_debugging",
-            )?)?);
-            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
-                ray_tracing,
-                "ray_trace_sun_shadow",
-            )?)?);
-            layouts.merge_from_reflection(&ash_reflect::ShaderReflection::new(&read_shader(
-                ray_tracing,
-                "reconstruct_shadow_buffer",
-            )?)?);
-
-            None
-        };
-
         let descriptor_set_layouts =
             DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
 
@@ -188,6 +223,7 @@ impl Pipelines {
                         *descriptor_set_layouts.instance_buffer,
                         *descriptor_set_layouts.lights,
                         *descriptor_set_layouts.sun_shadow_buffer,
+                        *descriptor_set_layouts.tile_classification
                     ])
                     .push_constant_ranges(&[*vk::PushConstantRange::builder()
                         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
@@ -349,6 +385,15 @@ impl Pipelines {
             device.create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::builder()
                     .set_layouts(&[*descriptor_set_layouts.tile_classification])
+                    .push_constant_ranges(&[]),
+                None,
+            )
+        }?;
+
+        let filter_pass_layout = unsafe {
+            device.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .set_layouts(&[*descriptor_set_layouts.tile_classification, *descriptor_set_layouts.sun_shadow_buffer])
                     .push_constant_ranges(&[]),
                 None,
             )
@@ -695,6 +740,24 @@ impl Pipelines {
                     .stage(*stages.tile_classification.as_stage_create_info())
                     .layout(tile_classification_layout),
             );
+
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(*stages.filter_pass_0.as_stage_create_info())
+                    .layout(filter_pass_layout),
+            );
+
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(*stages.filter_pass_1.as_stage_create_info())
+                    .layout(filter_pass_layout),
+            );
+
+            compute_pipeline_stages.push(
+                *vk::ComputePipelineCreateInfo::builder()
+                    .stage(*stages.filter_pass_2.as_stage_create_info())
+                    .layout(filter_pass_layout),
+            );
         }
 
         let compute_pipelines = unsafe {
@@ -724,6 +787,9 @@ impl Pipelines {
                         ray_trace_sun_shadow: compute_pipelines[5],
                         reconstruct_shadow_buffer: compute_pipelines[6],
                         tile_classification: compute_pipelines[7],
+                        filter_pass_0: compute_pipelines[8],
+                        filter_pass_1: compute_pipelines[9],
+                        filter_pass_2: compute_pipelines[10],
                     })
                 } else {
                     None
@@ -740,6 +806,7 @@ impl Pipelines {
                 ray_trace_sun_shadow_layout,
                 reconstruct_shadow_buffer_layout,
                 tile_classification_layout,
+                filter_pass_layout,
             },
             descriptor_set_layouts,
         ))

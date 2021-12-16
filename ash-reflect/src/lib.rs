@@ -125,29 +125,35 @@ impl DescriptorSetLayout {
         }
     }
 
+    fn merge_priority(&self, descriptor_set: &DescriptorSet) -> Option<u32> {
+        let mut matching_descriptors = 0;
+
+        for (id, descriptor) in descriptor_set {
+            match self.bindings.get(id) {
+                Some(info) => if &info.inner == descriptor {
+                    matching_descriptors += 1;
+                } else {
+                    return None;
+                }
+                None => {},
+            }
+        }
+
+        Some(matching_descriptors)
+    }
+
     fn merge(
         &mut self,
         shader_stage: vk::ShaderStageFlags,
         descriptor_set: &DescriptorSet,
-    ) -> bool {
-        let is_same = descriptor_set
-            .iter()
-            .all(|(id, descriptor)| match self.bindings.get(id) {
-                Some(info) => &info.inner == descriptor,
-                None => true,
+    ) {
+        for (id, descriptor) in descriptor_set {
+            let entry = self.bindings.entry(*id).or_insert_with(|| DescriptorInfo {
+                shader_stages: shader_stage,
+                inner: descriptor.clone(),
             });
-
-        if is_same {
-            for (id, descriptor) in descriptor_set {
-                let entry = self.bindings.entry(*id).or_insert_with(|| DescriptorInfo {
-                    shader_stages: shader_stage,
-                    inner: descriptor.clone(),
-                });
-                entry.shader_stages |= shader_stage;
-            }
+            entry.shader_stages |= shader_stage;
         }
-
-        is_same
     }
 
     pub fn add_to_pool(&self, pool_sizes: &mut PoolSizes, settings: Settings) {
@@ -229,20 +235,24 @@ impl DescriptorSetLayouts {
 
     pub fn merge_from_reflection(&mut self, reflection: &ShaderReflection) {
         for (set_id, descriptor_set) in &reflection.descriptor_sets {
-            let merged = self
+            let layout_to_merge = self
                 .layouts
                 .iter_mut()
                 .enumerate()
-                .find_map(|(layout_index, layout)| {
-                    if layout.merge(reflection.shader_stage, descriptor_set) {
-                        Some(layout_index)
-                    } else {
-                        None
-                    }
+                .filter_map(|(layout_index, layout)| {
+                    layout.merge_priority(descriptor_set).map(|merge_priority| {
+                        (merge_priority, layout, layout_index)
+                    })
+                })
+                .max_by_key(|(merge_priority, ..)| {
+                    *merge_priority
                 });
 
-            let layout_index = match merged {
-                Some(layout_index) => layout_index,
+            let layout_index = match layout_to_merge {
+                Some((_, layout, layout_index)) => {
+                    layout.merge(reflection.shader_stage, descriptor_set);
+                    layout_index
+                },
                 None => {
                     let layout_index = self.layouts.len();
                     self.layouts.push(DescriptorSetLayout::new(

@@ -18,6 +18,7 @@ pub(crate) struct RecordParams<'a> {
     pub opaque_sampled_hdr_framebuffer: &'a ash_abstractions::Image,
     pub depth_buffers: &'a PingPong<DepthBuffer>,
     pub descriptor_sets: &'a DescriptorSets,
+    pub history_buffer: &'a ash_abstractions::Image,
     pub tile_classification_descriptor_set: vk::DescriptorSet,
     pub dynamic: DynamicRecordParams,
     pub toggle: bool,
@@ -55,6 +56,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         depth_buffers,
         tile_classification_descriptor_set,
         toggle,
+        history_buffer,
         dynamic:
             DynamicRecordParams {
                 num_primitives,
@@ -543,22 +545,91 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                 1,
             );
 
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                rt_pipelines.reconstruct_shadow_buffer,
-            );
-
             device.cmd_bind_descriptor_sets(
                 command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                pipelines.reconstruct_shadow_buffer_layout,
+                pipelines.filter_pass_layout,
                 0,
-                &[
-                    descriptor_sets.sun_shadow_buffer,
-                    descriptor_sets.packed_shadow_bitmasks,
-                ],
+                &[tile_classification_descriptor_set, descriptor_sets.sun_shadow_buffer],
                 &[],
+            );
+
+            vk_sync::cmd::pipeline_barrier(
+                device,
+                command_buffer,
+                Some(vk_sync::GlobalBarrier {
+                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                    next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                }),
+                &[],
+                &[
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_accesses: &[
+                            vk_sync::AccessType::ComputeShaderWrite,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: history_buffer.image,
+                        range: base_subresource_range,
+                        ..Default::default()
+                    },
+                ],
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                rt_pipelines.filter_pass_0,
+            );
+
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(extent.width, 8),
+                dispatch_count(extent.height, 8),
+                1,
+            );
+
+            vk_sync::cmd::pipeline_barrier(
+                device,
+                command_buffer,
+                Some(vk_sync::GlobalBarrier {
+                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                    next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                }),
+                &[],
+                &[],
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                rt_pipelines.filter_pass_1,
+            );
+
+            device.cmd_dispatch(
+                command_buffer,
+                dispatch_count(extent.width, 8),
+                dispatch_count(extent.height, 8),
+                1,
+            );
+
+            vk_sync::cmd::pipeline_barrier(
+                device,
+                command_buffer,
+                Some(vk_sync::GlobalBarrier {
+                    previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                    next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
+                }),
+                &[],
+                &[],
+            );
+
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                rt_pipelines.filter_pass_2,
             );
 
             device.cmd_dispatch(
@@ -613,6 +684,18 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
                         range: base_subresource_range,
                         ..Default::default()
                     },
+                    vk_sync::ImageBarrier {
+                        previous_accesses: &[
+                            vk_sync::AccessType::ComputeShaderWrite,
+                        ],
+                        next_accesses: &[
+                            vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                        ],
+                        next_layout: vk_sync::ImageLayout::Optimal,
+                        image: history_buffer.image,
+                        range: base_subresource_range,
+                        ..Default::default()
+                    },
                 ],
             );
         }
@@ -635,6 +718,7 @@ pub(crate) unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
         pipelines,
         descriptor_sets,
         draw_buffers,
+        tile_classification_descriptor_set,
     );
 
     {
@@ -914,6 +998,7 @@ unsafe fn record_draw_pass(
     pipelines: &Pipelines,
     descriptor_sets: &DescriptorSets,
     draw_buffers: &DrawBuffers,
+    tile_classification_descriptor_set: vk::DescriptorSet,
 ) {
     device.cmd_begin_render_pass(
         command_buffer,
@@ -937,6 +1022,7 @@ unsafe fn record_draw_pass(
             descriptor_sets.instance_buffer,
             descriptor_sets.lights,
             descriptor_sets.sun_shadow_buffer,
+            tile_classification_descriptor_set
         ],
         &[],
     );
