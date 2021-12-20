@@ -94,6 +94,8 @@ struct Opt {
     /// For viewing packed normals / velocity in renderdoc.
     #[structopt(long)]
     debug_g_buffer: bool,
+    #[structopt(long)]
+    no_sponza: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -392,16 +394,18 @@ fn main() -> anyhow::Result<()> {
     let mut model_staging_buffers = ModelStagingBuffers::default();
     let mut max_draw_counts = MaxDrawCounts::default();
 
-    load_gltf(
-        &model_loading::path_for_gltf_model("Sponza"),
-        &mut init_resources,
-        &mut image_manager,
-        &mut buffers_to_cleanup,
-        &mut model_staging_buffers,
-        &mut max_draw_counts,
-        Similarity::IDENTITY,
-        None,
-    )?;
+    if !opt.no_sponza {
+        load_gltf(
+            &model_loading::path_for_gltf_model("Sponza"),
+            &mut init_resources,
+            &mut image_manager,
+            &mut buffers_to_cleanup,
+            &mut model_staging_buffers,
+            &mut max_draw_counts,
+            Similarity::IDENTITY,
+            None,
+        )?;
+    }
 
     load_gltf(
         &if opt.external_model {
@@ -422,6 +426,7 @@ fn main() -> anyhow::Result<()> {
         opt.roughness_override,
     )?;
 
+    dbg!(&image_manager.num_images());
     dbg!(max_draw_counts);
 
     let num_instances = model_staging_buffers.instances.len() as u32;
@@ -1510,16 +1515,13 @@ fn main() -> anyhow::Result<()> {
 
                     // write to buffers here to avoid race conditions
                     {
-                        uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
+                        uniforms_buffer.write_mapped(bytes_of(&uniforms), 0)?;
                         tile_classification_descriptors
                             .tile_classification_data_buffer
-                            .write_mapped(
-                                unsafe { bytes_of(&tile_classification_descriptors.data) },
-                                0,
-                            )?;
+                            .write_mapped(bytes_of(&tile_classification_descriptors.data), 0)?;
 
                         acceleration_structure_debugging_uniforms_buffer.write_mapped(
-                            unsafe { bytes_of(&acceleration_structure_debugging_uniforms) },
+                            bytes_of(&acceleration_structure_debugging_uniforms),
                             0,
                         )?;
 
@@ -1536,14 +1538,12 @@ fn main() -> anyhow::Result<()> {
                                 let instance = instances[instances_offset];
 
                                 acceleration_structure_data.instances.write_mapped(
-                                    unsafe {
-                                        bytes_of(&acceleration_structure_instance(
-                                            instances_offset as u32,
-                                            instance,
-                                            &acceleration_structure_data.bottom_levels,
-                                            &device,
-                                        ))
-                                    },
+                                    bytes_of(&acceleration_structure_instance(
+                                        instances_offset as u32,
+                                        instance,
+                                        &acceleration_structure_data.bottom_levels,
+                                        &device,
+                                    )),
                                     std::mem::size_of::<vk::AccelerationStructureInstanceKHR>()
                                         * instances_offset,
                                 )?;

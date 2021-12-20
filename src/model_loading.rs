@@ -347,6 +347,9 @@ fn load_texture_from_gltf(
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
 ) -> anyhow::Result<ash_abstractions::Image> {
     let format = match (image.format, srgb) {
+        (gltf::image::Format::R8, false) => vk::Format::R8_UNORM,
+        (gltf::image::Format::R8, true) => vk::Format::R8_SRGB,
+        (gltf::image::Format::R8G8, true) => vk::Format::R8G8_SRGB,
         (gltf::image::Format::R8G8B8A8, true) => vk::Format::R8G8B8A8_SRGB,
         (gltf::image::Format::R8G8B8A8, false) => vk::Format::R8G8B8A8_UNORM,
         format => panic!("unsupported format: {:?}", format),
@@ -409,6 +412,10 @@ impl ImageManager {
         self.images.push(image);
 
         index
+    }
+
+    pub fn num_images(&self) -> usize {
+        self.image_infos.len()
     }
 
     pub fn write_descriptor_set(

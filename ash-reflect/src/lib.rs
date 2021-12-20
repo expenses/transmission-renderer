@@ -359,6 +359,12 @@ impl BuiltDescriptorSetLayouts {
             };
         }
 
+        for (i, set_layout) in set_layouts.iter().enumerate() {
+            if *set_layout == vk::DescriptorSetLayout::null() {
+                panic!("Set layout {} is missing", i);
+            }
+        }
+
         let mut push_constant_ranges = Vec::new();
 
         if let Some(push_constant_range) = push_constant_range {

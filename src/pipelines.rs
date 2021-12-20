@@ -210,7 +210,11 @@ impl Pipelines {
             max_unbounded_descriptors: crate::MAX_IMAGES,
             enable_partially_bound_unbounded_descriptors: true,
         };
+
         let layouts = layouts.build(device, settings)?;
+        let descriptor_set_layouts =
+            DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
+        let layouts = &descriptor_set_layouts.layouts;
 
         let draw_pipeline_layout = unsafe {
             device.create_pipeline_layout(
@@ -265,9 +269,6 @@ impl Pipelines {
                 None,
             )
         }?;
-
-        let descriptor_set_layouts =
-            DescriptorSetLayouts::from_reflected_layouts(device, debug_utils_loader, layouts)?;
 
         let depth_pre_pass_pipeline_layout = unsafe {
             device.create_pipeline_layout(

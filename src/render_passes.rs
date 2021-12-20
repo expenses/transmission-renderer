@@ -221,20 +221,6 @@ impl RenderPasses {
             .color_attachments(&defer_attachment_refs)
             .depth_stencil_attachment(&depth_attachment_ref)];
 
-        let defer_subpass_dependency = [*vk::SubpassDependency::builder()
-            .src_subpass(0)
-            .dst_subpass(vk::SUBPASS_EXTERNAL)
-            .src_stage_mask(
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                    | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-            )
-            .src_access_mask(
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-            )
-            .dst_stage_mask(vk::PipelineStageFlags::FRAGMENT_SHADER)
-            .dst_access_mask(vk::AccessFlags::SHADER_READ)];
-
         let defer_render_pass = unsafe {
             device.create_render_pass(
                 &vk::RenderPassCreateInfo::builder()

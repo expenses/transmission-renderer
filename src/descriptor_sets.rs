@@ -1,4 +1,3 @@
-use crate::MAX_IMAGES;
 use ash::extensions::ext::DebugUtils as DebugUtilsLoader;
 use ash::vk;
 use ash_reflect::FetchedDescriptorSetLayout;
@@ -15,7 +14,7 @@ pub struct DescriptorSetLayouts {
     pub sun_shadow_buffer: FetchedDescriptorSetLayout,
     pub packed_shadow_bitmasks: FetchedDescriptorSetLayout,
     pub tile_classification: FetchedDescriptorSetLayout,
-    layouts: ash_reflect::BuiltDescriptorSetLayouts,
+    pub layouts: ash_reflect::BuiltDescriptorSetLayouts,
 }
 
 impl DescriptorSetLayouts {
