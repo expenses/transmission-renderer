@@ -5,6 +5,10 @@ use ash::vk;
 use glam::{Vec2, Vec3};
 use std::path::{Path, PathBuf};
 
+fn rgba_flags() -> vk::ColorComponentFlags {
+    vk::ColorComponentFlags::R | vk::ColorComponentFlags::G | vk::ColorComponentFlags::B | vk::ColorComponentFlags::A
+}
+
 fn read_shader(parent: &Path, name: &str) -> anyhow::Result<Vec<u8>> {
     let mut path = parent.join(name);
     path.set_extension("spv");
@@ -407,10 +411,10 @@ impl Pipelines {
             vertex_bindings: &full_vertex_bindings,
             colour_attachments: &[
                 *vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .color_write_mask(rgba_flags())
                     .blend_enable(false),
                 *vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .color_write_mask(rgba_flags())
                     .blend_enable(false),
             ],
         };
@@ -429,7 +433,7 @@ impl Pipelines {
             vertex_attributes: &full_vertex_attributes,
             vertex_bindings: &full_vertex_bindings,
             colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
+                .color_write_mask(rgba_flags())
                 .blend_enable(false)],
         };
 
@@ -447,7 +451,7 @@ impl Pipelines {
             vertex_attributes: &full_vertex_attributes,
             vertex_bindings: &full_vertex_bindings,
             colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
+                .color_write_mask(rgba_flags())
                 .blend_enable(false)],
         };
 
@@ -511,7 +515,7 @@ impl Pipelines {
             vertex_attributes: &[],
             vertex_bindings: &[],
             colour_attachments: &[*vk::PipelineColorBlendAttachmentState::builder()
-                .color_write_mask(vk::ColorComponentFlags::all())
+                .color_write_mask(rgba_flags())
                 .blend_enable(false)],
         };
 
@@ -530,10 +534,10 @@ impl Pipelines {
             vertex_bindings: &[],
             colour_attachments: &[
                 *vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .color_write_mask(rgba_flags())
                     .blend_enable(false),
                 *vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(vk::ColorComponentFlags::all())
+                    .color_write_mask(rgba_flags())
                     .blend_enable(false),
             ],
         };

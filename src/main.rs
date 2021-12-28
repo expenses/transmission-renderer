@@ -59,7 +59,7 @@ fn perspective_matrix_reversed(width: u32, height: u32) -> Mat4 {
 pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
-pub const MAX_IMAGES: u32 = 192;
+pub const MAX_IMAGES: u32 = 190;
 pub const NUM_CLUSTERS_X: u32 = 24;
 pub const NUM_CLUSTERS_Y: u32 = 16;
 pub const NUM_DEPTH_SLICES: u32 = 16;
@@ -127,7 +127,7 @@ fn main() -> anyhow::Result<()> {
         .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0))
         .build(&event_loop)?;
 
-    let entry = unsafe { ash::Entry::new() }?;
+    let entry = unsafe { ash::Entry::load() }?;
 
     let api_version = vk::API_VERSION_1_2;
 
@@ -161,8 +161,8 @@ fn main() -> anyhow::Result<()> {
     let device_extensions = CStrList::new(extensions);
 
     let mut debug_messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
-        .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
+        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE | vk::DebugUtilsMessageSeverityFlagsEXT::INFO | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR)
+        .message_type(vk::DebugUtilsMessageTypeFlagsEXT::GENERAL | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE)
         .pfn_user_callback(Some(ash_abstractions::vulkan_debug_utils_callback));
 
     let instance = unsafe {
@@ -2144,27 +2144,6 @@ pub fn transpose_matrix_for_acceleration_structure_instance(matrix: Mat4) -> [f3
     ]
 }
 
-// Stolen from ash master.
-#[repr(transparent)]
-#[derive(Debug)]
-pub struct Packed24_8(u32);
-
-impl Packed24_8 {
-    pub fn new(low_24: u32, high_8: u8) -> Self {
-        Self((low_24 & 0x00ff_ffff) | (u32::from(high_8) << 24))
-    }
-
-    /// Extracts the least-significant 24 bits (3 bytes) of this integer
-    pub fn low_24(&self) -> u32 {
-        self.0 & 0xffffff
-    }
-
-    /// Extracts the most significant 8 bits (single byte) of this integer
-    pub fn high_8(&self) -> u8 {
-        (self.0 >> 24) as u8
-    }
-}
-
 fn end_init_resources(
     init_resources: ash_abstractions::InitResources,
     queue: vk::Queue,
@@ -2229,8 +2208,8 @@ fn acceleration_structure_instance(
                 instance.transform.unpack().as_mat4(),
             ),
         },
-        instance_custom_index_and_mask: Packed24_8::new(instance_id, 0xff).0,
-        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
+        instance_custom_index_and_mask: vk::Packed24_8::new(instance_id, 0xff),
+        instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(0, 0),
         acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
             device_handle: bottom_levels[instance.primitive_id as usize]
                 .buffer

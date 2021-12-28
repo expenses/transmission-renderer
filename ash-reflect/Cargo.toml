@@ -3,9 +3,7 @@ name = "ash-reflect"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-anyhow = "1.0.51"
-ash = "0.33.3"
-rspirv-reflect = "0.5.0"
+anyhow = "1.0.52"
+ash = "0.35.0"
+rspirv-reflect = "0.6.0"
