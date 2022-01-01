@@ -96,6 +96,8 @@ struct Opt {
     debug_g_buffer: bool,
     #[structopt(long)]
     no_sponza: bool,
+    #[structopt(long)]
+    variant_index: Option<usize>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -161,8 +163,17 @@ fn main() -> anyhow::Result<()> {
     let device_extensions = CStrList::new(extensions);
 
     let mut debug_messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE | vk::DebugUtilsMessageSeverityFlagsEXT::INFO | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR)
-        .message_type(vk::DebugUtilsMessageTypeFlagsEXT::GENERAL | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE)
+        .message_severity(
+            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        )
+        .message_type(
+            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+        )
         .pfn_user_callback(Some(ash_abstractions::vulkan_debug_utils_callback));
 
     let instance = unsafe {
@@ -404,6 +415,7 @@ fn main() -> anyhow::Result<()> {
             &mut max_draw_counts,
             Similarity::IDENTITY,
             None,
+            None,
         )?;
     }
 
@@ -424,6 +436,7 @@ fn main() -> anyhow::Result<()> {
             scale: opt.scale,
         },
         opt.roughness_override,
+        opt.variant_index,
     )?;
 
     dbg!(&image_manager.num_images());

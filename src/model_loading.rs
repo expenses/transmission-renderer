@@ -19,6 +19,7 @@ pub(crate) fn load_gltf(
     max_draw_counts: &mut MaxDrawCounts,
     base_transform: Similarity,
     roughness_override: Option<f32>,
+    variant_index: Option<usize>,
 ) -> anyhow::Result<()> {
     let name = path.file_name().unwrap().to_str().unwrap();
 
@@ -52,6 +53,30 @@ pub(crate) fn load_gltf(
         }
     }
 
+    if let Some(variant_index) = variant_index {
+        match gltf.variants() {
+            None => log::warn!(
+                "Variant index {} specified but no variants in the model",
+                variant_index
+            ),
+            Some(mut variants) => {
+                let num_variants = variants.len();
+                match variants.nth(variant_index) {
+                    Some(variant) => {
+                        log::info!("Using variant '{}'", variant.name());
+                    }
+                    None => {
+                        log::warn!(
+                            "Variant index {} specified but there are only {} variants",
+                            variant_index,
+                            num_variants
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     let node_tree = NodeTree::new(gltf.nodes());
 
     let loading_meshes_span = tracy_client::span!("Loading meshes");
@@ -63,7 +88,22 @@ pub(crate) fn load_gltf(
         let transform = base_transform * node_tree.transform_of(node.index());
 
         for primitive in mesh.primitives() {
-            let material = primitive.material();
+            let mut material = primitive.material();
+
+            if let Some(variant_index) = variant_index {
+                let mapping = primitive
+                    .mappings()
+                    .find(|mapping| mapping.variants().contains(&(variant_index as u32)));
+
+                match mapping {
+                    Some(mapping) => {
+                        material = mapping.material();
+                    }
+                    None => {
+                        log::warn!("Variant index {} not found in variants", variant_index)
+                    }
+                }
+            }
 
             let draw_buffer_index = match (material.alpha_mode(), material.transmission().is_some())
             {
@@ -181,7 +221,7 @@ pub(crate) fn load_gltf(
                             FormatRequirement::DontCare => {
                                 // try loading a cached encoded srgb texture
                                 if let Some(id) = image_index_to_id.get(&(image_index, true)) {
-                                    println!(
+                                    log::debug!(
                                         "reusing image {} (encoded srgb: don't care)",
                                         image_index
                                     );
@@ -196,9 +236,10 @@ pub(crate) fn load_gltf(
 
                         let id = match image_index_to_id.entry((image_index, is_encoded_srgb)) {
                             std::collections::hash_map::Entry::Occupied(occupied) => {
-                                println!(
+                                log::debug!(
                                     "reusing image {} (encoded srgb: {})",
-                                    image_index, is_encoded_srgb
+                                    image_index,
+                                    is_encoded_srgb
                                 );
                                 *occupied.get()
                             }
