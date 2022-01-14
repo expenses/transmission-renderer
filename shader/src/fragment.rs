@@ -198,7 +198,7 @@ pub fn opaque(
     let num_lights = *index(cluster_light_counts, cluster);
 
     #[cfg(target_feature = "RayQueryKHR")]
-    let sun_shadow_value = unsafe {
+    let sun_shadow_value = {
         let sample: Vec4 = sun_shadow_buffer.read(frag_coord.xy().as_uvec2());
         sample.x
     };
@@ -232,7 +232,7 @@ pub fn opaque(
             .extend(1.0);
         //output = (debug_colour_for_id(cluster_z)).extend(1.0);
 
-        output = unsafe {
+        output = {
             let sample: Vec2 = reprojection_results.read(frag_coord.xy().as_uvec2());
             sample
         }

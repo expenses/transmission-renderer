@@ -1,6 +1,6 @@
 #![cfg_attr(
     target_arch = "spirv",
-    feature(register_attr, asm, asm_const, asm_experimental_arch),
+    feature(register_attr, asm_const, asm_experimental_arch),
     register_attr(spirv),
     no_std
 )]
