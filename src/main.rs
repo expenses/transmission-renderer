@@ -1359,9 +1359,11 @@ fn main() -> anyhow::Result<()> {
                         delta: (delta_x, delta_y),
                     } => {
                         if cursor_grab {
+                            let scale_factor = window.scale_factor() as f32;
+
                             camera
                                 .driver_mut::<dolly::drivers::YawPitch>()
-                                .rotate_yaw_pitch(0.1 * -delta_x as f32, 0.1 * -delta_y as f32);
+                                .rotate_yaw_pitch(-0.1 * delta_x as f32 / scale_factor, -0.1 * delta_y as f32 / scale_factor);
                         }
                     }
                     _ => {}
