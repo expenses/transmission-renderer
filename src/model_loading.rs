@@ -35,21 +35,29 @@ pub(crate) fn load_gltf(
         let _span = tracy_client::span!("Converting images");
 
         for image in &mut images {
-            if image.format == gltf::image::Format::R8G8B8 {
-                let dynamic_image = image::DynamicImage::ImageRgb8(
-                    image::RgbImage::from_raw(
-                        image.width,
-                        image.height,
-                        std::mem::take(&mut image.pixels),
-                    )
-                    .unwrap(),
-                );
-
-                let rgba8 = dynamic_image.to_rgba8();
-
-                image.format = gltf::image::Format::R8G8B8A8;
-                image.pixels = rgba8.into_raw();
-            }
+            match image.format {
+                gltf::image::Format::R8G8B8 => {
+                    image.pixels = image.pixels.chunks(3).map(|pixel| {
+                        [pixel[0], pixel[1], pixel[2], 255]
+                    }).flat_map(|pixel| pixel).collect();
+                    image.format = gltf::image::Format::R8G8B8A8;
+                },
+                gltf::image::Format::R8G8 => {
+                    image.pixels = image.pixels.chunks(2).map(|pixel| {
+                        [pixel[0], pixel[1], 0, 255]
+                    })
+                    .flat_map(|pixel| pixel).collect();
+                    image.format = gltf::image::Format::R8G8B8A8;
+                },
+                gltf::image::Format::R8 => {
+                    image.pixels = image.pixels.iter().map(|red_channel| {
+                        [*red_channel, 0, 0, 255]
+                    })
+                    .flat_map(|pixel| pixel).collect();
+                    image.format = gltf::image::Format::R8G8B8A8;
+                }
+                _ => {},
+            };
         }
     }
 
