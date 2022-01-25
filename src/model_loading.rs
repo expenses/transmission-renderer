@@ -35,17 +35,51 @@ pub(crate) fn load_gltf(
         let _span = tracy_client::span!("Converting images");
 
         for image in &mut images {
-            if image.format == gltf::image::Format::R8G8B8 {
-                let dynamic_image = image::DynamicImage::ImageRgb8(
+            let replacement_image = if image.format == gltf::image::Format::R8G8B8 {
+                Some(image::DynamicImage::ImageRgb8(
                     image::RgbImage::from_raw(
                         image.width,
                         image.height,
                         std::mem::take(&mut image.pixels),
                     )
                     .unwrap(),
-                );
+                ))
+            } else if image.format == gltf::image::Format::R8G8 {
+                let pixels: Vec<u8> = image.pixels.chunks(2).map(|pixel| {
+                    [pixel[0], pixel[1], 0, 255]
+                })
+                .flat_map(|pixel| pixel).collect();
 
-                let rgba8 = dynamic_image.to_rgba8();
+
+
+                Some(image::DynamicImage::ImageRgba8(
+                    image::RgbaImage::from_raw(
+                        image.width,
+                        image.height,
+                        pixels,
+                    )
+                    .unwrap(),
+                ))
+            } else if image.format == gltf::image::Format::R8 {
+                let pixels: Vec<u8> = image.pixels.iter().map(|red_channel| {
+                    [*red_channel, 0, 0, 255]
+                })
+                .flat_map(|pixel| pixel).collect();
+
+                Some(image::DynamicImage::ImageRgba8(
+                    image::RgbaImage::from_raw(
+                        image.width,
+                        image.height,
+                        pixels,
+                    )
+                    .unwrap(),
+                ))
+            } else {
+                None
+            };
+
+            if let Some(replacement_image) = replacement_image {
+                let rgba8 = replacement_image.to_rgba8();
 
                 image.format = gltf::image::Format::R8G8B8A8;
                 image.pixels = rgba8.into_raw();
