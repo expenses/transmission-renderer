@@ -11,7 +11,7 @@ use ash_abstractions::CStrList;
 use std::f32::consts::PI;
 use std::ffi::CStr;
 use structopt::StructOpt;
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
@@ -1049,9 +1049,6 @@ fn main() -> anyhow::Result<()> {
 
     let mut cursor_grab = false;
 
-    let mut screen_center =
-        winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
-
     let mut profiling_ctx =
         query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
 
@@ -1106,10 +1103,6 @@ fn main() -> anyhow::Result<()> {
                                 if is_pressed {
                                     cursor_grab = !cursor_grab;
 
-                                    if cursor_grab {
-                                        window.set_cursor_position(screen_center)?;
-                                    }
-
                                     window.set_cursor_visible(!cursor_grab);
                                     window.set_cursor_grab(cursor_grab)?;
                                 }
@@ -1118,20 +1111,6 @@ fn main() -> anyhow::Result<()> {
                                 toggle = !toggle;
                             }
                             _ => {}
-                        }
-                    }
-                    WindowEvent::CursorMoved { position, .. } => {
-                        if cursor_grab {
-                            let position = position.to_logical::<f64>(window.scale_factor());
-
-                            window.set_cursor_position(screen_center)?;
-
-                            camera
-                                .driver_mut::<dolly::drivers::YawPitch>()
-                                .rotate_yaw_pitch(
-                                    0.1 * (screen_center.x - position.x) as f32,
-                                    0.1 * (screen_center.y - position.y) as f32,
-                                );
                         }
                     }
                     WindowEvent::Resized(new_size) => {
@@ -1151,11 +1130,6 @@ fn main() -> anyhow::Result<()> {
 
                         perspective_matrix =
                             perspective_matrix_reversed(extent.width, extent.height);
-
-                        screen_center = winit::dpi::LogicalPosition::new(
-                            extent.width as f64 / 2.0,
-                            extent.height as f64 / 2.0,
-                        );
 
                         swapchain_info.image_extent = extent;
                         swapchain_info.old_swapchain = swapchain.swapchain;
@@ -1377,6 +1351,18 @@ fn main() -> anyhow::Result<()> {
                             &g_buffer.normals_velocity,
                             &shadow_bitmask_buffer,
                         )
+                    }
+                    _ => {}
+                },
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseMotion {
+                        delta: (delta_x, delta_y),
+                    } => {
+                        if cursor_grab {
+                            camera
+                                .driver_mut::<dolly::drivers::YawPitch>()
+                                .rotate_yaw_pitch(0.1 * -delta_x as f32, 0.1 * -delta_y as f32);
+                        }
                     }
                     _ => {}
                 },
