@@ -4,27 +4,33 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = [".", "glam-pbr", "shader", "shared-structs"]
+members = [".", "glam-pbr", "shader", "shared-structs", "ash-reflect"]
 
 [dependencies]
-anyhow = "1.0.45"
-ash = "0.33.3"
-ash-window = "0.7.0"
+anyhow = "1.0.52"
+ash = "0.35.0"
+ash-window = "0.9.0"
 dolly = "0.1.4"
-gltf = { git = "https://github.com/expenses/gltf", branch = "more-extensions", default-features = false, features = ["utils", "import", "image_jpeg_rayon", "KHR_materials_ior", "KHR_materials_transmission", "KHR_texture_transform", "KHR_materials_volume", "KHR_materials_specular"] }
-image = { version = "*", default-features = false }
-gpu-allocator = "0.10.0"
+image = { version = "0.23.14", default-features = false }
+gpu-allocator = "0.14.0"
 ash-abstractions = { package = "ash-opinionated-abstractions", git = "https://github.com/expenses/ash-opinionated-abstractions" }
-winit = "0.25.0"
-vk-sync = { package = "vk-sync-fork", version = "0.2.2" }
-simplelog = "0.11.0"
+winit = "0.26.0"
+vk-sync = { package = "vk-sync-fork", version = "0.3.0" }
+simplelog = "0.11.1"
 log = "0.4.14"
 shared-structs = { path = "shared-structs" }
-glam = "0.19.0"
+glam = "0.20"
 colstodian = { git = "https://github.com/termhn/colstodian" }
 tracy-client = { git = "https://github.com/expenses/rust_tracy_client", branch = "dodgy-high-level-bindings" }
 c_str_macro = "1.0.3"
 structopt = "0.3.25"
+ash-reflect = { path = "ash-reflect" }
+
+[dependencies.gltf]
+git = "https://github.com/expenses/gltf"
+branch = "more-extensions-variants"
+default-features = false
+features = ["utils", "import", "image_jpeg_rayon", "KHR_materials_ior", "KHR_materials_transmission", "KHR_texture_transform", "KHR_materials_volume", "KHR_materials_specular", "KHR_materials_variants"]
 
 [profile.dev.package."*"]
 opt-level = 3

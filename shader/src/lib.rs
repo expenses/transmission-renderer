@@ -1,13 +1,27 @@
 #![cfg_attr(
     target_arch = "spirv",
-    feature(register_attr, asm, asm_const, asm_experimental_arch),
+    feature(register_attr, asm_const, asm_experimental_arch),
     register_attr(spirv),
     no_std
 )]
 
 mod asm;
+mod debugging;
+mod deferred;
+mod depth_pre_pass;
+mod fragment;
 mod lighting;
+mod noise;
 mod tonemapping;
+mod vertex;
+
+pub use debugging::*;
+pub use deferred::*;
+pub use depth_pre_pass::*;
+pub use fragment::*;
+pub use vertex::*;
+
+use noise::BlueNoiseSampler;
 
 use asm::atomic_i_increment;
 use lighting::{
@@ -16,6 +30,7 @@ use lighting::{
 };
 use tonemapping::{BakedLottesTonemapperParams, LottesTonemapper};
 
+use core::ops::{Add, Mul};
 use glam_pbr::{ibl_volume_refraction, IblVolumeRefractionParams, PerceptualRoughness, View};
 use shared_structs::{
     AccelerationStructureDebuggingUniforms, AssignLightsPushConstants, ClusterAabb,
@@ -25,227 +40,21 @@ use shared_structs::{
 use spirv_std::{
     self as _,
     arch::IndexUnchecked,
-    glam::{const_vec3, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles},
+    glam::{const_vec3, Mat4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles},
     num_traits::Float,
     ray_tracing::AccelerationStructure,
     Image, RuntimeArray, Sampler,
 };
-use core::ops::{Add, Mul};
 
 type Textures = RuntimeArray<Image!(2D, type=f32, sampled)>;
 
-#[spirv(fragment)]
-pub fn fragment_transmission(
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    #[spirv(flat)] material_id: u32,
-    #[spirv(flat)] model_scale: f32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
-    #[spirv(descriptor_set = 0, binding = 4)] clamp_sampler: &Sampler,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
-    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
-    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
-    #[spirv(descriptor_set = 3, binding = 0)] framebuffer: &Image!(2D, type=f32, sampled),
-    #[spirv(frag_coord)] frag_coord: Vec4,
-    output: &mut Vec4,
-) {
-    let material = index(materials, material_id);
-
-    let texture_sampler = TextureSampler {
-        uv,
+fn sample_by_lod_0(textures: &Textures, sampler: Sampler, uv: Vec2, texture_id: u32) -> Vec4 {
+    TextureSampler {
         textures,
-        sampler: *sampler,
-    };
-
-    let mut diffuse = material.diffuse_factor;
-
-    if material.textures.diffuse != -1 {
-        diffuse *= texture_sampler.sample(material.textures.diffuse as u32);
-    }
-
-    let mut transmission_factor = material.transmission_factor;
-
-    if material.textures.transmission != -1 {
-        transmission_factor *= texture_sampler
-            .sample(material.textures.transmission as u32)
-            .x;
-    }
-
-    let view_vector = Vec3::from(push_constants.view_position) - position;
-    let view = View(view_vector.normalize());
-
-    let normal = calculate_normal(normal, &texture_sampler, material, view_vector, uv);
-
-    let material_params = get_material_params(diffuse, material, &texture_sampler);
-
-    let emission = get_emission(material, &texture_sampler);
-
-    let cluster = {
-        let cluster_xy = (frag_coord.xy() / uniforms.cluster_size_in_pixels).as_uvec2();
-
-        let cluster_z = uniforms
-            .light_clustering_coefficients
-            .get_depth_slice(frag_coord.z);
-
-        cluster_z * uniforms.num_clusters.x * uniforms.num_clusters.y
-            + cluster_xy.y * uniforms.num_clusters.x
-            + cluster_xy.x
-    };
-
-    #[cfg(target_feature = "RayQueryKHR")]
-    let acceleration_structure =
-        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
-
-    let (result, mut transmission) = evaluate_lights_transmission(
-        material_params,
-        view,
-        position,
-        normal,
-        uniforms,
-        LightParams {
-            num_lights: *index(cluster_light_counts, cluster),
-            light_indices_offset: cluster * MAX_LIGHTS_PER_CLUSTER,
-            light_indices,
-            lights,
-        },
-        #[cfg(target_feature = "RayQueryKHR")]
-        &acceleration_structure,
-    );
-
-    let mut thickness = material.thickness_factor;
-
-    if material.textures.thickness != -1 {
-        thickness *= texture_sampler.sample(material.textures.thickness as u32).y;
-    }
-
-    let ggx_lut_sampler = |normal_dot_view: f32, perceptual_roughness: PerceptualRoughness| {
-        let uv = Vec2::new(normal_dot_view, perceptual_roughness.0);
-
-        let texture = unsafe { textures.index(uniforms.ggx_lut_texture_index as usize) };
-        let sample: Vec4 = texture.sample(*clamp_sampler, uv);
-
-        sample.xy()
-    };
-
-    let framebuffer_sampler = |uv, lod| {
-        let sample: Vec4 = framebuffer.sample_by_lod(*clamp_sampler, uv, lod);
-        sample.truncate()
-    };
-
-    transmission += ibl_volume_refraction(
-        IblVolumeRefractionParams {
-            proj_view_matrix: push_constants.proj_view,
-            position,
-            material_params,
-            framebuffer_size_x: push_constants.framebuffer_size.x,
-            normal,
-            view,
-            thickness,
-            model_scale,
-            attenuation_distance: material.attenuation_distance,
-            attenuation_colour: material.attenuation_colour.into(),
-        },
-        framebuffer_sampler,
-        ggx_lut_sampler,
-    );
-
-    let real_transmission = transmission_factor * transmission;
-
-    let diffuse = result.diffuse.lerp(real_transmission, transmission_factor);
-
-    *output = (diffuse + result.specular + emission).extend(1.0);
-}
-
-#[spirv(fragment)]
-pub fn fragment(
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    #[spirv(flat)] material_id: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] lights: &[Light],
-    #[spirv(descriptor_set = 2, binding = 1, storage_buffer)] cluster_light_counts: &[u32],
-    #[spirv(descriptor_set = 2, binding = 2, storage_buffer)] light_indices: &[u32],
-    #[spirv(frag_coord)] frag_coord: Vec4,
-    hdr_framebuffer: &mut Vec4,
-    opaque_sampled_framebuffer: &mut Vec4,
-) {
-    let material = index(materials, material_id);
-
-    let texture_sampler = TextureSampler {
+        sampler,
         uv,
-        textures,
-        sampler: *sampler,
-    };
-
-    let mut diffuse = material.diffuse_factor;
-
-    if material.textures.diffuse != -1 {
-        diffuse *= texture_sampler.sample(material.textures.diffuse as u32)
     }
-
-    let view_vector = Vec3::from(push_constants.view_position) - position;
-    let view = View(view_vector.normalize());
-
-    let normal = calculate_normal(normal, &texture_sampler, material, view_vector, uv);
-
-    let material_params = get_material_params(diffuse, material, &texture_sampler);
-
-    let emission = get_emission(material, &texture_sampler);
-
-    let cluster_z = uniforms
-        .light_clustering_coefficients
-        .get_depth_slice(frag_coord.z);
-
-    let cluster = {
-        let cluster_xy = (frag_coord.xy() / uniforms.cluster_size_in_pixels).as_uvec2();
-
-        cluster_z * uniforms.num_clusters.x * uniforms.num_clusters.y
-            + cluster_xy.y * uniforms.num_clusters.x
-            + cluster_xy.x
-    };
-
-    #[cfg(target_feature = "RayQueryKHR")]
-    let acceleration_structure =
-        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
-
-    let num_lights = *index(cluster_light_counts, cluster);
-
-    let result = evaluate_lights(
-        material_params,
-        view,
-        position,
-        normal,
-        uniforms,
-        LightParams {
-            num_lights,
-            light_indices_offset: cluster * MAX_LIGHTS_PER_CLUSTER,
-            light_indices,
-            lights,
-        },
-        #[cfg(target_feature = "RayQueryKHR")]
-        &acceleration_structure,
-    );
-
-    let mut output = (result.diffuse + result.specular + emission).extend(1.0);
-
-    if uniforms.debug_clusters != 0 {
-        output = (debug_colour_for_id(num_lights) + (debug_colour_for_id(cluster) - 0.5) * 0.025)
-            .extend(1.0);
-        //output = (debug_colour_for_id(cluster_z)).extend(1.0);
-    }
-
-    *hdr_framebuffer = output;
-    *opaque_sampled_framebuffer = output;
+    .sample_by_lod_0(texture_id)
 }
 
 struct TextureSampler<'a> {
@@ -264,130 +73,6 @@ impl<'a> TextureSampler<'a> {
         let texture = unsafe { self.textures.index(texture_id as usize) };
         texture.sample_by_lod(self.sampler, self.uv, 0.0)
     }
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(fragment)]
-pub fn depth_pre_pass_alpha_clip(
-    uv: Vec2,
-    #[spirv(flat)] material_id: u32,
-    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
-) {
-    let material = index(materials, material_id);
-
-    let texture_sampler = TextureSampler {
-        uv,
-        textures,
-        sampler: *sampler,
-    };
-
-    let mut diffuse = material.diffuse_factor;
-
-    if material.textures.diffuse != -1 {
-        diffuse *= texture_sampler.sample(material.textures.diffuse as u32)
-    }
-
-    if diffuse.w < material.alpha_clipping_cutoff {
-        spirv_std::arch::kill();
-    }
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(vertex)]
-pub fn depth_pre_pass_vertex_alpha_clip(
-    position: Vec3,
-    uv: Vec2,
-    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
-    #[spirv(instance_index)] instance_index: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(position)] builtin_pos: &mut Vec4,
-    out_uv: &mut Vec2,
-    #[spirv(flat)] out_material_id: &mut u32,
-) {
-    let instance = index(instances, instance_index);
-    let similarity = instance.transform.unpack();
-
-    let position = similarity * position;
-
-    *out_uv = uv;
-    *out_material_id = instance.material_id;
-    *builtin_pos = push_constants.proj_view * position.extend(1.0);
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(vertex)]
-pub fn depth_pre_pass_instanced(
-    position: Vec3,
-    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
-    #[spirv(instance_index)] instance_index: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(position)] builtin_pos: &mut Vec4,
-) {
-    let similarity = index(instances, instance_index).transform.unpack();
-
-    let position = similarity * position;
-
-    *builtin_pos = push_constants.proj_view * position.extend(1.0);
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(vertex)]
-pub fn vertex_instanced(
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
-    #[spirv(instance_index)] instance_index: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    out_position: &mut Vec3,
-    out_normal: &mut Vec3,
-    out_uv: &mut Vec2,
-    #[spirv(flat)] out_material_id: &mut u32,
-    #[spirv(position)] builtin_pos: &mut Vec4,
-) {
-    let instance = index(instances, instance_index);
-    let similarity = instance.transform.unpack();
-
-    let position = similarity * position;
-
-    *out_position = position;
-    *out_normal = similarity.rotation * normal;
-    *out_uv = uv;
-    *out_material_id = instance.material_id;
-
-    *builtin_pos = push_constants.proj_view * position.extend(1.0);
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(vertex)]
-pub fn vertex_instanced_with_scale(
-    position: Vec3,
-    normal: Vec3,
-    uv: Vec2,
-    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] instances: &[Instance],
-    #[spirv(instance_index)] instance_index: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    out_position: &mut Vec3,
-    out_normal: &mut Vec3,
-    out_uv: &mut Vec2,
-    #[spirv(flat)] out_material_id: &mut u32,
-    out_scale: &mut f32,
-    #[spirv(position)] builtin_pos: &mut Vec4,
-) {
-    let instance = index(instances, instance_index);
-    let similarity = instance.transform.unpack();
-
-    let position = similarity * position;
-
-    *out_position = position;
-    *out_normal = similarity.rotation * normal;
-    *out_uv = uv;
-    *out_material_id = instance.material_id;
-    *out_scale = similarity.scale;
-
-    *builtin_pos = push_constants.proj_view * position.extend(1.0);
 }
 
 fn index<T, S: IndexUnchecked<T> + ?Sized>(structure: &S, index: u32) -> &T {
@@ -627,13 +312,14 @@ pub fn assign_lights_to_clusters(
 
     if light.is_a_spotlight() {
         // Todo: idk if using the inversed quat from the camera is working 100% here.
-        let spotlight_direction = push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
+        let spotlight_direction =
+            push_constants.view_rotation * light.spotlight_direction_and_outer_angle.truncate();
 
         let angle = light.spotlight_direction_and_outer_angle.w;
         let range = light.colour_emission_and_falloff_distance_sq.w;
 
         if cluster.cull_spotlight(light_position, spotlight_direction, angle, range) {
-            return
+            return;
         }
     }
 
@@ -667,180 +353,9 @@ fn debug_colour_for_id(id: u32) -> Vec3 {
     *index(&DEBUG_COLOURS, id % DEBUG_COLOURS.len() as u32)
 }
 
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(vertex)]
-pub fn fullscreen_tri(
-    #[spirv(vertex_index)] vert_idx: i32,
-    uv: &mut Vec2,
-    #[spirv(position)] builtin_pos: &mut Vec4,
-) {
-    *uv = Vec2::new(((vert_idx << 1) & 2) as f32, (vert_idx & 2) as f32);
-    let pos = 2.0 * *uv - Vec2::ONE;
-
-    *builtin_pos = Vec4::new(pos.x, pos.y, 0.0, 1.0);
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(fragment)]
-pub fn fragment_tonemap(
-    uv: Vec2,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(descriptor_set = 1, binding = 0)] texture: &Image!(2D, type=f32, sampled),
-    #[spirv(push_constant)] params: &BakedLottesTonemapperParams,
-    output: &mut Vec4,
-) {
-    let sample: Vec4 = texture.sample(*sampler, uv);
-
-    *output = LottesTonemapper
-        .tonemap(sample.truncate(), *params)
-        .extend(1.0);
-}
-
-#[cfg(target_feature = "RayQueryKHR")]
-#[spirv(compute(threads(8, 8)))]
-pub fn acceleration_structure_debugging(
-    #[spirv(global_invocation_id)] id: UVec3,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 2, storage_buffer)] materials: &[MaterialInfo],
-    #[spirv(descriptor_set = 0, binding = 5, storage_buffer)] indices: &[u32],
-    #[spirv(descriptor_set = 0, binding = 6, storage_buffer)] uvs: &[Vec2],
-    #[spirv(descriptor_set = 0, binding = 7, storage_buffer)] primitives: &[PrimitiveInfo],
-    #[spirv(descriptor_set = 1, binding = 0)] output: &Image!(2D, format=rgba16f, sampled=false),
-    #[spirv(descriptor_set = 1, binding = 1, uniform)] uniforms: &AccelerationStructureDebuggingUniforms,
-    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] instances: &[Instance],
-) {
-    let id_xy = id.truncate();
-
-    let pixel_center = id_xy.as_vec2() + 0.5;
-
-    let texture_coordinates = pixel_center / uniforms.size.as_vec2();
-
-    let render_coordinates = texture_coordinates * 2.0 - 1.0;
-
-    // Transform [0, 0, 0] in view-space into world space
-    let origin = (uniforms.view_inverse * Vec4::new(0.0, 0.0, 0.0, 1.0)).truncate();
-    // Transform the render coordinates into project-y space
-    let target =
-        uniforms.proj_inverse * Vec4::new(render_coordinates.x, render_coordinates.y, 1.0, 1.0);
-    let local_direction_vector = target.truncate().normalize();
-    // Rotate the location direction vector into a global direction vector.
-    let direction = (uniforms.view_inverse * local_direction_vector.extend(0.0)).truncate();
-
-    let acceleration_structure =
-        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
-
-    use spirv_std::ray_tracing::{
-        AccelerationStructure, CommittedIntersection, RayFlags, RayQuery,
-    };
-
-    let model_buffers = ModelBuffers {
-        indices, uvs
-    };
-
-    spirv_std::ray_query!(let mut ray);
-
-    unsafe {
-        ray.initialize(
-            &acceleration_structure,
-            RayFlags::NONE,
-            0xff,
-            origin,
-            0.01,
-            direction,
-            1000.0,
-        );
-
-        let mut colour = Vec3::ZERO;
-
-        while ray.proceed() {
-            let instance_id = ray.get_candidate_intersection_instance_custom_index();
-            let instance = index(instances, instance_id);
-            let material = index(materials, instance.material_id);
-            let primitive_info = index(primitives, instance.primitive_id);
-
-            let triangle_index = ray.get_candidate_intersection_primitive_index();
-            let indices = model_buffers.get_indices_for_primitive(triangle_index + primitive_info.first_index / 3);
-            let barycentric_coords = barycentric_coords_from_hits(ray.get_candidate_intersection_barycentrics());
-            let interpolated_uv = model_buffers.interpolate_uv(indices, barycentric_coords);
-
-            let texture_sampler = TextureSampler {
-                uv: interpolated_uv,
-                textures,
-                sampler: *sampler,
-            };
-
-            let mut diffuse = material.diffuse_factor;
-
-            if material.textures.diffuse != -1 {
-                diffuse *= texture_sampler.sample_by_lod_0(material.textures.diffuse as u32)
-            }
-
-            if diffuse.w >= material.alpha_clipping_cutoff {
-                ray.confirm_intersection();
-
-                colour = diffuse.truncate();
-            }
-        }
-
-        /*
-        let colour = match ray.get_committed_intersection_type() {
-            CommittedIntersection::None => Vec3::ZERO,
-            _ => {
-                barycentric_coords_from_hits(ray.get_committed_intersection_barycentrics())
-            }
-        };
-        */
-
-        output.write(id.truncate(), colour);
-    };
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(vertex)]
-pub fn cluster_debugging_vs(
-    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] cluster_data: &[ClusterAabb],
-    #[spirv(vertex_index)] vertex_index: u32,
-    #[spirv(push_constant)] push_constants: &PushConstants,
-    out_colour: &mut Vec3,
-    #[spirv(position)] builtin_pos: &mut Vec4,
-) {
-    let cluster = index(cluster_data, vertex_index / 8);
-
-    let points = [
-        Vec3::from(cluster.min),
-        Vec3::new(cluster.min.x, cluster.min.y, cluster.max.z),
-        Vec3::from(cluster.min),
-        Vec3::new(cluster.min.x, cluster.max.y, cluster.min.z),
-        Vec3::from(cluster.min),
-        Vec3::new(cluster.max.x, cluster.min.y, cluster.min.z),
-        Vec3::new(cluster.max.x, cluster.max.y, cluster.min.z),
-        Vec3::from(cluster.max),
-    ];
-
-    let position = *index(&points, vertex_index % points.len() as u32);
-
-    *builtin_pos = push_constants.proj_view * position.extend(1.0);
-
-    *out_colour = Vec3::X.lerp(Vec3::Y, (vertex_index % 2) as f32);
-}
-
-#[cfg(not(target_feature = "RayQueryKHR"))]
-#[spirv(fragment)]
-pub fn cluster_debugging_fs(
-    colour: Vec3,
-    hdr_framebuffer: &mut Vec4,
-    opaque_sampled_framebuffer: &mut Vec4,
-) {
-    let output = colour.extend(1.0);
-    *hdr_framebuffer = output;
-    *opaque_sampled_framebuffer = output;
-}
-
 struct ModelBuffers<'a> {
     indices: &'a [u32],
-    uvs: &'a [Vec2]
+    uvs: &'a [Vec2],
 }
 
 impl<'a> ModelBuffers<'a> {
@@ -850,7 +365,7 @@ impl<'a> ModelBuffers<'a> {
         UVec3::new(
             *index(self.indices, index_offset),
             *index(self.indices, index_offset + 1),
-            *index(self.indices, index_offset + 2)
+            *index(self.indices, index_offset + 2),
         )
     }
 
@@ -878,4 +393,115 @@ fn interpolate<T: Mul<f32, Output = T> + Add<T, Output = T>>(
     barycentric_coords: Vec3,
 ) -> T {
     a * barycentric_coords.x + b * barycentric_coords.y + c * barycentric_coords.z
+}
+
+fn world_position_from_depth(tex_coord: Vec2, ndc_depth: f32, view_proj_inverse: Mat4) -> Vec3 {
+    // Take texture coordinate and remap to [-1.0, 1.0] range.
+    let screen_pos = tex_coord * 2.0 - 1.0;
+
+    // Create NDC position.
+    let ndc_pos = Vec4::new(screen_pos.x, screen_pos.y, ndc_depth, 1.0);
+
+    // Transform back into world position.
+    let world_pos = view_proj_inverse * ndc_pos;
+
+    // Undo projection.
+    world_pos.truncate() / world_pos.w
+}
+
+#[cfg(target_feature = "RayQueryKHR")]
+#[spirv(compute(threads(8, 8)))]
+pub fn ray_trace_sun_shadow(
+    #[spirv(descriptor_set = 0, binding = 0)] textures: &Textures,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 3, uniform)] uniforms: &Uniforms,
+    #[spirv(descriptor_set = 1, binding = 0)] depth_buffer: &Image!(2D, type=f32, sampled),
+    #[spirv(descriptor_set = 2, binding = 0, storage_buffer)] packed_shadow_bitmasks: &mut [u32],
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let frag_coord = id.truncate().as_vec2();
+    let tex_coord = frag_coord / push_constants.framebuffer_size.as_vec2();
+
+    let mut blue_noise_sampler = BlueNoiseSampler {
+        textures,
+        sampler: *sampler,
+        uniforms,
+        // I spent an actual hour figuring out that I needed to do this offset. Actually kill me.
+        frag_coord: frag_coord + 0.5,
+        iteration: 0,
+    };
+
+    let depth = {
+        let sample: Vec4 = depth_buffer.sample_by_lod(*sampler, tex_coord, 0.0);
+        sample.x
+    };
+
+    let position = world_position_from_depth(tex_coord, depth, uniforms.proj_view_inverse);
+
+    let acceleration_structure =
+        unsafe { AccelerationStructure::from_u64(push_constants.acceleration_structure_address) };
+
+    use spirv_std::ray_tracing::RayQuery;
+    spirv_std::ray_query!(let mut shadow_ray);
+
+    let factor = lighting::trace_shadow_ray(
+        shadow_ray,
+        &acceleration_structure,
+        position,
+        blue_noise_sampler.sample_directional_light(0.1 / 3.0, uniforms.sun_dir.into()),
+        10_000.0,
+    );
+
+    let ballot = asm::subgroup_ballot(factor);
+
+    if asm::subgroup_elect() {
+        let top_bitmask = ballot.x;
+        let bottom_bitmask = ballot.y;
+
+        let (top_row_index, bottom_row_index) =
+            indices_for_block(id, push_constants.framebuffer_size);
+
+        *index_mut(packed_shadow_bitmasks, top_row_index) = top_bitmask;
+        *index_mut(packed_shadow_bitmasks, bottom_row_index) = bottom_bitmask;
+    }
+}
+
+fn div_round_up(a: u32, b: u32) -> u32 {
+    (a + b - 1) / b
+}
+
+fn indices_for_block(id: UVec3, framebuffer_size: UVec2) -> (u32, u32) {
+    let block_x = id.x / 8;
+    let block_y = id.y / 8;
+    let num_blocks_x = div_round_up(framebuffer_size.x, 8);
+
+    let top_row_index = (block_y * 2) * num_blocks_x + block_x;
+    let bottom_row_index = (block_y * 2 + 1) * num_blocks_x + block_x;
+
+    (top_row_index, bottom_row_index)
+}
+
+#[cfg(target_feature = "RayQueryKHR")]
+#[spirv(compute(threads(8, 8)))]
+pub fn reconstruct_shadow_buffer(
+    #[spirv(descriptor_set = 0, binding = 0)] sun_shadow_buffer: &Image!(2D, format=rgba8, sampled=false),
+    #[spirv(descriptor_set = 1, binding = 0, storage_buffer)] packed_shadow_bitmasks: &[u32],
+    #[spirv(push_constant)] push_constants: &PushConstants,
+    #[spirv(global_invocation_id)] id: UVec3,
+) {
+    let (top_row_index, bottom_row_index) = indices_for_block(id, push_constants.framebuffer_size);
+
+    let top_row = *index(packed_shadow_bitmasks, top_row_index);
+    let bottom_row = *index(packed_shadow_bitmasks, bottom_row_index);
+    let ballot = UVec4::new(top_row, bottom_row, 0, 0);
+
+    let factor = asm::subgroup_inverse_ballot(ballot);
+
+    unsafe {
+        sun_shadow_buffer.write(
+            id.truncate(),
+            Vec4::new(factor as u32 as f32, 0.0, 0.0, 1.0),
+        );
+    }
 }

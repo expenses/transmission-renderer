@@ -19,6 +19,7 @@ pub(crate) fn load_gltf(
     max_draw_counts: &mut MaxDrawCounts,
     base_transform: Similarity,
     roughness_override: Option<f32>,
+    variant_index: Option<usize>,
 ) -> anyhow::Result<()> {
     let name = path.file_name().unwrap().to_str().unwrap();
 
@@ -34,20 +35,52 @@ pub(crate) fn load_gltf(
         let _span = tracy_client::span!("Converting images");
 
         for image in &mut images {
-            if image.format == gltf::image::Format::R8G8B8 {
-                let dynamic_image = image::DynamicImage::ImageRgb8(
-                    image::RgbImage::from_raw(
-                        image.width,
-                        image.height,
-                        std::mem::take(&mut image.pixels),
-                    )
-                    .unwrap(),
-                );
+            match image.format {
+                gltf::image::Format::R8G8B8 => {
+                    image.pixels = image.pixels.chunks(3).map(|pixel| {
+                        [pixel[0], pixel[1], pixel[2], 255]
+                    }).flat_map(|pixel| pixel).collect();
+                    image.format = gltf::image::Format::R8G8B8A8;
+                },
+                gltf::image::Format::R8G8 => {
+                    image.pixels = image.pixels.chunks(2).map(|pixel| {
+                        [pixel[0], pixel[1], 0, 255]
+                    })
+                    .flat_map(|pixel| pixel).collect();
+                    image.format = gltf::image::Format::R8G8B8A8;
+                },
+                gltf::image::Format::R8 => {
+                    image.pixels = image.pixels.iter().map(|red_channel| {
+                        [*red_channel, 0, 0, 255]
+                    })
+                    .flat_map(|pixel| pixel).collect();
+                    image.format = gltf::image::Format::R8G8B8A8;
+                }
+                _ => {},
+            };
+        }
+    }
 
-                let rgba8 = dynamic_image.to_rgba8();
-
-                image.format = gltf::image::Format::R8G8B8A8;
-                image.pixels = rgba8.into_raw();
+    if let Some(variant_index) = variant_index {
+        match gltf.variants() {
+            None => log::warn!(
+                "Variant index {} specified but no variants in the model",
+                variant_index
+            ),
+            Some(mut variants) => {
+                let num_variants = variants.len();
+                match variants.nth(variant_index) {
+                    Some(variant) => {
+                        log::info!("Using variant '{}'", variant.name());
+                    }
+                    None => {
+                        log::warn!(
+                            "Variant index {} specified but there are only {} variants",
+                            variant_index,
+                            num_variants
+                        );
+                    }
+                }
             }
         }
     }
@@ -63,7 +96,22 @@ pub(crate) fn load_gltf(
         let transform = base_transform * node_tree.transform_of(node.index());
 
         for primitive in mesh.primitives() {
-            let material = primitive.material();
+            let mut material = primitive.material();
+
+            if let Some(variant_index) = variant_index {
+                let mapping = primitive
+                    .mappings()
+                    .find(|mapping| mapping.variants().contains(&(variant_index as u32)));
+
+                match mapping {
+                    Some(mapping) => {
+                        material = mapping.material();
+                    }
+                    None => {
+                        log::warn!("Variant index {} not found in variants", variant_index)
+                    }
+                }
+            }
 
             let draw_buffer_index = match (material.alpha_mode(), material.transmission().is_some())
             {
@@ -135,6 +183,7 @@ pub(crate) fn load_gltf(
 
             model_buffers.instances.push(Instance {
                 transform: transform.pack(),
+                prev_transform: transform.pack(),
                 primitive_id: model_buffers.primitives.len() as u32,
                 material_id: material_id as u32,
             });
@@ -180,7 +229,7 @@ pub(crate) fn load_gltf(
                             FormatRequirement::DontCare => {
                                 // try loading a cached encoded srgb texture
                                 if let Some(id) = image_index_to_id.get(&(image_index, true)) {
-                                    println!(
+                                    log::debug!(
                                         "reusing image {} (encoded srgb: don't care)",
                                         image_index
                                     );
@@ -195,9 +244,10 @@ pub(crate) fn load_gltf(
 
                         let id = match image_index_to_id.entry((image_index, is_encoded_srgb)) {
                             std::collections::hash_map::Entry::Occupied(occupied) => {
-                                println!(
+                                log::debug!(
                                     "reusing image {} (encoded srgb: {})",
-                                    image_index, is_encoded_srgb
+                                    image_index,
+                                    is_encoded_srgb
                                 );
                                 *occupied.get()
                             }
@@ -346,6 +396,9 @@ fn load_texture_from_gltf(
     buffers_to_cleanup: &mut Vec<ash_abstractions::Buffer>,
 ) -> anyhow::Result<ash_abstractions::Image> {
     let format = match (image.format, srgb) {
+        (gltf::image::Format::R8, false) => vk::Format::R8_UNORM,
+        (gltf::image::Format::R8, true) => vk::Format::R8_SRGB,
+        (gltf::image::Format::R8G8, true) => vk::Format::R8G8_SRGB,
         (gltf::image::Format::R8G8B8A8, true) => vk::Format::R8G8B8A8_SRGB,
         (gltf::image::Format::R8G8B8A8, false) => vk::Format::R8G8B8A8_UNORM,
         format => panic!("unsupported format: {:?}", format),
@@ -408,6 +461,10 @@ impl ImageManager {
         self.images.push(image);
 
         index
+    }
+
+    pub fn num_images(&self) -> usize {
+        self.image_infos.len()
     }
 
     pub fn write_descriptor_set(

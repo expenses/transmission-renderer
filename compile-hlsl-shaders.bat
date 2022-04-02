@@ -1,0 +1,4 @@
+.\dxc\bin\x64\dxc.exe -spirv -fspv-target-env=vulkan1.2 -T cs_6_6 .\shader\tile_classification.hlsl -E tile_classification -Fo compiled-shaders/ray-tracing/tile_classification.spv -Wno-ambig-lit-shift
+.\dxc\bin\x64\dxc.exe -spirv -fspv-target-env=vulkan1.2 -T cs_6_6 .\shader\filter_passes.hlsl -E filter_pass_0 -enable-16bit-types -Fo compiled-shaders/ray-tracing/filter_pass_0.spv -Wno-ambig-lit-shift
+.\dxc\bin\x64\dxc.exe -spirv -fspv-target-env=vulkan1.2 -T cs_6_6 .\shader\filter_passes.hlsl -E filter_pass_1 -enable-16bit-types -Fo compiled-shaders/ray-tracing/filter_pass_1.spv -Wno-ambig-lit-shift
+.\dxc\bin\x64\dxc.exe -spirv -fspv-target-env=vulkan1.2 -T cs_6_6 .\shader\filter_passes.hlsl -E filter_pass_2 -enable-16bit-types -Fo compiled-shaders/ray-tracing/filter_pass_2.spv -Wno-ambig-lit-shift

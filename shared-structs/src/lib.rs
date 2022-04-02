@@ -1,7 +1,7 @@
 #![no_std]
 
 use core::ops::Mul;
-use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
+use glam::{IVec2, Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec3A, Vec4};
 #[cfg(target_arch = "spirv")]
 use num_traits::Float;
 
@@ -19,13 +19,17 @@ pub struct PushConstants {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Uniforms {
-    pub light_clustering_coefficients: LightClusterCoefficients,
+    pub prev_proj_view: Mat4,
+    pub proj_view_inverse: Mat4,
     pub sun_dir: Vec3A,
     pub sun_intensity: Vec3A,
     pub cluster_size_in_pixels: Vec2,
     pub num_clusters: UVec2,
     pub debug_clusters: u32,
     pub ggx_lut_texture_index: u32,
+    pub blue_noise_texture_index: u32,
+    pub frame_index: u32,
+    pub light_clustering_coefficients: LightClusterCoefficients,
 }
 
 // https://google.github.io/filament/Filament.md.html#imagingpipeline/lightpath/clusteredforwardrendering
@@ -252,6 +256,7 @@ impl Mul<Vec3> for Similarity {
 #[repr(C)]
 pub struct Instance {
     pub transform: PackedSimilarity,
+    pub prev_transform: PackedSimilarity,
     pub primitive_id: u32,
     pub material_id: u32,
 }
@@ -309,7 +314,8 @@ impl ClusterAabb {
         let vector_1_len = vector.dot(direction);
         let vector_1_len_sq = vector_1_len * vector_1_len;
 
-        let distance_closest_point = angle.cos() * (vector_len_sq - vector_1_len_sq).sqrt() - vector_1_len * angle.sin();
+        let distance_closest_point =
+            angle.cos() * (vector_len_sq - vector_1_len_sq).sqrt() - vector_1_len * angle.sin();
 
         let angle_cull = distance_closest_point > radius;
         let front_cull = vector_1_len > radius + range;
@@ -344,4 +350,18 @@ pub struct WriteClusterDataPushConstants {
 pub struct AssignLightsPushConstants {
     pub view_matrix: Mat4,
     pub view_rotation: Quat,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default)]
+#[repr(C)]
+pub struct TileClassificationData {
+    pub eye: Vec3,
+    pub first_frame: i32,
+    pub screen_dimensions: IVec2,
+    pub inverse_screen_dimensions: Vec2,
+    pub projection_inverse: Mat4,
+    pub reprojection_matrix: Mat4,
+    pub view_projection_inverse: Mat4,
+    pub depth_similarity_sigma: f32,
 }

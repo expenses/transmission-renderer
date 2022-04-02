@@ -1,4 +1,4 @@
-use crate::{index, TextureSampler};
+use crate::{index, noise::BlueNoiseSampler, TextureSampler};
 use glam_pbr::{
     basic_brdf, light_direction_and_attenuation, BasicBrdfParams, BrdfResult, IndexOfRefraction,
     Light as LightDir, MaterialParams, Normal, PerceptualRoughness, View,
@@ -29,7 +29,7 @@ pub fn evaluate_lights_transmission(
         position,
         uniforms.sun_dir.into(),
         10_000.0,
-    );
+    ) as u32 as f32;
 
     #[cfg(not(target_feature = "RayQueryKHR"))]
     let factor = 1.0;
@@ -68,7 +68,7 @@ pub fn evaluate_lights_transmission(
             position,
             direction,
             distance,
-        );
+        ) as u32 as f32;
 
         #[cfg(not(target_feature = "RayQueryKHR"))]
         let factor = 1.0;
@@ -94,20 +94,20 @@ pub fn evaluate_lights_transmission(
     (sum, transmission)
 }
 
-fn trace_shadow_ray(
+pub(crate) fn trace_shadow_ray(
     ray: &mut RayQuery,
     acceleration_structure: &AccelerationStructure,
     origin: Vec3,
     direction: Vec3,
     max_t: f32,
-) -> f32 {
+) -> bool {
     unsafe {
         ray.initialize(
             acceleration_structure,
             RayFlags::NONE,
             0xff,
             origin,
-            0.001,
+            0.01,
             direction,
             max_t,
         );
@@ -117,10 +117,7 @@ fn trace_shadow_ray(
             ray.confirm_intersection();
         }
 
-        match ray.get_committed_intersection_type() {
-            CommittedIntersection::None => 1.0,
-            _ => 0.0,
-        }
+        ray.get_committed_intersection_type() == CommittedIntersection::None
     }
 }
 
@@ -150,23 +147,12 @@ pub fn evaluate_lights(
     uniforms: &Uniforms,
     light_params: LightParams,
     #[cfg(target_feature = "RayQueryKHR")] acceleration_structure: &AccelerationStructure,
+    #[cfg(target_feature = "RayQueryKHR")] blue_noise_sampler: &mut BlueNoiseSampler,
+    sun_shadow_value: f32,
 ) -> BrdfResult {
-    #[cfg(target_feature = "RayQueryKHR")]
-    spirv_std::ray_query!(let mut shadow_ray);
-
-    #[cfg(target_feature = "RayQueryKHR")]
-    let factor = trace_shadow_ray(
-        shadow_ray,
-        acceleration_structure,
-        position,
-        uniforms.sun_dir.into(),
-        10_000.0,
-    )
-    // todo: ambient lighting via probes or idk!
-    .max(0.1);
-
-    #[cfg(not(target_feature = "RayQueryKHR"))]
-    let factor = 1.0;
+    let factor = sun_shadow_value
+        // todo: ambient lighting via probes or idk!
+        .max(0.1);
 
     let mut sum = basic_brdf(BasicBrdfParams {
         light: LightDir(uniforms.sun_dir.into()),
@@ -175,6 +161,9 @@ pub fn evaluate_lights(
         view,
         material_params,
     });
+
+    #[cfg(target_feature = "RayQueryKHR")]
+    spirv_std::ray_query!(let mut shadow_ray);
 
     let mut current_light = light_params.light_indices_offset;
     let end = light_params.end();
@@ -195,7 +184,7 @@ pub fn evaluate_lights(
                 position,
                 direction,
                 distance,
-            );
+            ) as u32 as f32;
         }
 
         if light.is_a_spotlight() {

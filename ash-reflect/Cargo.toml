@@ -1,0 +1,9 @@
+[package]
+name = "ash-reflect"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.52"
+ash = "0.35.0"
+rspirv-reflect = "0.6.0"

@@ -11,26 +11,29 @@ use ash_abstractions::CStrList;
 use std::f32::consts::PI;
 use std::ffi::CStr;
 use structopt::StructOpt;
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event::{DeviceEvent, ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 use winit::window::Fullscreen;
 
 use glam::{Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4};
-use shared_structs::{Instance, Light, PushConstants, Similarity};
+use shared_structs::{Instance, Light, PushConstants, Similarity, TileClassificationData};
 
 mod acceleration_structures;
 mod descriptor_sets;
 mod model_loading;
 mod pipelines;
 mod profiling;
+mod recording;
 mod render_passes;
+
+use recording::*;
 
 use acceleration_structures::{
     build_acceleration_structures_from_primitives,
     build_top_level_acceleration_structure_from_instances,
     update_top_level_acceleration_structure_from_instances, AccelerationStructure,
 };
-use descriptor_sets::{DescriptorSetLayouts, DescriptorSets};
+use descriptor_sets::DescriptorSets;
 use model_loading::{load_gltf, ImageManager};
 use pipelines::Pipelines;
 use profiling::ProfilingContext;
@@ -56,7 +59,7 @@ fn perspective_matrix_reversed(width: u32, height: u32) -> Mat4 {
 pub const Z_NEAR: f32 = 0.01;
 pub const Z_FAR: f32 = 500.0;
 
-pub const MAX_IMAGES: u32 = 193;
+pub const MAX_IMAGES: u32 = 190;
 pub const NUM_CLUSTERS_X: u32 = 24;
 pub const NUM_CLUSTERS_Y: u32 = 16;
 pub const NUM_DEPTH_SLICES: u32 = 16;
@@ -88,6 +91,13 @@ struct Opt {
     ///
     #[structopt(long)]
     rotate_model: bool,
+    /// For viewing packed normals / velocity in renderdoc.
+    #[structopt(long)]
+    debug_g_buffer: bool,
+    #[structopt(long)]
+    no_sponza: bool,
+    #[structopt(long)]
+    variant_index: Option<usize>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -98,20 +108,28 @@ fn main() -> anyhow::Result<()> {
     {
         use simplelog::*;
 
-        CombinedLogger::init(vec![TermLogger::new(
-            LevelFilter::Info,
-            Config::default(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        )])?;
+        CombinedLogger::init(vec![
+            TermLogger::new(
+                LevelFilter::Info,
+                Config::default(),
+                TerminalMode::Mixed,
+                ColorChoice::Auto,
+            ),
+            WriteLogger::new(
+                LevelFilter::Trace,
+                Config::default(),
+                std::fs::File::create("run.log")?,
+            ),
+        ])?;
     }
 
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_title("Transmission Renderer")
+        .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0))
         .build(&event_loop)?;
 
-    let entry = unsafe { ash::Entry::new() }?;
+    let entry = unsafe { ash::Entry::load() }?;
 
     let api_version = vk::API_VERSION_1_2;
 
@@ -145,8 +163,17 @@ fn main() -> anyhow::Result<()> {
     let device_extensions = CStrList::new(extensions);
 
     let mut debug_messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
-        .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
+        .message_severity(
+            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        )
+        .message_type(
+            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+        )
         .pfn_user_callback(Some(ash_abstractions::vulkan_debug_utils_callback));
 
     let instance = unsafe {
@@ -199,7 +226,8 @@ fn main() -> anyhow::Result<()> {
             .runtime_descriptor_array(true)
             .draw_indirect_count(true)
             .descriptor_binding_partially_bound(true)
-            .buffer_device_address(true);
+            .buffer_device_address(true)
+            .shader_float16(true);
 
         let mut ray_query_features =
             vk::PhysicalDeviceRayQueryFeaturesKHR::builder().ray_query(true);
@@ -225,15 +253,14 @@ fn main() -> anyhow::Result<()> {
     };
 
     let render_passes = RenderPasses::new(&device, &debug_utils_loader, surface_format.format)?;
-    let descriptor_set_layouts = DescriptorSetLayouts::new(&device)?;
 
     let pipeline_cache =
         unsafe { device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None) }?;
 
-    let pipelines = Pipelines::new(
+    let (pipelines, descriptor_set_layouts) = Pipelines::new(
         &device,
+        &debug_utils_loader,
         &render_passes,
-        &descriptor_set_layouts,
         pipeline_cache,
         opt.ray_tracing,
     )?;
@@ -292,41 +319,80 @@ fn main() -> anyhow::Result<()> {
     let mut image_manager = ImageManager::default();
     let mut buffers_to_cleanup = Vec::new();
 
-    let ggx_lut_id = {
-        let _span = tracy_client::span!("Loading ggx_lut.png");
-
+    let (ggx_lut_texture_index, blue_noise_texture_index) = {
         use image::GenericImageView;
 
-        let decoded_image = image::load_from_memory_with_format(
-            include_bytes!("../ggx_lut.png"),
-            image::ImageFormat::Png,
-        )?;
+        let ggx_lut_texture_index = {
+            let _span = tracy_client::span!("Loading ggx_lut.png");
 
-        let rgba_image = decoded_image.to_rgba8();
+            let decoded_image = image::load_from_memory_with_format(
+                include_bytes!("../ggx_lut.png"),
+                image::ImageFormat::Png,
+            )?;
 
-        let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
-            &ash_abstractions::LoadImageDescriptor {
-                bytes: &*rgba_image,
-                extent: vk::Extent3D {
-                    width: decoded_image.width(),
-                    height: decoded_image.height(),
-                    depth: 1,
+            let rgba_image = decoded_image.to_rgba8();
+
+            let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
+                &ash_abstractions::LoadImageDescriptor {
+                    bytes: &*rgba_image,
+                    extent: vk::Extent3D {
+                        width: decoded_image.width(),
+                        height: decoded_image.height(),
+                        depth: 1,
+                    },
+                    view_ty: vk::ImageViewType::TYPE_2D,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                    name: "ggx lut",
+                    next_accesses: &[
+                        vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    mip_levels: 1,
                 },
-                view_ty: vk::ImageViewType::TYPE_2D,
-                format: vk::Format::R8G8B8A8_UNORM,
-                name: "ggx lut",
-                next_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-                ],
-                next_layout: vk_sync::ImageLayout::Optimal,
-                mip_levels: 1,
-            },
-            &mut init_resources,
-        )?;
+                &mut init_resources,
+            )?;
 
-        buffers_to_cleanup.push(staging_buffer);
+            buffers_to_cleanup.push(staging_buffer);
 
-        image_manager.push_image(image)
+            image_manager.push_image(image)
+        };
+
+        let blue_noise_texture_index = {
+            let _span = tracy_client::span!("Loading blue_noise_64x64.png");
+
+            let decoded_image = image::load_from_memory_with_format(
+                include_bytes!("../blue_noise_64x64.png"),
+                image::ImageFormat::Png,
+            )?;
+
+            let rgba_image = decoded_image.to_rgba8();
+
+            let (image, staging_buffer) = ash_abstractions::load_image_from_bytes(
+                &ash_abstractions::LoadImageDescriptor {
+                    bytes: &*rgba_image,
+                    extent: vk::Extent3D {
+                        width: decoded_image.width(),
+                        height: decoded_image.height(),
+                        depth: 1,
+                    },
+                    view_ty: vk::ImageViewType::TYPE_2D,
+                    format: vk::Format::R8G8B8A8_UNORM,
+                    name: "blue noise",
+                    next_accesses: &[
+                        vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                    ],
+                    next_layout: vk_sync::ImageLayout::Optimal,
+                    mip_levels: 1,
+                },
+                &mut init_resources,
+            )?;
+
+            buffers_to_cleanup.push(staging_buffer);
+
+            image_manager.push_image(image)
+        };
+
+        (ggx_lut_texture_index, blue_noise_texture_index)
     };
 
     let window_size = window.inner_size();
@@ -339,16 +405,19 @@ fn main() -> anyhow::Result<()> {
     let mut model_staging_buffers = ModelStagingBuffers::default();
     let mut max_draw_counts = MaxDrawCounts::default();
 
-    load_gltf(
-        &model_loading::path_for_gltf_model("Sponza"),
-        &mut init_resources,
-        &mut image_manager,
-        &mut buffers_to_cleanup,
-        &mut model_staging_buffers,
-        &mut max_draw_counts,
-        Similarity::IDENTITY,
-        None,
-    )?;
+    if !opt.no_sponza {
+        load_gltf(
+            &model_loading::path_for_gltf_model("Sponza"),
+            &mut init_resources,
+            &mut image_manager,
+            &mut buffers_to_cleanup,
+            &mut model_staging_buffers,
+            &mut max_draw_counts,
+            Similarity::IDENTITY,
+            None,
+            None,
+        )?;
+    }
 
     load_gltf(
         &if opt.external_model {
@@ -367,8 +436,10 @@ fn main() -> anyhow::Result<()> {
             scale: opt.scale,
         },
         opt.roughness_override,
+        opt.variant_index,
     )?;
 
+    dbg!(&image_manager.num_images());
     dbg!(max_draw_counts);
 
     let num_instances = model_staging_buffers.instances.len() as u32;
@@ -380,7 +451,39 @@ fn main() -> anyhow::Result<()> {
 
     let draw_buffers = DrawBuffers::new(max_draw_counts, &mut init_resources)?;
 
-    let mut depthbuffer = create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+    let mut depth_buffers = PingPong::new(
+        DepthBuffer::new(
+            &device,
+            "depth buffer a",
+            extent,
+            &render_passes,
+            descriptor_sets.depth_buffer_a,
+            &mut init_resources,
+        )?,
+        DepthBuffer::new(
+            &device,
+            "depth buffer b",
+            extent,
+            &render_passes,
+            descriptor_sets.depth_buffer_b,
+            &mut init_resources,
+        )?,
+    );
+
+    let mut sun_shadow_buffer =
+        create_sun_shadow_buffer(extent.width, extent.height, &mut init_resources)?;
+
+    let mut g_buffer = GBuffer::new(
+        extent.width,
+        extent.height,
+        &render_passes,
+        &depth_buffers,
+        &mut init_resources,
+    )?;
+
+    let mut shadow_bitmask_buffer =
+        create_tile_buffer(extent.width, extent.height, &mut init_resources)?;
+
     let mut hdr_framebuffer = create_hdr_framebuffer(
         extent.width,
         extent.height,
@@ -535,8 +638,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut uniforms = shared_structs::Uniforms {
         sun_dir: sun.as_normal().into(),
-        sun_intensity: Vec3::splat(3.0).into(),
-        ggx_lut_texture_index: ggx_lut_id,
+        sun_intensity: Vec3::splat(6.0).into(),
+        ggx_lut_texture_index,
         num_clusters,
         cluster_size_in_pixels: Vec2::new(extent.width as f32, extent.height as f32)
             / num_clusters.as_vec2(),
@@ -549,9 +652,11 @@ fn main() -> anyhow::Result<()> {
             Z_FAR,
             NUM_DEPTH_SLICES,
         ),
+        blue_noise_texture_index,
+        frame_index: 0,
+        prev_proj_view: Default::default(),
+        proj_view_inverse: Default::default(),
     };
-
-    dbg!(&uniforms);
 
     let mut uniforms_buffer = ash_abstractions::Buffer::new(
         unsafe { bytes_of(&uniforms) },
@@ -559,6 +664,48 @@ fn main() -> anyhow::Result<()> {
         vk::BufferUsageFlags::UNIFORM_BUFFER,
         &mut init_resources,
     )?;
+
+    let clamp_sampler = unsafe {
+        device.create_sampler(
+            &vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                .max_lod(vk::LOD_CLAMP_NONE),
+            None,
+        )
+    }?;
+
+    let mut tile_classification_descriptors = TileClassificationDescriptors {
+        data: TileClassificationData::default(),
+        tile_classification_data_buffer: ash_abstractions::Buffer::new(
+            unsafe { bytes_of(&TileClassificationData::default()) },
+            "tile classification data buffer",
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            &mut init_resources,
+        )?,
+        descriptor_sets: PingPong::new(
+            descriptor_sets.tile_classification_a,
+            descriptor_sets.tile_classification_b,
+        ),
+        trilinear_clamp_sampler: clamp_sampler,
+        moments: TileClassificationDescriptors::create_moments_images(extent, &mut init_resources)?,
+        tile_metadata: create_tile_buffer(extent.width, extent.height, &mut init_resources)?,
+        history: TileClassificationDescriptors::create_history_image(extent, &mut init_resources)?,
+        reprojection_results: TileClassificationDescriptors::create_reprojection_results_image(
+            extent,
+            &mut init_resources,
+        )?,
+    };
+
+    tile_classification_descriptors.update(
+        &device,
+        &depth_buffers,
+        &g_buffer.normals_velocity,
+        &shadow_bitmask_buffer,
+    );
 
     let mut acceleration_structure_debugging_uniforms =
         shared_structs::AccelerationStructureDebuggingUniforms {
@@ -620,7 +767,12 @@ fn main() -> anyhow::Result<()> {
                 primitive.draw_buffer_index < 2
             })
             .map(|(instance_id, &instance)| {
-                acceleration_structure_instance(instance_id as u32, instance, &acceleration_structures, &device)
+                acceleration_structure_instance(
+                    instance_id as u32,
+                    instance,
+                    &acceleration_structures,
+                    &device,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -661,22 +813,26 @@ fn main() -> anyhow::Result<()> {
 
     let mut instances = model_staging_buffers.instances;
 
-    let mut draw_framebuffer = create_draw_framebuffer(
-        &device,
-        extent,
-        render_passes.draw,
-        &hdr_framebuffer,
-        opaque_sampled_hdr_framebuffer_top_mip_view,
-        &depthbuffer,
-    )?;
+    let mut draw_framebuffer = depth_buffers.try_map(|depth_buffer| {
+        create_draw_framebuffer(
+            &device,
+            extent,
+            render_passes.draw,
+            &hdr_framebuffer,
+            opaque_sampled_hdr_framebuffer_top_mip_view,
+            &depth_buffer.image,
+        )
+    })?;
 
-    let mut transmission_framebuffer = create_transmission_framebuffer(
-        &device,
-        extent,
-        render_passes.transmission,
-        &hdr_framebuffer,
-        &depthbuffer,
-    )?;
+    let mut transmission_framebuffer = depth_buffers.try_map(|depth_buffer| {
+        create_framebuffer_with_depth(
+            &device,
+            extent,
+            render_passes.transmission,
+            &hdr_framebuffer,
+            &depth_buffer.image,
+        )
+    })?;
 
     let mut keyboard_state = KeyboardState::default();
 
@@ -690,27 +846,6 @@ fn main() -> anyhow::Result<()> {
             None,
         )
     }?;
-
-    let clamp_sampler = unsafe {
-        device.create_sampler(
-            &vk::SamplerCreateInfo::builder()
-                .mag_filter(vk::Filter::LINEAR)
-                .min_filter(vk::Filter::LINEAR)
-                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                .max_lod(vk::LOD_CLAMP_NONE),
-            None,
-        )
-    }?;
-
-    fn buffer_info(buffer: &ash_abstractions::Buffer) -> [vk::DescriptorBufferInfo; 1] {
-        [vk::DescriptorBufferInfo {
-            buffer: buffer.buffer,
-            range: vk::WHOLE_SIZE,
-            offset: 0,
-        }]
-    }
 
     unsafe {
         device.update_descriptor_sets(
@@ -827,7 +962,13 @@ fn main() -> anyhow::Result<()> {
         )
     }
 
-    descriptor_sets.update_framebuffers(&device, &hdr_framebuffer, &opaque_sampled_hdr_framebuffer);
+    descriptor_sets.update_framebuffers(
+        &device,
+        &hdr_framebuffer,
+        &opaque_sampled_hdr_framebuffer,
+        &sun_shadow_buffer,
+        &shadow_bitmask_buffer,
+    );
 
     unsafe {
         record_write_cluster_data(
@@ -908,9 +1049,6 @@ fn main() -> anyhow::Result<()> {
 
     let mut cursor_grab = false;
 
-    let mut screen_center =
-        winit::dpi::LogicalPosition::new(extent.width as f64 / 2.0, extent.height as f64 / 2.0);
-
     let mut profiling_ctx =
         query_pool.into_profiling_context(&device, physical_device_properties.limits)?;
 
@@ -965,10 +1103,6 @@ fn main() -> anyhow::Result<()> {
                                 if is_pressed {
                                     cursor_grab = !cursor_grab;
 
-                                    if cursor_grab {
-                                        window.set_cursor_position(screen_center)?;
-                                    }
-
                                     window.set_cursor_visible(!cursor_grab);
                                     window.set_cursor_grab(cursor_grab)?;
                                 }
@@ -977,20 +1111,6 @@ fn main() -> anyhow::Result<()> {
                                 toggle = !toggle;
                             }
                             _ => {}
-                        }
-                    }
-                    WindowEvent::CursorMoved { position, .. } => {
-                        if cursor_grab {
-                            let position = position.to_logical::<f64>(window.scale_factor());
-
-                            window.set_cursor_position(screen_center)?;
-
-                            camera
-                                .driver_mut::<dolly::drivers::YawPitch>()
-                                .rotate_yaw_pitch(
-                                    0.1 * (screen_center.x - position.x) as f32,
-                                    0.1 * (screen_center.y - position.y) as f32,
-                                );
                         }
                     }
                     WindowEvent::Resized(new_size) => {
@@ -1003,15 +1123,13 @@ fn main() -> anyhow::Result<()> {
                             Vec2::new(extent.width as f32, extent.height as f32)
                                 / num_clusters.as_vec2();
 
+                        // Reset frame index
+                        uniforms.frame_index = 0;
+
                         uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
 
                         perspective_matrix =
                             perspective_matrix_reversed(extent.width, extent.height);
-
-                        screen_center = winit::dpi::LogicalPosition::new(
-                            extent.width as f64 / 2.0,
-                            extent.height as f64 / 2.0,
-                        );
 
                         swapchain_info.image_extent = extent;
                         swapchain_info.old_swapchain = swapchain.swapchain;
@@ -1039,9 +1157,14 @@ fn main() -> anyhow::Result<()> {
                             )?;
                         }
 
-                        depthbuffer.cleanup(&device, &mut allocator)?;
+                        depth_buffers.try_for_each(|depth_buffer| {
+                            depth_buffer.image.cleanup(&device, &mut allocator)
+                        })?;
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
+                        sun_shadow_buffer.cleanup(&device, &mut allocator)?;
+                        g_buffer.cleanup(&device, &mut allocator)?;
+                        shadow_bitmask_buffer.cleanup(&device, &mut allocator)?;
 
                         let mut init_resources = ash_abstractions::InitResources {
                             command_buffer,
@@ -1050,8 +1173,30 @@ fn main() -> anyhow::Result<()> {
                             debug_utils_loader: Some(&debug_utils_loader),
                         };
 
-                        depthbuffer =
-                            create_depthbuffer(extent.width, extent.height, &mut init_resources)?;
+                        depth_buffers = PingPong::new(
+                            DepthBuffer::new(
+                                &device,
+                                "depth buffer a",
+                                extent,
+                                &render_passes,
+                                descriptor_sets.depth_buffer_a,
+                                &mut init_resources,
+                            )?,
+                            DepthBuffer::new(
+                                &device,
+                                "depth buffer b",
+                                extent,
+                                &render_passes,
+                                descriptor_sets.depth_buffer_b,
+                                &mut init_resources,
+                            )?,
+                        );
+
+                        sun_shadow_buffer = create_sun_shadow_buffer(
+                            extent.width,
+                            extent.height,
+                            &mut init_resources,
+                        )?;
 
                         hdr_framebuffer = create_hdr_framebuffer(
                             extent.width,
@@ -1061,6 +1206,35 @@ fn main() -> anyhow::Result<()> {
                             vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::STORAGE,
                             &mut init_resources,
                         )?;
+
+                        g_buffer = GBuffer::new(
+                            extent.width,
+                            extent.height,
+                            &render_passes,
+                            &depth_buffers,
+                            &mut init_resources,
+                        )?;
+
+                        shadow_bitmask_buffer =
+                            create_tile_buffer(extent.width, extent.height, &mut init_resources)?;
+
+                        tile_classification_descriptors.moments =
+                            TileClassificationDescriptors::create_moments_images(
+                                extent,
+                                &mut init_resources,
+                            )?;
+                        tile_classification_descriptors.tile_metadata =
+                            create_tile_buffer(extent.width, extent.height, &mut init_resources)?;
+                        tile_classification_descriptors.history =
+                            TileClassificationDescriptors::create_history_image(
+                                extent,
+                                &mut init_resources,
+                            )?;
+                        tile_classification_descriptors.reprojection_results =
+                            TileClassificationDescriptors::create_reprojection_results_image(
+                                extent,
+                                &mut init_resources,
+                            )?;
 
                         opaque_mip_levels = mip_levels_for_size(extent.width, extent.height);
 
@@ -1140,6 +1314,8 @@ fn main() -> anyhow::Result<()> {
                             &device,
                             &hdr_framebuffer,
                             &opaque_sampled_hdr_framebuffer,
+                            &sun_shadow_buffer,
+                            &shadow_bitmask_buffer,
                         );
 
                         swapchain_image_framebuffers = create_swapchain_image_framebuffers(
@@ -1149,21 +1325,46 @@ fn main() -> anyhow::Result<()> {
                             &render_passes,
                         )?;
 
-                        draw_framebuffer = create_draw_framebuffer(
+                        draw_framebuffer = depth_buffers.try_map(|depth_buffer| {
+                            create_draw_framebuffer(
+                                &device,
+                                extent,
+                                render_passes.draw,
+                                &hdr_framebuffer,
+                                opaque_sampled_hdr_framebuffer_top_mip_view,
+                                &depth_buffer.image,
+                            )
+                        })?;
+                        transmission_framebuffer = depth_buffers.try_map(|depth_buffer| {
+                            create_framebuffer_with_depth(
+                                &device,
+                                extent,
+                                render_passes.transmission,
+                                &hdr_framebuffer,
+                                &depth_buffer.image,
+                            )
+                        })?;
+
+                        tile_classification_descriptors.update(
                             &device,
-                            extent,
-                            render_passes.draw,
-                            &hdr_framebuffer,
-                            opaque_sampled_hdr_framebuffer_top_mip_view,
-                            &depthbuffer,
-                        )?;
-                        transmission_framebuffer = create_transmission_framebuffer(
-                            &device,
-                            extent,
-                            render_passes.transmission,
-                            &hdr_framebuffer,
-                            &depthbuffer,
-                        )?;
+                            &depth_buffers,
+                            &g_buffer.normals_velocity,
+                            &shadow_bitmask_buffer,
+                        )
+                    }
+                    _ => {}
+                },
+                Event::DeviceEvent { event, .. } => match event {
+                    DeviceEvent::MouseMotion {
+                        delta: (delta_x, delta_y),
+                    } => {
+                        if cursor_grab {
+                            let scale_factor = window.scale_factor() as f32;
+
+                            camera
+                                .driver_mut::<dolly::drivers::YawPitch>()
+                                .rotate_yaw_pitch(-0.1 * delta_x as f32 / scale_factor, -0.1 * delta_y as f32 / scale_factor);
+                        }
                     }
                     _ => {}
                 },
@@ -1184,16 +1385,6 @@ fn main() -> anyhow::Result<()> {
                         .translate(move_vec * delta_time * speed);
 
                     camera.update(delta_time);
-
-                    push_constants.proj_view = {
-                        view_matrix = Mat4::look_at_rh(
-                            camera.final_transform.position,
-                            camera.final_transform.position + camera.final_transform.forward(),
-                            camera.final_transform.up(),
-                        );
-                        perspective_matrix * view_matrix
-                    };
-                    push_constants.view_position = camera.final_transform.position.into();
 
                     {
                         let acceleration = 0.002;
@@ -1228,17 +1419,44 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     uniforms.sun_dir = sun.as_normal().into();
-                    uniforms_buffer.write_mapped(unsafe { bytes_of(&uniforms) }, 0)?;
+                    uniforms.prev_proj_view = push_constants.proj_view;
+
+                    let previous_view = view_matrix;
+
+                    push_constants.proj_view = {
+                        view_matrix = Mat4::look_at_rh(
+                            camera.final_transform.position,
+                            camera.final_transform.position + camera.final_transform.forward(),
+                            camera.final_transform.up(),
+                        );
+                        perspective_matrix * view_matrix
+                    };
+                    push_constants.view_position = camera.final_transform.position.into();
+
+                    uniforms.proj_view_inverse =
+                        push_constants.proj_view.as_dmat4().inverse().as_mat4();
 
                     acceleration_structure_debugging_uniforms.view_inverse = view_matrix.inverse();
                     acceleration_structure_debugging_uniforms.proj_inverse =
                         perspective_matrix.inverse();
                     acceleration_structure_debugging_uniforms.size =
                         UVec2::new(extent.width, extent.height);
-                    acceleration_structure_debugging_uniforms_buffer.write_mapped(
-                        unsafe { bytes_of(&acceleration_structure_debugging_uniforms) },
-                        0,
-                    )?;
+
+                    tile_classification_descriptors.data = TileClassificationData {
+                        eye: camera.final_transform.position.into(),
+                        first_frame: (uniforms.frame_index == 0) as i32,
+                        screen_dimensions: UVec2::new(extent.width, extent.height).as_ivec2(),
+                        inverse_screen_dimensions: 1.0
+                            / UVec2::new(extent.width, extent.height).as_vec2(),
+                        projection_inverse: perspective_matrix.as_dmat4().inverse().as_mat4(),
+                        view_projection_inverse: uniforms.proj_view_inverse,
+                        reprojection_matrix: {
+                            perspective_matrix.as_dmat4()
+                                * (previous_view.as_dmat4() * uniforms.proj_view_inverse.as_dmat4())
+                        }
+                        .as_mat4(),
+                        depth_similarity_sigma: 1.0,
+                    };
 
                     if opt.spotlights {
                         spotlight_angle += 0.01;
@@ -1257,27 +1475,10 @@ fn main() -> anyhow::Result<()> {
 
                     if opt.rotate_model {
                         let instances_offset = instances_to_rotate.clone().start;
+                        instances[instances_offset].prev_transform =
+                            instances[instances_offset].transform;
                         instances[instances_offset].transform.rotation =
                             Quat::from_rotation_y(model_rotation);
-
-                        if let Some(acceleration_structure_data) =
-                            acceleration_structure_data.as_mut()
-                        {
-                            let instance = instances[instances_offset];
-
-                            acceleration_structure_data.instances.write_mapped(
-                                unsafe {
-                                    bytes_of(&acceleration_structure_instance(
-                                        instances_offset as u32,
-                                        instance,
-                                        &acceleration_structure_data.bottom_levels,
-                                        &device,
-                                    ))
-                                },
-                                std::mem::size_of::<vk::AccelerationStructureInstanceKHR>()
-                                    * instances_offset,
-                            )?;
-                        }
 
                         model_rotation -= 0.0025;
                     }
@@ -1313,12 +1514,42 @@ fn main() -> anyhow::Result<()> {
                     let tonemap_framebuffer =
                         swapchain_image_framebuffers[swapchain_image_index as usize];
 
-                    if opt.rotate_model {
-                        let instances_offset = instances_to_rotate.clone().start;
-                        model_buffers.instances.write_mapped(
-                            cast_slice(&instances[instances_to_rotate.clone()]),
-                            std::mem::size_of::<Instance>() * instances_offset,
+                    // write to buffers here to avoid race conditions
+                    {
+                        uniforms_buffer.write_mapped(bytes_of(&uniforms), 0)?;
+                        tile_classification_descriptors
+                            .tile_classification_data_buffer
+                            .write_mapped(bytes_of(&tile_classification_descriptors.data), 0)?;
+
+                        acceleration_structure_debugging_uniforms_buffer.write_mapped(
+                            bytes_of(&acceleration_structure_debugging_uniforms),
+                            0,
                         )?;
+
+                        if opt.rotate_model {
+                            let instances_offset = instances_to_rotate.clone().start;
+                            model_buffers.instances.write_mapped(
+                                cast_slice(&instances[instances_to_rotate.clone()]),
+                                std::mem::size_of::<Instance>() * instances_offset,
+                            )?;
+
+                            if let Some(acceleration_structure_data) =
+                                acceleration_structure_data.as_mut()
+                            {
+                                let instance = instances[instances_offset];
+
+                                acceleration_structure_data.instances.write_mapped(
+                                    bytes_of(&acceleration_structure_instance(
+                                        instances_offset as u32,
+                                        instance,
+                                        &acceleration_structure_data.bottom_levels,
+                                        &device,
+                                    )),
+                                    std::mem::size_of::<vk::AccelerationStructureInstanceKHR>()
+                                        * instances_offset,
+                                )?;
+                            }
+                        }
                     }
 
                     {
@@ -1359,11 +1590,18 @@ fn main() -> anyhow::Result<()> {
                             profiling_ctx: &mut profiling_ctx,
                             model_buffers: &model_buffers,
                             render_passes: &render_passes,
-                            draw_framebuffer,
+                            g_buffer: &g_buffer,
+                            depth_buffers: &depth_buffers,
+                            record_g_buffer: opt.ray_tracing || opt.debug_g_buffer,
+                            draw_framebuffer: *draw_framebuffer.get(),
                             tonemap_framebuffer,
-                            transmission_framebuffer,
+                            transmission_framebuffer: *transmission_framebuffer.get(),
                             descriptor_sets: &descriptor_sets,
                             hdr_framebuffer: &hdr_framebuffer,
+                            history_buffer: &tile_classification_descriptors.history,
+                            tile_classification_descriptor_set: *tile_classification_descriptors
+                                .descriptor_sets
+                                .get(),
                             opaque_sampled_hdr_framebuffer: &opaque_sampled_hdr_framebuffer,
                             toggle,
                             dynamic: DynamicRecordParams {
@@ -1412,6 +1650,14 @@ fn main() -> anyhow::Result<()> {
                     profiling_ctx.collect(&device)?;
 
                     tracy_client::finish_continuous_frame!();
+
+                    uniforms.frame_index += 1;
+
+                    depth_buffers.switch();
+                    tile_classification_descriptors.descriptor_sets.switch();
+                    draw_framebuffer.switch();
+                    transmission_framebuffer.switch();
+                    g_buffer.framebuffers.switch();
                 },
                 Event::LoopDestroyed => {
                     unsafe {
@@ -1419,7 +1665,9 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     {
-                        depthbuffer.cleanup(&device, &mut allocator)?;
+                        depth_buffers.try_for_each(|depth_buffer| {
+                            depth_buffer.image.cleanup(&device, &mut allocator)
+                        })?;
                         light_buffers.cleanup(&device, &mut allocator)?;
                         image_manager.cleanup(&device, &mut allocator)?;
                         uniforms_buffer.cleanup(&device, &mut allocator)?;
@@ -1427,8 +1675,12 @@ fn main() -> anyhow::Result<()> {
                         hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         opaque_sampled_hdr_framebuffer.cleanup(&device, &mut allocator)?;
                         model_buffers.cleanup(&device, &mut allocator)?;
+                        sun_shadow_buffer.cleanup(&device, &mut allocator)?;
+                        cluster_data_buffer.cleanup(&device, &mut allocator)?;
                         acceleration_structure_debugging_uniforms_buffer
                             .cleanup(&device, &mut allocator)?;
+
+                        g_buffer.cleanup(&device, &mut allocator)?;
 
                         if let Some(acceleration_structure_data) =
                             acceleration_structure_data.as_ref()
@@ -1475,805 +1727,18 @@ impl LightBuffers {
     }
 }
 
-unsafe fn record_write_cluster_data(
-    init_resources: &ash_abstractions::InitResources,
-    pipelines: &Pipelines,
-    descriptor_sets: &DescriptorSets,
-    perspective_matrix: Mat4,
-    screen_dimensions: UVec2,
-) {
-    init_resources.device.cmd_bind_pipeline(
-        init_resources.command_buffer,
-        vk::PipelineBindPoint::COMPUTE,
-        pipelines.write_cluster_data,
-    );
-
-    init_resources.device.cmd_bind_descriptor_sets(
-        init_resources.command_buffer,
-        vk::PipelineBindPoint::COMPUTE,
-        pipelines.write_cluster_data_pipeline_layout,
-        0,
-        &[descriptor_sets.main, descriptor_sets.cluster_data],
-        &[],
-    );
-
-    init_resources.device.cmd_push_constants(
-        init_resources.command_buffer,
-        pipelines.write_cluster_data_pipeline_layout,
-        vk::ShaderStageFlags::COMPUTE,
-        0,
-        bytes_of(&shared_structs::WriteClusterDataPushConstants {
-            inverse_perspective: perspective_matrix.inverse(),
-            screen_dimensions,
-        }),
-    );
-
-    init_resources.device.cmd_dispatch(
-        init_resources.command_buffer,
-        dispatch_count(NUM_CLUSTERS_X, 4),
-        dispatch_count(NUM_CLUSTERS_Y, 4),
-        dispatch_count(NUM_DEPTH_SLICES, 4),
-    );
-}
-
-struct RecordParams<'a> {
-    device: &'a ash::Device,
-    command_buffer: vk::CommandBuffer,
-    pipelines: &'a Pipelines,
-    draw_buffers: &'a DrawBuffers,
-    light_buffers: &'a LightBuffers,
-    profiling_ctx: &'a ProfilingContext,
-    model_buffers: &'a ModelBuffers,
-    render_passes: &'a RenderPasses,
-    draw_framebuffer: vk::Framebuffer,
-    transmission_framebuffer: vk::Framebuffer,
-    tonemap_framebuffer: vk::Framebuffer,
-    hdr_framebuffer: &'a ash_abstractions::Image,
-    opaque_sampled_hdr_framebuffer: &'a ash_abstractions::Image,
-    descriptor_sets: &'a DescriptorSets,
-    dynamic: DynamicRecordParams,
-    toggle: bool,
-}
-
-struct DynamicRecordParams {
-    extent: vk::Extent2D,
-    num_primitives: u32,
-    num_instances: u32,
-    num_lights: u32,
-    push_constants: PushConstants,
-    view_matrix: Mat4,
-    perspective_matrix: Mat4,
-    opaque_mip_levels: u32,
-    tonemapping_params: colstodian::tonemap::BakedLottesTonemapperParams,
-    camera_rotation: Quat,
-}
-
-unsafe fn record(params: RecordParams) -> anyhow::Result<()> {
-    let _span = tracy_client::span!("Command buffer recording");
-
-    let RecordParams {
-        device,
-        command_buffer,
-        pipelines,
-        draw_buffers,
-        light_buffers,
-        profiling_ctx,
-        render_passes,
-        draw_framebuffer,
-        transmission_framebuffer,
-        tonemap_framebuffer,
-        toggle,
-        dynamic:
-            DynamicRecordParams {
-                num_primitives,
-                num_instances,
-                num_lights,
-                push_constants,
-                view_matrix,
-                perspective_matrix,
-                extent,
-                opaque_mip_levels,
-                tonemapping_params,
-                camera_rotation,
-            },
-        model_buffers,
-        hdr_framebuffer,
-        opaque_sampled_hdr_framebuffer,
-        descriptor_sets,
-    } = params;
-
-    let draw_clear_values = [
-        vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue {
-                depth: 0.0,
-                stencil: 0,
-            },
-        },
-        vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        },
-        vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0],
-            },
-        },
-    ];
-
-    let tonemap_clear_values = [vk::ClearValue {
-        color: vk::ClearColorValue {
-            float32: [0.0, 0.0, 0.0, 1.0],
-        },
-    }];
-
-    let area = vk::Rect2D {
-        offset: vk::Offset2D { x: 0, y: 0 },
-        extent,
-    };
-
-    let draw_render_pass_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_passes.draw)
-        .framebuffer(draw_framebuffer)
-        .render_area(area)
-        .clear_values(&draw_clear_values);
-
-    let transmission_render_pass_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_passes.transmission)
-        .framebuffer(transmission_framebuffer)
-        .render_area(area);
-
-    let tonemap_render_pass_info = vk::RenderPassBeginInfo::builder()
-        .render_pass(render_passes.tonemap)
-        .framebuffer(tonemap_framebuffer)
-        .render_area(area)
-        .clear_values(&tonemap_clear_values);
-
-    let viewport = *vk::Viewport::builder()
-        .x(0.0)
-        .y(0.0)
-        .width(extent.width as f32)
-        .height(extent.height as f32)
-        .min_depth(0.0)
-        .max_depth(1.0);
-
-    profiling_ctx.reset(device, command_buffer);
-
-    let all_commands_profiling_zone = profiling_zone!(
-        "all commands",
-        vk::PipelineStageFlags::TOP_OF_PIPE,
-        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-        device,
-        command_buffer,
-        profiling_ctx
-    );
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "frustum culling",
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        {
-            let profiling_zone = profiling_zone!(
-                "zeroing the instance count buffer",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_fill_buffer(
-                command_buffer,
-                draw_buffers.instance_count_buffer.buffer,
-                0,
-                vk::WHOLE_SIZE,
-                0,
-            );
-
-            drop(profiling_zone);
-
-            let profiling_zone = profiling_zone!(
-                "zeroing the draw count buffer",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_fill_buffer(
-                command_buffer,
-                draw_buffers.draw_counts_buffer.buffer,
-                0,
-                vk::WHOLE_SIZE,
-                0,
-            );
-
-            device.cmd_fill_buffer(
-                command_buffer,
-                light_buffers.cluster_light_counts.buffer,
-                0,
-                vk::WHOLE_SIZE,
-                0,
-            );
-
-            drop(profiling_zone);
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::TransferWrite],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther],
-            }),
-            &[],
-            &[],
-        );
-
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.frustum_culling_pipeline_layout,
-            0,
-            &[
-                descriptor_sets.frustum_culling,
-                descriptor_sets.instance_buffer,
-            ],
-            &[],
-        );
-
-        let trunc_row = |index| perspective_matrix.row(index).truncate();
-
-        // Get the left and top planes (the ones that satisfy 'x + w < 0' and 'y + w < 0') (I think, don't quote me on this)
-        // https://github.com/zeux/niagara/blob/98f5d5ae2b48e15e145e3ad13ae7f4f9f1e0e297/src/niagara.cpp#L822-L823
-        let frustum_x = (trunc_row(3) + trunc_row(0)).normalize();
-        let frustum_y = (trunc_row(3) + trunc_row(1)).normalize();
-
-        device.cmd_push_constants(
-            command_buffer,
-            pipelines.frustum_culling_pipeline_layout,
-            vk::ShaderStageFlags::COMPUTE,
-            0,
-            bytes_of(&shared_structs::CullingPushConstants {
-                view: view_matrix,
-                frustum_x_xz: frustum_x.xz(),
-                frustum_y_yz: frustum_y.yz(),
-                z_near: Z_NEAR,
-            }),
-        );
-
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.frustum_culling,
-        );
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "frustum culling compute shader",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_dispatch(command_buffer, dispatch_count(num_instances, 64), 1, 1);
-        }
-
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                pipelines.assign_lights_to_clusters,
-            );
-
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                pipelines.lights_pipeline_layout,
-                0,
-                &[descriptor_sets.lights, descriptor_sets.cluster_data],
-                &[],
-            );
-
-            device.cmd_push_constants(
-                command_buffer,
-                pipelines.lights_pipeline_layout,
-                vk::ShaderStageFlags::COMPUTE,
-                0,
-                bytes_of(&shared_structs::AssignLightsPushConstants {
-                    view_matrix,
-                    view_rotation: camera_rotation.inverse(),
-                }),
-            );
-
-            device.cmd_dispatch(
-                command_buffer,
-                dispatch_count(NUM_CLUSTERS, 8),
-                dispatch_count(num_lights, 8),
-                1,
-            );
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderReadOther, vk_sync::AccessType::FragmentShaderReadOther],
-            }),
-            &[],
-            &[],
-        );
-
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.demultiplex_draws,
-        );
-
-        {
-            device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                pipelines.frustum_culling_pipeline_layout,
-                0,
-                &[
-                    descriptor_sets.frustum_culling,
-                    descriptor_sets.instance_buffer,
-                ],
-                &[],
-            );
-
-            let _profiling_zone = profiling_zone!(
-                "demultiplex draws compute shader",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_dispatch(command_buffer, dispatch_count(num_primitives, 64), 1, 1);
-        }
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            Some(vk_sync::GlobalBarrier {
-                previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[vk_sync::AccessType::IndirectBuffer],
-            }),
-            &[],
-            &[],
-        );
-    }
-
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &draw_render_pass_info,
-        vk::SubpassContents::INLINE,
-    );
-
-    device.cmd_set_scissor(command_buffer, 0, &[area]);
-    device.cmd_set_viewport(command_buffer, 0, &[viewport]);
-
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.pipeline_layout,
-        0,
-        &[
-            descriptor_sets.main,
-            descriptor_sets.instance_buffer,
-            descriptor_sets.lights,
-        ],
-        &[],
-    );
-
-    device.cmd_push_constants(
-        command_buffer,
-        pipelines.pipeline_layout,
-        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-        0,
-        bytes_of(&push_constants),
-    );
-
-    device.cmd_bind_vertex_buffers(
-        command_buffer,
-        0,
-        &[
-            model_buffers.position.buffer,
-            model_buffers.normal.buffer,
-            model_buffers.uv.buffer,
-        ],
-        &[0, 0, 0],
-    );
-
-    device.cmd_bind_index_buffer(
-        command_buffer,
-        model_buffers.index.buffer,
-        0,
-        vk::IndexType::UINT32,
-    );
-
-    {
-        let _depth_profiling_zone =
-            profiling_zone!("depth pre pass", device, command_buffer, profiling_ctx);
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "depth pre pass opaque",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass,
-            );
-
-            draw_buffers
-                .opaque
-                .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
-        }
-
-        {
-            let _profiling_zone = profiling_zone!(
-                "depth pre pass alpha clipped",
-                device,
-                command_buffer,
-                profiling_ctx
-            );
-
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass_alpha_clip,
-            );
-
-            draw_buffers.alpha_clip.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                1,
-                command_buffer,
-            );
-        }
-    }
-
-    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
-
-    /*{
-        device.cmd_bind_pipeline(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.cluster_debugging,
-        );
-
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipelines.cluster_debugging_pipeline_layout,
-            0,
-            &[
-                descriptor_sets.cluster_data,
-            ],
-            &[],
-        );
-
-        device.cmd_draw(command_buffer, NUM_CLUSTERS * 8, 1, 0, 0);
-    }*/
-
-    device.cmd_bind_pipeline(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.normal,
-    );
-
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.pipeline_layout,
-        0,
-        &[
-            descriptor_sets.main,
-            descriptor_sets.instance_buffer,
-            descriptor_sets.lights,
-        ],
-        &[],
-    );
-
-    {
-        let _profiling_zone = profiling_zone!("main opaque", device, command_buffer, profiling_ctx);
-        draw_buffers
-            .opaque
-            .record(device, &draw_buffers.draw_counts_buffer, 0, command_buffer);
-    }
-
-    {
-        let _profiling_zone =
-            profiling_zone!("main alpha clipped", device, command_buffer, profiling_ctx);
-        draw_buffers
-            .alpha_clip
-            .record(device, &draw_buffers.draw_counts_buffer, 1, command_buffer);
-    }
-
-    device.cmd_next_subpass(command_buffer, vk::SubpassContents::INLINE);
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "depth pre pass transmissive",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass_transmissive,
-            );
-
-            draw_buffers.transmission.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                2,
-                command_buffer,
-            );
-        }
-
-        {
-            device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipelines.depth_pre_pass_transmissive_alpha_clip,
-            );
-
-            draw_buffers.transmission_alpha_clip.record(
-                device,
-                &draw_buffers.draw_counts_buffer,
-                3,
-                command_buffer,
-            );
-        }
-    }
-
-    device.cmd_end_render_pass(command_buffer);
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "opaque framebuffer mipchain",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        ash_abstractions::generate_mips(
-            device,
-            command_buffer,
-            opaque_sampled_hdr_framebuffer.image,
-            extent.width as i32,
-            extent.height as i32,
-            opaque_mip_levels,
-            &[vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer],
-            vk_sync::ImageLayout::Optimal,
-        );
-    }
-
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &transmission_render_pass_info,
-        vk::SubpassContents::INLINE,
-    );
-
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.transmission_pipeline_layout,
-        0,
-        &[
-            descriptor_sets.main,
-            descriptor_sets.instance_buffer,
-            descriptor_sets.lights,
-            descriptor_sets.opaque_sampled_hdr_framebuffer,
-        ],
-        &[],
-    );
-
-    device.cmd_bind_pipeline(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.transmission,
-    );
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "opaque transmissive objects",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        draw_buffers.transmission.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            2,
-            command_buffer,
-        );
-    }
-
-    {
-        let _profiling_zone = profiling_zone!(
-            "alpha clip transmissive objects",
-            device,
-            command_buffer,
-            profiling_ctx
-        );
-
-        draw_buffers.transmission_alpha_clip.record(
-            device,
-            &draw_buffers.draw_counts_buffer,
-            3,
-            command_buffer,
-        );
-    }
-
-    device.cmd_end_render_pass(command_buffer);
-
-    if let Some(pipeline) = pipelines
-        .acceleration_structure_debugging
-        .filter(|_| toggle)
-    {
-        let subresource_range = *vk::ImageSubresourceRange::builder()
-            .aspect_mask(vk::ImageAspectFlags::COLOR)
-            .level_count(1)
-            .layer_count(1);
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            None,
-            &[],
-            &[vk_sync::ImageBarrier {
-                previous_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-                ],
-                next_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_layout: vk_sync::ImageLayout::Optimal,
-                image: hdr_framebuffer.image,
-                range: subresource_range,
-                discard_contents: true,
-                ..Default::default()
-            }],
-        );
-
-        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::COMPUTE, pipeline);
-
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            vk::PipelineBindPoint::COMPUTE,
-            pipelines.acceleration_structure_debugging_layout,
-            0,
-            &[descriptor_sets.main, descriptor_sets.acceleration_structure_debugging, descriptor_sets.instance_buffer],
-            &[],
-        );
-
-        device.cmd_push_constants(
-            command_buffer,
-            pipelines.acceleration_structure_debugging_layout,
-            vk::ShaderStageFlags::COMPUTE,
-            0,
-            bytes_of(&push_constants),
-        );
-
-        device.cmd_dispatch(
-            command_buffer,
-            dispatch_count(extent.width, 8),
-            dispatch_count(extent.height, 8),
-            1,
-        );
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            None,
-            &[],
-            &[vk_sync::ImageBarrier {
-                previous_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
-                next_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-                ],
-                next_layout: vk_sync::ImageLayout::Optimal,
-                image: hdr_framebuffer.image,
-                range: subresource_range,
-                ..Default::default()
-            }],
-        );
-    }
-
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &tonemap_render_pass_info,
-        vk::SubpassContents::INLINE,
-    );
-
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.tonemap_pipeline_layout,
-        0,
-        &[descriptor_sets.main, descriptor_sets.hdr_framebuffer],
-        &[],
-    );
-
-    device.cmd_push_constants(
-        command_buffer,
-        pipelines.tonemap_pipeline_layout,
-        vk::ShaderStageFlags::FRAGMENT,
-        0,
-        bytes_of(&tonemapping_params),
-    );
-
-    device.cmd_bind_pipeline(
-        command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipelines.tonemap,
-    );
-
-    {
-        let _profiling_zone = profiling_zone!("tonemapping", device, command_buffer, profiling_ctx);
-
-        device.cmd_draw(command_buffer, 3, 1, 0, 0);
-    }
-
-    device.cmd_end_render_pass(command_buffer);
-
-    {
-        let subresource_range = *vk::ImageSubresourceRange::builder()
-            .aspect_mask(vk::ImageAspectFlags::COLOR)
-            .base_mip_level(1)
-            .level_count(opaque_mip_levels - 1)
-            .layer_count(1);
-
-        vk_sync::cmd::pipeline_barrier(
-            device,
-            command_buffer,
-            None,
-            &[],
-            &[vk_sync::ImageBarrier {
-                previous_accesses: &[
-                    vk_sync::AccessType::FragmentShaderReadSampledImageOrUniformTexelBuffer,
-                ],
-                next_accesses: &[vk_sync::AccessType::TransferWrite],
-                next_layout: vk_sync::ImageLayout::Optimal,
-                image: opaque_sampled_hdr_framebuffer.image,
-                range: subresource_range,
-                discard_contents: true,
-                ..Default::default()
-            }],
-        );
-    }
-
-    drop(all_commands_profiling_zone);
-
-    Ok(())
-}
-
-fn create_transmission_framebuffer(
+fn create_framebuffer_with_depth(
     device: &ash::Device,
     extent: vk::Extent2D,
     render_pass: vk::RenderPass,
-    hdr_framebuffer: &ash_abstractions::Image,
-    depthbuffer: &ash_abstractions::Image,
+    image: &ash_abstractions::Image,
+    depth_buffer: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
-                .attachments(&[depthbuffer.view, hdr_framebuffer.view])
+                .attachments(&[depth_buffer.view, image.view])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -2288,17 +1753,36 @@ fn create_draw_framebuffer(
     render_pass: vk::RenderPass,
     hdr_framebuffer: &ash_abstractions::Image,
     opaque_sampled_hdr_framebuffer_top_mip_view: vk::ImageView,
-    depthbuffer: &ash_abstractions::Image,
+    depth_buffer: &ash_abstractions::Image,
 ) -> anyhow::Result<vk::Framebuffer> {
     Ok(unsafe {
         device.create_framebuffer(
             &vk::FramebufferCreateInfo::builder()
                 .render_pass(render_pass)
                 .attachments(&[
-                    depthbuffer.view,
+                    depth_buffer.view,
                     hdr_framebuffer.view,
                     opaque_sampled_hdr_framebuffer_top_mip_view,
                 ])
+                .width(extent.width)
+                .height(extent.height)
+                .layers(1),
+            None,
+        )
+    }?)
+}
+
+fn create_single_attachment_framebuffer(
+    device: &ash::Device,
+    extent: vk::Extent2D,
+    render_pass: vk::RenderPass,
+    image: &ash_abstractions::Image,
+) -> anyhow::Result<vk::Framebuffer> {
+    Ok(unsafe {
+        device.create_framebuffer(
+            &vk::FramebufferCreateInfo::builder()
+                .render_pass(render_pass)
+                .attachments(&[image.view])
                 .width(extent.width)
                 .height(extent.height)
                 .layers(1),
@@ -2333,7 +1817,7 @@ fn create_swapchain_image_framebuffers(
         .collect()
 }
 
-fn create_depthbuffer(
+fn create_sun_shadow_buffer(
     width: u32,
     height: u32,
     init_resources: &mut ash_abstractions::InitResources,
@@ -2342,11 +1826,11 @@ fn create_depthbuffer(
         &ash_abstractions::ImageDescriptor {
             width,
             height,
-            name: "depthbuffer",
+            name: "sun shadow buffer",
             mip_levels: 1,
-            format: vk::Format::D32_SFLOAT,
-            usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            next_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
+            format: vk::Format::R8G8B8A8_UNORM,
+            usage: vk::ImageUsageFlags::STORAGE,
+            next_accesses: &[vk_sync::AccessType::FragmentShaderReadOther],
             next_layout: vk_sync::ImageLayout::Optimal,
         },
         init_resources,
@@ -2534,7 +2018,9 @@ impl ModelStagingBuffers {
             index: ash_abstractions::Buffer::new(
                 unsafe { cast_slice(&self.index) },
                 "index buffer",
-                vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::STORAGE_BUFFER | ray_tracing_flags,
+                vk::BufferUsageFlags::INDEX_BUFFER
+                    | vk::BufferUsageFlags::STORAGE_BUFFER
+                    | ray_tracing_flags,
                 init_resources,
             )?,
             instances: ash_abstractions::Buffer::new(
@@ -2605,6 +2091,7 @@ impl Castable for shared_structs::MaterialInfo {}
 impl Castable for shared_structs::Uniforms {}
 impl Castable for shared_structs::PushConstants {}
 impl Castable for MaxDrawCounts {}
+impl Castable for TileClassificationData {}
 impl Castable for vk::AccelerationStructureInstanceKHR {}
 impl Castable for shared_structs::CullingPushConstants {}
 impl Castable for shared_structs::PrimitiveInfo {}
@@ -2656,27 +2143,6 @@ pub fn transpose_matrix_for_acceleration_structure_instance(matrix: Mat4) -> [f3
         row_0.x, row_0.y, row_0.z, row_0.w, row_1.x, row_1.y, row_1.z, row_1.w, row_2.x, row_2.y,
         row_2.z, row_2.w,
     ]
-}
-
-// Stolen from ash master.
-#[repr(transparent)]
-#[derive(Debug)]
-pub struct Packed24_8(u32);
-
-impl Packed24_8 {
-    pub fn new(low_24: u32, high_8: u8) -> Self {
-        Self((low_24 & 0x00ff_ffff) | (u32::from(high_8) << 24))
-    }
-
-    /// Extracts the least-significant 24 bits (3 bytes) of this integer
-    pub fn low_24(&self) -> u32 {
-        self.0 & 0xffffff
-    }
-
-    /// Extracts the most significant 8 bits (single byte) of this integer
-    pub fn high_8(&self) -> u8 {
-        (self.0 >> 24) as u8
-    }
 }
 
 fn end_init_resources(
@@ -2743,12 +2209,419 @@ fn acceleration_structure_instance(
                 instance.transform.unpack().as_mat4(),
             ),
         },
-        instance_custom_index_and_mask: Packed24_8::new(instance_id, 0xff).0,
-        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0).0,
+        instance_custom_index_and_mask: vk::Packed24_8::new(instance_id, 0xff),
+        instance_shader_binding_table_record_offset_and_flags: vk::Packed24_8::new(0, 0),
         acceleration_structure_reference: vk::AccelerationStructureReferenceKHR {
             device_handle: bottom_levels[instance.primitive_id as usize]
                 .buffer
                 .device_address(device),
         },
     }
+}
+
+fn create_tile_buffer(
+    width: u32,
+    height: u32,
+    init_resources: &mut ash_abstractions::InitResources,
+) -> anyhow::Result<ash_abstractions::Buffer> {
+    ash_abstractions::Buffer::new_of_size(
+        dispatch_count(width, 8) as u64 * dispatch_count(height, 4) as u64 * 4,
+        "shadow bitmask buffer",
+        vk::BufferUsageFlags::STORAGE_BUFFER,
+        init_resources,
+    )
+}
+
+fn create_g_buffer_image(
+    width: u32,
+    height: u32,
+    name: &str,
+    format: vk::Format,
+    init_resources: &mut ash_abstractions::InitResources,
+) -> anyhow::Result<ash_abstractions::Image> {
+    ash_abstractions::Image::new(
+        &ash_abstractions::ImageDescriptor {
+            width,
+            height,
+            name,
+            mip_levels: 1,
+            format,
+            usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            next_accesses: &[vk_sync::AccessType::ColorAttachmentWrite],
+            next_layout: vk_sync::ImageLayout::Optimal,
+        },
+        init_resources,
+    )
+}
+
+struct GBuffer {
+    pub normals_velocity: ash_abstractions::Image,
+    pub framebuffers: PingPong<vk::Framebuffer>,
+}
+
+impl GBuffer {
+    pub const NORMALS_VELOCITY_FORMAT: vk::Format = vk::Format::R16G16B16A16_SFLOAT;
+
+    fn new(
+        width: u32,
+        height: u32,
+        render_passes: &RenderPasses,
+        depth_buffers: &PingPong<DepthBuffer>,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<Self> {
+        let normals_velocity_buffer = create_g_buffer_image(
+            width,
+            height,
+            "normals velocity buffer",
+            Self::NORMALS_VELOCITY_FORMAT,
+            init_resources,
+        )?;
+
+        Ok(Self {
+            framebuffers: depth_buffers.try_map(|depth_buffer| unsafe {
+                Ok(init_resources.device.create_framebuffer(
+                    &vk::FramebufferCreateInfo::builder()
+                        .render_pass(render_passes.defer)
+                        .attachments(&[depth_buffer.image.view, normals_velocity_buffer.view])
+                        .width(width)
+                        .height(height)
+                        .layers(1),
+                    None,
+                )?)
+            })?,
+            normals_velocity: normals_velocity_buffer,
+        })
+    }
+
+    fn cleanup(
+        &self,
+        device: &ash::Device,
+        allocator: &mut gpu_allocator::vulkan::Allocator,
+    ) -> anyhow::Result<()> {
+        self.normals_velocity.cleanup(device, allocator)?;
+        Ok(())
+    }
+}
+
+struct TileClassificationDescriptors {
+    data: TileClassificationData,
+    pub tile_classification_data_buffer: ash_abstractions::Buffer,
+    pub descriptor_sets: PingPong<vk::DescriptorSet>,
+    pub trilinear_clamp_sampler: vk::Sampler,
+    pub moments: PingPong<ash_abstractions::Image>,
+    tile_metadata: ash_abstractions::Buffer,
+    history: ash_abstractions::Image,
+    reprojection_results: ash_abstractions::Image,
+}
+
+impl TileClassificationDescriptors {
+    fn create_moments_image(
+        name: &str,
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ash_abstractions::Image> {
+        ash_abstractions::Image::new(
+            &ash_abstractions::ImageDescriptor {
+                width: extent.width,
+                height: extent.height,
+                name,
+                mip_levels: 1,
+                format: vk::Format::B10G11R11_UFLOAT_PACK32,
+                usage: vk::ImageUsageFlags::STORAGE,
+                next_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                next_layout: vk_sync::ImageLayout::Optimal,
+            },
+            init_resources,
+        )
+    }
+
+    fn create_history_image(
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ash_abstractions::Image> {
+        ash_abstractions::Image::new(
+            &ash_abstractions::ImageDescriptor {
+                width: extent.width,
+                height: extent.height,
+                name: "history buffer",
+                mip_levels: 1,
+                format: vk::Format::R16G16_SFLOAT,
+                usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
+                next_accesses: &[
+                    vk_sync::AccessType::ComputeShaderReadSampledImageOrUniformTexelBuffer,
+                ],
+                next_layout: vk_sync::ImageLayout::Optimal,
+            },
+            init_resources,
+        )
+    }
+
+    fn create_reprojection_results_image(
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<ash_abstractions::Image> {
+        ash_abstractions::Image::new(
+            &ash_abstractions::ImageDescriptor {
+                width: extent.width,
+                height: extent.height,
+                name: "reprojection results",
+                mip_levels: 1,
+                format: vk::Format::R16G16_SFLOAT,
+                usage: vk::ImageUsageFlags::STORAGE,
+                next_accesses: &[vk_sync::AccessType::ComputeShaderWrite],
+                next_layout: vk_sync::ImageLayout::Optimal,
+            },
+            init_resources,
+        )
+    }
+
+    fn create_moments_images(
+        extent: vk::Extent2D,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<PingPong<ash_abstractions::Image>> {
+        Ok(PingPong::new(
+            Self::create_moments_image("moments image a", extent, init_resources)?,
+            Self::create_moments_image("moments image b", extent, init_resources)?,
+        ))
+    }
+
+    fn update(
+        &self,
+        device: &ash::Device,
+        depth_buffers: &PingPong<DepthBuffer>,
+        normals_velocity_image: &ash_abstractions::Image,
+        shadow_bitmask_buffer: &ash_abstractions::Buffer,
+    ) {
+        self.update_descriptor_set(
+            device,
+            &depth_buffers.ping.image,
+            &depth_buffers.pong.image,
+            normals_velocity_image,
+            shadow_bitmask_buffer,
+            &self.moments.ping,
+            &self.moments.pong,
+            self.descriptor_sets.ping,
+        );
+        self.update_descriptor_set(
+            device,
+            &depth_buffers.pong.image,
+            &depth_buffers.ping.image,
+            normals_velocity_image,
+            shadow_bitmask_buffer,
+            &self.moments.pong,
+            &self.moments.ping,
+            self.descriptor_sets.pong,
+        );
+    }
+
+    fn update_descriptor_set(
+        &self,
+        device: &ash::Device,
+        current_depth_buffer: &ash_abstractions::Image,
+        previous_depth_buffer: &ash_abstractions::Image,
+        normals_velocity_image: &ash_abstractions::Image,
+        shadow_bitmask_buffer: &ash_abstractions::Buffer,
+        current_moments: &ash_abstractions::Image,
+        previous_moments: &ash_abstractions::Image,
+        descriptor_set: vk::DescriptorSet,
+    ) {
+        unsafe {
+            device.update_descriptor_sets(
+                &[
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .buffer_info(&buffer_info(&self.tile_classification_data_buffer)),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(current_depth_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(2)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(normals_velocity_image.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(3)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(self.history.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(4)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(previous_depth_buffer.view)
+                            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(5)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&buffer_info(&shadow_bitmask_buffer)),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(6)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&buffer_info(&self.tile_metadata)),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(7)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(self.reprojection_results.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(8)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(previous_moments.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(9)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(current_moments.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(10)
+                        .descriptor_type(vk::DescriptorType::SAMPLER)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .sampler(self.trilinear_clamp_sampler)]),
+                    *vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(11)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(&[*vk::DescriptorImageInfo::builder()
+                            .image_view(self.history.view)
+                            .image_layout(vk::ImageLayout::GENERAL)]),
+                ],
+                &[],
+            )
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PingPong<T> {
+    state: bool,
+    ping: T,
+    pong: T,
+}
+
+impl<T> PingPong<T> {
+    pub fn new(ping: T, pong: T) -> Self {
+        Self {
+            state: false,
+            ping,
+            pong,
+        }
+    }
+
+    fn get(&self) -> &T {
+        if self.state {
+            &self.ping
+        } else {
+            &self.pong
+        }
+    }
+
+    fn get_both(&self) -> (&T, &T) {
+        if self.state {
+            (&self.ping, &self.pong)
+        } else {
+            (&self.pong, &self.ping)
+        }
+    }
+
+    fn switch(&mut self) {
+        self.state = !self.state;
+    }
+
+    fn map<M, F: Fn(&T) -> M>(&self, func: F) -> PingPong<M> {
+        PingPong::new(func(&self.ping), func(&self.pong))
+    }
+
+    fn try_map<M, F: Fn(&T) -> anyhow::Result<M>>(&self, func: F) -> anyhow::Result<PingPong<M>> {
+        Ok(PingPong::new(func(&self.ping)?, func(&self.pong)?))
+    }
+
+    fn try_for_each<F: FnMut(&T) -> anyhow::Result<()>>(&self, mut func: F) -> anyhow::Result<()> {
+        func(&self.ping)?;
+        func(&self.pong)?;
+        Ok(())
+    }
+}
+
+struct DepthBuffer {
+    image: ash_abstractions::Image,
+    descriptor_set: vk::DescriptorSet,
+    framebuffer: vk::Framebuffer,
+}
+
+impl DepthBuffer {
+    fn new(
+        device: &ash::Device,
+        name: &str,
+        extent: vk::Extent2D,
+        render_passes: &RenderPasses,
+        descriptor_set: vk::DescriptorSet,
+        init_resources: &mut ash_abstractions::InitResources,
+    ) -> anyhow::Result<Self> {
+        let image = ash_abstractions::Image::new(
+            &ash_abstractions::ImageDescriptor {
+                width: extent.width,
+                height: extent.height,
+                name,
+                mip_levels: 1,
+                format: vk::Format::D32_SFLOAT,
+                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+                next_accesses: &[vk_sync::AccessType::DepthStencilAttachmentWrite],
+                next_layout: vk_sync::ImageLayout::Optimal,
+            },
+            init_resources,
+        )?;
+
+        unsafe {
+            device.update_descriptor_sets(
+                &[*vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_set)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&[*vk::DescriptorImageInfo::builder()
+                        .image_view(image.view)
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)])],
+                &[],
+            );
+        }
+
+        Ok(Self {
+            framebuffer: create_single_attachment_framebuffer(
+                device,
+                extent,
+                render_passes.depth_pre_pass,
+                &image,
+            )?,
+            image,
+            descriptor_set,
+        })
+    }
+}
+
+fn buffer_info(buffer: &ash_abstractions::Buffer) -> [vk::DescriptorBufferInfo; 1] {
+    [vk::DescriptorBufferInfo {
+        buffer: buffer.buffer,
+        range: vk::WHOLE_SIZE,
+        offset: 0,
+    }]
 }
